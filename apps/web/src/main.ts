@@ -103,6 +103,7 @@ async function main(): Promise<void> {
   const redoStack: Op[] = []
   let liveStroke: Stroke | null = null
   let livePredicted: Sample[] = []
+  let liveAsFinal = false // shift-constrained → render with last:true so the cap shows live
   let committedDirty = true
 
   // Hydrate from local storage before the first render.
@@ -141,7 +142,7 @@ async function main(): Promise<void> {
     clearLayer(target.live)
     if (!liveStroke) return
     applyCamera(target.live, camera, target.dpr)
-    const path = getStrokePath(liveStroke, livePredicted, false)
+    const path = getStrokePath(liveStroke, livePredicted, liveAsFinal)
     if (path) {
       drawStrokePath(
         target.live,
@@ -150,6 +151,30 @@ async function main(): Promise<void> {
         effectiveOpacity(liveStroke),
       )
     }
+  }
+
+  /**
+   * Pen-hover preview — small semi-transparent dot at the cursor showing
+   * the active brush's effective size and color. Renders on the live layer.
+   * Replaced by the actual stroke as soon as drawing starts.
+   */
+  const renderPenHover = (boardX: number, boardY: number): void => {
+    if (liveStroke) return // a stroke is in flight; live render handles cursor
+    const brushPreset = BRUSH_PRESETS[getBrushId()]
+    clearLayer(target.live)
+    applyCamera(target.live, camera, target.dpr)
+    const c = target.live.ctx
+    c.save()
+    c.fillStyle = resolveInkColor(getColor())
+    c.globalAlpha = 0.4
+    c.beginPath()
+    c.arc(boardX, boardY, brushPreset.size / 2, 0, Math.PI * 2)
+    c.fill()
+    c.restore()
+  }
+  const clearHover = (): void => {
+    if (liveStroke) return
+    clearLayer(target.live)
   }
 
   const params = new URLSearchParams(location.search)
@@ -187,10 +212,17 @@ async function main(): Promise<void> {
       openToolMenu({
         at: { x: e.clientX, y: e.clientY },
         getActiveToolId,
+        getActiveBrushId: getBrushId,
         onSelectTool: setTool,
+        onSelectBrush: setBrushId,
         onResetZoom: () => {
           resetZoom(camera)
           onCameraChange()
+        },
+        onZoomToFit: () => {
+          if (fitToContent(camera, strokes, { width: target.width, height: target.height })) {
+            onCameraChange()
+          }
         },
         onClear: clearFlow.request,
       })
@@ -204,18 +236,23 @@ async function main(): Promise<void> {
       onStrokeStart(stroke) {
         liveStroke = stroke
         livePredicted = []
+        liveAsFinal = false
         renderLive()
       },
-      onStrokeUpdate(_stroke, predicted) {
+      onStrokeUpdate(_stroke, predicted, renderAsFinal) {
         livePredicted = predicted
+        liveAsFinal = renderAsFinal
         renderLive()
       },
+      onHoverMove: renderPenHover,
+      onHoverEnd: clearHover,
       onStrokeCommit(stroke) {
         strokes.push(stroke)
         undoStack.push({ kind: 'create', strokeId: stroke.id })
         redoStack.length = 0
         liveStroke = null
         livePredicted = []
+        liveAsFinal = false
         // Don't clear live here — RAF redraws committed (with this stroke
         // baked in via last:true) and then clears live, avoiding a flicker.
         committedDirty = true

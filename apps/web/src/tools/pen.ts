@@ -16,10 +16,17 @@ export interface PenToolCallbacks {
   onStrokeStart: (stroke: Stroke) => void
   /**
    * Called once per pointermove. `predicted` is replaced each event; do not
-   * retain references across calls.
+   * retain references across calls. `renderAsFinal` is true when the
+   * in-flight stroke should be rendered with `last: true` (e.g. shift-
+   * constrained mode where the stroke is a finished straight line). For
+   * normal freeform drawing, false — the renderer keeps the last cap open.
    */
-  onStrokeUpdate: (stroke: Stroke, predicted: Sample[]) => void
+  onStrokeUpdate: (stroke: Stroke, predicted: Sample[], renderAsFinal: boolean) => void
   onStrokeCommit: (stroke: Stroke) => void
+  /** Hover (no contact) — board coordinates. Used to render brush preview. */
+  onHoverMove?: (boardX: number, boardY: number) => void
+  /** Hover ended (pointerleave or stroke begin). */
+  onHoverEnd?: () => void
 }
 
 export interface PenToolOptions {
@@ -72,10 +79,19 @@ export function createPenTool(opts: PenToolOptions): Tool {
         samples: [sample(e, brush, ctx)],
         startedAt: e.timeStamp,
       }
+      // Hide hover preview; the live stroke render takes its place.
+      opts.callbacks.onHoverEnd?.()
       opts.callbacks.onStrokeStart(active)
     },
     onPointerMove(e, ctx) {
-      if (!active) return
+      if (!active) {
+        // Hover (or any non-contact movement). Render brush preview at cursor.
+        if (opts.callbacks.onHoverMove) {
+          const { x, y } = ctx.toBoard(e.clientX, e.clientY)
+          opts.callbacks.onHoverMove(x, y)
+        }
+        return
+      }
       const brush = active.brush
 
       // Shift-constrained mode: stroke is a straight line from the start
@@ -83,11 +99,15 @@ export function createPenTool(opts: PenToolOptions): Tool {
       // the in-flight stroke to a straight line; releasing Shift returns to
       // freeform from the current position, building on whatever samples are
       // already present.
+      //
+      // Render as final (last:true) so the cap shows up at the cursor in real
+      // time, not just at commit. Otherwise the visible line stops a few
+      // pixels short of the cursor (perfect-freehand's open-end smoothing).
       if (e.shiftKey) {
         const first = active.samples[0]
         if (first) {
           active.samples = [first, sample(e, brush, ctx)]
-          opts.callbacks.onStrokeUpdate(active, [])
+          opts.callbacks.onStrokeUpdate(active, [], true)
         }
         return
       }
@@ -101,7 +121,7 @@ export function createPenTool(opts: PenToolOptions): Tool {
       const predicted = opts.usePrediction
         ? e.getPredictedEvents().map((pe) => sample(pe, brush, ctx))
         : []
-      opts.callbacks.onStrokeUpdate(active, predicted)
+      opts.callbacks.onStrokeUpdate(active, predicted, false)
     },
     onPointerUp(_e, _ctx) {
       if (!active) return

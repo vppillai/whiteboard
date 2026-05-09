@@ -377,7 +377,16 @@ body {
 
 .whiteboard-tools {
   padding: 10px;
-  min-width: 240px;
+  min-width: 250px;
+}
+
+.whiteboard-tools-section-label {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  margin: 0 4px 6px;
+  font-weight: 600;
 }
 
 .whiteboard-tools-palette {

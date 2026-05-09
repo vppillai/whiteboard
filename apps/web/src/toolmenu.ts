@@ -1,28 +1,32 @@
 /**
  * Tool menu — opens on right-click (or pen barrel-button mapped to right-
  * click). Designed for fully pen-only operation: tap a swatch to apply a
- * color, tap a tool to switch tools, tap an action to run it. The menu then
- * dismisses automatically.
+ * color, tap a brush to select a preset, tap a tool to switch tools, tap a
+ * view action to run it. The menu then dismisses automatically.
  *
- * Layout:
+ * Layout (sections labelled to keep the menu scannable as it grows):
+ *
+ *   COLOR
  *   [color swatches grid]
- *   ─────
- *   [Pen | Eraser | Laser | Text]   tool pills (only Pen is enabled today)
- *   ─────
- *   Reset zoom       (back to the canonical origin at scale 1)
- *   Grid options…    (opens sub-popover)
- *   ─────
- *   Clear board…     (raises the clickable confirmation toast)
+ *   ─
+ *   BRUSH
+ *   [Pen | Marker | Pencil | Hi | Brush]   brush preset pills
+ *   ─
+ *   TOOL
+ *   [Draw | Eraser | Lasso | Laser | Text]  tool pills
+ *   ─
+ *   VIEW
+ *   Reset zoom
+ *   Fit to view
+ *   Grid options…
+ *   ─
+ *   Clear board…
  *
- * Tool pills for Eraser / Laser / Text are placeholder-disabled today so the
- * surface is laid out before they're built. They'll enable as their backing
- * implementations land (eraser at M1; laser & text on the backlog).
- *
- * Undo / redo intentionally aren't in this menu — they're well-served by
- * keyboard (⌘/Ctrl+Z) and putting them here added clutter without earning
- * its place.
+ * Tool pills for Lasso / Laser / Text are placeholder-disabled today; they
+ * enable as their backing implementations land.
  */
 
+import { BRUSH_IDS, BRUSH_LABELS, type BrushId } from './brushes'
 import { openOptionsMenu } from './optionsmenu'
 import { type Popover, showPopover } from './popover'
 import { getColor, setColor } from './settings'
@@ -48,7 +52,7 @@ interface ToolDef {
 }
 
 const TOOLS: readonly ToolDef[] = [
-  { id: 'pen', label: 'Pen', enabled: true },
+  { id: 'pen', label: 'Draw', enabled: true },
   { id: 'eraser', label: 'Eraser', enabled: true },
   { id: 'lasso', label: 'Lasso', enabled: false },
   { id: 'laser', label: 'Laser', enabled: false },
@@ -58,8 +62,11 @@ const TOOLS: readonly ToolDef[] = [
 export interface ToolMenuOptions {
   at: { x: number; y: number }
   getActiveToolId: () => ToolId
+  getActiveBrushId: () => BrushId
   onSelectTool: (id: ToolId) => void
+  onSelectBrush: (id: BrushId) => void
   onResetZoom: () => void
+  onZoomToFit: () => void
   onClear: () => void
 }
 
@@ -70,7 +77,8 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
   const popoverRef: { current?: Popover } = {}
   const dismiss = (): void => popoverRef.current?.dismiss()
 
-  // ---- Colors ---------------------------------------------------------
+  // ---- COLOR ---------------------------------------------------------
+  root.appendChild(sectionLabel('Color'))
   const palette = document.createElement('div')
   palette.className = 'whiteboard-tools-palette'
   for (const c of PALETTE) {
@@ -83,8 +91,30 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
   }
   root.appendChild(palette)
 
-  // ---- Tools ----------------------------------------------------------
+  // ---- BRUSH ---------------------------------------------------------
   root.appendChild(separator())
+  root.appendChild(sectionLabel('Brush'))
+  const brushRow = document.createElement('div')
+  brushRow.className = 'whiteboard-tools-row'
+  const activeBrush = opts.getActiveBrushId()
+  for (const id of BRUSH_IDS) {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'whiteboard-tool-pill'
+    if (id === activeBrush) btn.classList.add('active')
+    btn.textContent = id === 'highlighter' ? 'Hi' : BRUSH_LABELS[id]
+    btn.title = BRUSH_LABELS[id]
+    btn.addEventListener('click', () => {
+      opts.onSelectBrush(id)
+      dismiss()
+    })
+    brushRow.appendChild(btn)
+  }
+  root.appendChild(brushRow)
+
+  // ---- TOOL ---------------------------------------------------------
+  root.appendChild(separator())
+  root.appendChild(sectionLabel('Tool'))
   const toolsRow = document.createElement('div')
   toolsRow.className = 'whiteboard-tools-row'
   const activeId = opts.getActiveToolId()
@@ -109,12 +139,19 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
   }
   root.appendChild(toolsRow)
 
-  // ---- View / settings ------------------------------------------------
+  // ---- VIEW ---------------------------------------------------------
   root.appendChild(separator())
+  root.appendChild(sectionLabel('View'))
   root.appendChild(
     fullItem('Reset zoom', () => {
       dismiss()
       opts.onResetZoom()
+    }),
+  )
+  root.appendChild(
+    fullItem('Fit to view', () => {
+      dismiss()
+      opts.onZoomToFit()
     }),
   )
   root.appendChild(
@@ -124,7 +161,7 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
     }),
   )
 
-  // ---- Clear ---------------------------------------------------------
+  // ---- CLEAR --------------------------------------------------------
   root.appendChild(separator())
   root.appendChild(
     fullItem('Clear board…', () => {
@@ -177,5 +214,12 @@ function fullItem(label: string, onClick: () => void): HTMLButtonElement {
 function separator(): HTMLDivElement {
   const el = document.createElement('div')
   el.className = 'whiteboard-tool-sep'
+  return el
+}
+
+function sectionLabel(text: string): HTMLDivElement {
+  const el = document.createElement('div')
+  el.className = 'whiteboard-tools-section-label'
+  el.textContent = text
   return el
 }
