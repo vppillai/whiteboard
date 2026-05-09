@@ -13,8 +13,10 @@
 import type { Sample, Stroke } from '@whiteboard/shared'
 import { getStroke } from 'perfect-freehand'
 
-/** Multiplier range applied to brush opacity. min = light pressure, max = heavy. */
-const SHADE_MIN = 0.65
+/** Multiplier range applied to brush opacity. min = light pressure, max = heavy.
+ *  Tuned by user feel-test: 0.65 was too faded; 0.78 keeps light strokes
+ *  readable while preserving a visible delta from heavy strokes. */
+const SHADE_MIN = 0.78
 const SHADE_MAX = 1.0
 
 const sampleToPoint = (s: Sample): [number, number, number] => [s.x, s.y, s.p]
