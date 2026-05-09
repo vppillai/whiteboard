@@ -50,7 +50,7 @@ import { clearAllStrokes, loadAllStrokes, saveStroke } from './storage'
 import { effectiveOpacity, getStrokePath } from './stroke'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { openToolMenu } from './toolmenu'
-import { type Tool, createPenTool } from './tools'
+import { type Tool, type ToolId, createEraserTool, createPenTool } from './tools'
 import { clearView, loadView, makeViewSaver } from './viewstate'
 
 // Compose a runtime BrushConfig from the active brush preset (shape) and the
@@ -185,6 +185,8 @@ async function main(): Promise<void> {
       }
       openToolMenu({
         at: { x: e.clientX, y: e.clientY },
+        getActiveToolId,
+        onSelectTool: setTool,
         onResetZoom: () => {
           resetZoom(camera)
           onCameraChange()
@@ -223,12 +225,51 @@ async function main(): Promise<void> {
     },
   })
 
-  // Active-tool state. Single tool today; M1's eraser / lasso land alongside
-  // pen and the user switches between them via the side panel (M1.7) or the
-  // tool menu. M1.4 just gets the abstraction in place — boxed in a ref so
-  // tool switching is a single field write that future code can perform
-  // without rewiring the pointer pipeline.
+  // Eraser cursor renderer — draws a circle outline on the live layer.
+  const renderEraserCursor = (boardX: number, boardY: number, radius: number): void => {
+    clearLayer(target.live)
+    applyCamera(target.live, camera, target.dpr)
+    const c = target.live.ctx
+    c.save()
+    c.strokeStyle = 'rgba(239, 68, 68, 0.65)'
+    c.lineWidth = 1.5 / camera.scale
+    c.beginPath()
+    c.arc(boardX, boardY, radius, 0, Math.PI * 2)
+    c.stroke()
+    c.restore()
+  }
+
+  const eraserTool = createEraserTool({
+    radius: 12,
+    callbacks: {
+      getStrokes: () => strokes,
+      onErase: (ids) => {
+        if (ids.length === 0) return
+        const op: Op = { kind: 'delete', strokeIds: ids }
+        applyOp(op, opCtx)
+        undoStack.push(op)
+        redoStack.length = 0
+      },
+      onCursorMove: renderEraserCursor,
+      onCursorEnd: () => {
+        clearLayer(target.live)
+      },
+    },
+  })
+
+  // Active-tool state, boxed in a ref so tool switching is a single field
+  // write. setTool handles cleanup of the outgoing tool and applies the
+  // incoming tool's preferred cursor.
+  const allTools: Record<'pen' | 'eraser', Tool> = { pen: penTool, eraser: eraserTool }
   const tool: { current: Tool } = { current: penTool }
+  const setTool = (id: ToolId): void => {
+    if (tool.current.id === id) return
+    if (id !== 'pen' && id !== 'eraser') return // others not implemented yet
+    tool.current.cleanup?.()
+    tool.current = allTools[id]
+    root.style.cursor = tool.current.cursor ?? ''
+  }
+  const getActiveToolId = (): ToolId => tool.current.id
 
   const detachPointer = attachPointer(root, {
     getActiveTool: () => tool.current,
@@ -358,6 +399,8 @@ async function main(): Promise<void> {
       const id = BRUSH_IDS[index1Based - 1]
       if (id) setBrushId(id)
     },
+    selectDrawingTool: () => setTool('pen'),
+    selectEraserTool: () => setTool('eraser'),
     cancel: () => {
       let handled = false
       if (clearFlow.cancel()) handled = true

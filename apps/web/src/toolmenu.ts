@@ -26,6 +26,7 @@
 import { openOptionsMenu } from './optionsmenu'
 import { type Popover, showPopover } from './popover'
 import { getColor, setColor } from './settings'
+import type { ToolId } from './tools'
 
 const PALETTE: readonly string[] = [
   'ink',
@@ -41,21 +42,23 @@ const PALETTE: readonly string[] = [
 ]
 
 interface ToolDef {
-  id: 'pen' | 'eraser' | 'laser' | 'text'
+  id: ToolId
   label: string
   enabled: boolean
-  active: boolean
 }
 
 const TOOLS: readonly ToolDef[] = [
-  { id: 'pen', label: 'Pen', enabled: true, active: true },
-  { id: 'eraser', label: 'Eraser', enabled: false, active: false },
-  { id: 'laser', label: 'Laser', enabled: false, active: false },
-  { id: 'text', label: 'Text', enabled: false, active: false },
+  { id: 'pen', label: 'Pen', enabled: true },
+  { id: 'eraser', label: 'Eraser', enabled: true },
+  { id: 'lasso', label: 'Lasso', enabled: false },
+  { id: 'laser', label: 'Laser', enabled: false },
+  { id: 'text', label: 'Text', enabled: false },
 ]
 
 export interface ToolMenuOptions {
   at: { x: number; y: number }
+  getActiveToolId: () => ToolId
+  onSelectTool: (id: ToolId) => void
   onResetZoom: () => void
   onClear: () => void
 }
@@ -84,18 +87,24 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
   root.appendChild(separator())
   const toolsRow = document.createElement('div')
   toolsRow.className = 'whiteboard-tools-row'
+  const activeId = opts.getActiveToolId()
   for (const t of TOOLS) {
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.className = 'whiteboard-tool-pill'
-    if (t.active) btn.classList.add('active')
+    if (t.id === activeId) btn.classList.add('active')
     if (!t.enabled) {
       btn.classList.add('disabled')
       btn.disabled = true
       btn.title = 'Coming soon'
     }
     btn.textContent = t.label
-    // (No click handler today — only pen exists, and it's already active.)
+    if (t.enabled) {
+      btn.addEventListener('click', () => {
+        opts.onSelectTool(t.id)
+        dismiss()
+      })
+    }
     toolsRow.appendChild(btn)
   }
   root.appendChild(toolsRow)
