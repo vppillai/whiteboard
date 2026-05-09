@@ -1,5 +1,5 @@
 /**
- * Color picker popover. Compact 5×2 swatch grid plus a "recent" row.
+ * Color picker popover. Compact 5×2 swatch grid.
  *
  * The first swatch is the theme `ink` token (always available); the rest are
  * curated accents picked to read on both light and dark backgrounds. Clicking
@@ -8,7 +8,7 @@
  */
 
 import { type Popover, showPopover } from './popover'
-import { getColor, getSettings, onChange, setColor } from './settings'
+import { getColor, onChange, setColor } from './settings'
 
 const PALETTE: readonly string[] = [
   'ink',
@@ -31,54 +31,18 @@ export function openColorPicker(at: { x: number; y: number }): Popover {
   palette.className = 'whiteboard-color-palette'
   root.appendChild(palette)
 
-  const recentSection = document.createElement('div')
-  recentSection.className = 'whiteboard-color-recent'
-  root.appendChild(recentSection)
-
   // Boxed reference so swatch onClicks can reach the Popover instance after
   // it's created (showPopover is what produces it, but the swatches are
   // attached to its content first).
   const popoverRef: { current?: Popover } = {}
 
-  const renderPalette = (): void => {
-    palette.replaceChildren(
-      ...PALETTE.map((c) =>
-        makeSwatch(c, () => {
-          setColor(c)
-          popoverRef.current?.noteSelection()
-        }),
-      ),
+  for (const c of PALETTE) {
+    palette.appendChild(
+      makeSwatch(c, () => {
+        setColor(c)
+        popoverRef.current?.noteSelection()
+      }),
     )
-    syncActive()
-  }
-
-  const renderRecent = (): void => {
-    recentSection.replaceChildren()
-    const recents = getSettings().recentColors
-    if (recents.length === 0) {
-      const empty = document.createElement('div')
-      empty.className = 'whiteboard-color-recent-empty'
-      empty.textContent = 'recent colors will appear here'
-      recentSection.appendChild(empty)
-      return
-    }
-    const label = document.createElement('div')
-    label.className = 'whiteboard-popover-section-label'
-    label.textContent = 'recent'
-    recentSection.appendChild(label)
-
-    const list = document.createElement('div')
-    list.className = 'whiteboard-color-recent-list'
-    for (const c of recents) {
-      list.appendChild(
-        makeSwatch(c, () => {
-          setColor(c)
-          popoverRef.current?.noteSelection()
-        }),
-      )
-    }
-    recentSection.appendChild(list)
-    syncActive()
   }
 
   const syncActive = (): void => {
@@ -87,14 +51,9 @@ export function openColorPicker(at: { x: number; y: number }): Popover {
       sw.classList.toggle('active', sw.dataset.color === cur)
     }
   }
+  syncActive()
 
-  renderPalette()
-  renderRecent()
-
-  const unsubscribe = onChange(() => {
-    syncActive()
-    renderRecent()
-  })
+  const unsubscribe = onChange(syncActive)
 
   popoverRef.current = showPopover({
     anchor: at,

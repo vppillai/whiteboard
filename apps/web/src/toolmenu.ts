@@ -6,7 +6,6 @@
  *
  * Layout:
  *   [color swatches grid]
- *   [recent colors row]    (only shown if any)
  *   ─────
  *   [Pen | Eraser | Laser | Text]   tool pills (only Pen is enabled today)
  *   ─────
@@ -23,7 +22,7 @@
 
 import { openOptionsMenu } from './optionsmenu'
 import { type Popover, showPopover } from './popover'
-import { getColor, getSettings, setColor } from './settings'
+import { getColor, setColor } from './settings'
 
 const PALETTE: readonly string[] = [
   'ink',
@@ -78,21 +77,6 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
     )
   }
   root.appendChild(palette)
-
-  const recents = getSettings().recentColors
-  if (recents.length > 0) {
-    const row = document.createElement('div')
-    row.className = 'whiteboard-tools-recent'
-    for (const c of recents) {
-      row.appendChild(
-        swatch(c, () => {
-          setColor(c)
-          dismiss()
-        }),
-      )
-    }
-    root.appendChild(row)
-  }
 
   // ---- Tools ----------------------------------------------------------
   root.appendChild(separator())

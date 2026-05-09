@@ -373,23 +373,6 @@ body {
   background: var(--ink);
 }
 
-.whiteboard-color-recent {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--hud-border);
-}
-
-.whiteboard-color-recent-list {
-  display: flex;
-  gap: 8px;
-}
-
-.whiteboard-color-recent-empty {
-  font-size: 11px;
-  color: var(--fg-muted);
-  font-style: italic;
-}
-
 /* ---- Tool menu ------------------------------------------------------- */
 
 .whiteboard-tools {
@@ -401,12 +384,6 @@ body {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 6px;
-}
-
-.whiteboard-tools-recent {
-  display: flex;
-  gap: 6px;
-  margin-top: 6px;
 }
 
 .whiteboard-color-swatch-small {

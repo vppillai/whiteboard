@@ -19,24 +19,20 @@ export interface GridConfig {
 
 interface PersistedShape {
   color?: string
-  recentColors?: string[]
   grid?: { type?: GridType; spacing?: number }
 }
 
 interface State {
   color: string
-  recentColors: string[]
   grid: GridConfig
 }
 
 const STORAGE_KEY = 'whiteboard:settings'
 const VALID_GRID_TYPES: readonly GridType[] = ['dots', 'lines', 'ruled', 'none']
 const VALID_SPACINGS: readonly number[] = [16, 24, 32, 48]
-const RECENT_COLORS_MAX = 6
 
 const DEFAULTS: State = {
   color: 'ink',
-  recentColors: [],
   grid: { type: 'dots', spacing: 24 },
 }
 
@@ -50,11 +46,6 @@ function load(): State {
     const parsed = JSON.parse(raw) as PersistedShape
     return {
       color: typeof parsed.color === 'string' ? parsed.color : DEFAULTS.color,
-      recentColors: Array.isArray(parsed.recentColors)
-        ? parsed.recentColors
-            .filter((c): c is string => typeof c === 'string')
-            .slice(0, RECENT_COLORS_MAX)
-        : [],
       grid: {
         type:
           parsed.grid?.type && VALID_GRID_TYPES.includes(parsed.grid.type)
@@ -72,7 +63,7 @@ function load(): State {
 }
 
 function clone(s: State): State {
-  return { color: s.color, recentColors: [...s.recentColors], grid: { ...s.grid } }
+  return { color: s.color, grid: { ...s.grid } }
 }
 
 function persist(): void {
@@ -98,13 +89,6 @@ export function getColor(): string {
 export function setColor(color: string): void {
   if (state.color === color) return
   state.color = color
-  // Keep `ink` out of the recent-colors list — it's always available.
-  if (color !== 'ink') {
-    state.recentColors = [color, ...state.recentColors.filter((c) => c !== color)].slice(
-      0,
-      RECENT_COLORS_MAX,
-    )
-  }
   persist()
   emit()
 }
