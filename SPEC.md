@@ -4,6 +4,19 @@ A low-latency, browser-based whiteboard tuned for Wacom Intuos (indirect input),
 
 > This document is the **product spec**. For "as-built" architecture, see [docs/architecture.md](docs/architecture.md). For milestones and exit criteria, see [docs/milestones.md](docs/milestones.md).
 
+## 0. Tenets
+
+> **Snappy, sleek, user-friendly are paramount.**
+
+When a feature trades latency, visual minimalism, or pen-friendliness for capability, it loses. This is the ground truth that overrides everything below it:
+
+- **Latency wins.** The drawing pipeline gets first-class engineering attention; everything else fits around it. A milestone that ships features but degrades feel is a regression, not progress — feel-test on target hardware (Wacom Intuos) is a milestone-close gate.
+- **Visual minimalism is functional.** Less chrome = less cognitive load = faster to think on the canvas. Things that don't help drawing don't ship at all, or ship hidden by default.
+- **Pen-friendly takes precedence** over mouse / keyboard convenience. If the pen path is awkward, fix it even if it makes the keyboard path slightly less direct.
+- **Cleanups are part of the deliverable.** Architectural debt that produces sluggishness, glitches, or muddled state is treated as a milestone-critical bug, not a "later" item.
+
+These aren't aspirational bullets. They are the test every design decision in this project is held against.
+
 ## 1. Goals & non-goals
 
 ### Goals
