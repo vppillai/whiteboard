@@ -194,8 +194,10 @@ async function main(): Promise<void> {
       }
       openToolMenu({
         at: { x: e.clientX, y: e.clientY },
-        onUndo: undo,
-        onRedo: redo,
+        onResetZoom: () => {
+          resetZoom(camera)
+          onCameraChange()
+        },
         onClear: clearFlow.request,
       })
     },

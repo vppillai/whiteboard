@@ -9,8 +9,7 @@
  *   ─────
  *   [Pen | Eraser | Laser | Text]   tool pills (only Pen is enabled today)
  *   ─────
- *   [Undo] [Redo]
- *   ─────
+ *   Reset zoom       (back to the canonical origin at scale 1)
  *   Grid options…    (opens sub-popover)
  *   ─────
  *   Clear board…     (raises the clickable confirmation toast)
@@ -18,6 +17,10 @@
  * Tool pills for Eraser / Laser / Text are placeholder-disabled today so the
  * surface is laid out before they're built. They'll enable as their backing
  * implementations land (eraser at M1; laser & text on the backlog).
+ *
+ * Undo / redo intentionally aren't in this menu — they're well-served by
+ * keyboard (⌘/Ctrl+Z) and putting them here added clutter without earning
+ * its place.
  */
 
 import { openOptionsMenu } from './optionsmenu'
@@ -53,8 +56,7 @@ const TOOLS: readonly ToolDef[] = [
 
 export interface ToolMenuOptions {
   at: { x: number; y: number }
-  onUndo: () => void
-  onRedo: () => void
+  onResetZoom: () => void
   onClear: () => void
 }
 
@@ -98,26 +100,14 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
   }
   root.appendChild(toolsRow)
 
-  // ---- Undo / Redo ----------------------------------------------------
+  // ---- View / settings ------------------------------------------------
   root.appendChild(separator())
-  const actionsRow = document.createElement('div')
-  actionsRow.className = 'whiteboard-tools-row'
-  actionsRow.appendChild(
-    pill('Undo', () => {
+  root.appendChild(
+    fullItem('Reset zoom', () => {
       dismiss()
-      opts.onUndo()
+      opts.onResetZoom()
     }),
   )
-  actionsRow.appendChild(
-    pill('Redo', () => {
-      dismiss()
-      opts.onRedo()
-    }),
-  )
-  root.appendChild(actionsRow)
-
-  // ---- Grid ----------------------------------------------------------
-  root.appendChild(separator())
   root.appendChild(
     fullItem('Grid options…', () => {
       dismiss()
