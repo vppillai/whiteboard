@@ -105,9 +105,21 @@ async function main(): Promise<void> {
   }
 
   // Camera-aware coordinate transform for the pointer pipeline.
+  //
+  // Performance: `getBoundingClientRect()` is normally cheap on a static
+  // fixed-position element, but unrelated DOM mutations (popover open/close,
+  // dataset.input changes, theme toggle) invalidate layout and force a
+  // relayout on the next call. Calling it 200 times/sec during a Wacom
+  // stroke surfaced as input lag. Cache the rect and refresh it only when
+  // the viewport actually changes.
+  let canvasRect = root.getBoundingClientRect()
+  const refreshCanvasRect = (): void => {
+    canvasRect = root.getBoundingClientRect()
+  }
+  window.addEventListener('resize', refreshCanvasRect)
+
   const toBoard = (clientX: number, clientY: number): { x: number; y: number } => {
-    const rect = root.getBoundingClientRect()
-    return screenToBoard(camera, clientX - rect.left, clientY - rect.top)
+    return screenToBoard(camera, clientX - canvasRect.left, clientY - canvasRect.top)
   }
 
   /**
@@ -261,20 +273,18 @@ async function main(): Promise<void> {
     },
   })
 
-  // Metrics + last-pointer tracking: a separate pointermove listener so the
-  // HUD reflects the actual coalesced sample count regardless of stroke state,
-  // and so popover keyboard shortcuts can anchor at the most recent pointer.
+  // Metrics + last-pointer tracking: a single pointermove listener on the
+  // canvas root. The previous version also had a document-level pointermove
+  // for "track cursor when it's over a popover," but that listener fired on
+  // every pointer movement anywhere in the document — non-trivial overhead
+  // for a marginal edge case. Removed; popovers anchor at the last canvas
+  // pointer position, which is correct in all common flows.
   let lastPointer = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
   root.addEventListener('pointermove', (e) => {
     if (!(e instanceof PointerEvent)) return
     lastPointer = { x: e.clientX, y: e.clientY }
     const coalesced = e.getCoalescedEvents().length || 1
     metrics.notePointerEvent(coalesced)
-  })
-  document.addEventListener('pointermove', (e) => {
-    // Track even outside the canvas so popovers anchor sensibly when the user
-    // moves between the pen and the keyboard.
-    lastPointer = { x: e.clientX, y: e.clientY }
   })
 
   // Wheel: pan (plain) or zoom (Cmd/Ctrl/pinch).

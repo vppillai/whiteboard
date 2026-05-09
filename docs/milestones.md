@@ -11,6 +11,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | —  | Repo + dev / deploy environment                                          | ✅     |
 | M0 | Drawing core: latency, pan/zoom, theme, local persistence, undo/redo     | ✅ *(closed 2026-05-09; tagged `m0-drawing-core`)* |
 | M1.5 | Popover primitive · color picker · options menu · configurable grid    | ⬜     |
+| M1.4 | Refactor pass: tool abstraction, op-based undo, soft-delete, decompose main.ts | ⬜ |
 | M1 | Eraser, lasso, additional brush presets                                  | ⬜     |
 | M2 | Toolbar UI, keyboard shortcuts, export                                   | ⬜     |
 | M3 | Server, sync, room URLs                                                  | ⬜     |
@@ -86,6 +87,27 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 - **Feel-test gate**: pen interaction with the popovers feels right (hit targets are pen-friendly; popovers don't get in the way of drawing; pinning behavior matches expectation).
 - `docs/architecture.md` § 6 updated; CHANGELOG entry; per-module notes as needed.
 - Tagged commit `m1.5-popover-foundation`.
+
+### M1.4 — Refactor pass before M1 ⬜
+
+**Why this exists** (out of order: ships *between* M1.5 and M1). After several M0 / M1.5 iterations the codebase accumulated debt that would compound at M1: `main.ts` is 641 LOC and growing, the pointer pipeline hardcodes "draw" as the only tool, undo handles only stroke-creation, and the spec's `Stroke.deleted` soft-delete flag is dormant. Each of those is a hack-magnet for M1's eraser / lasso work. A focused day of cleanup before adding features keeps the M1 PR honest.
+
+**No new behavior.** This is a structural change. Lint, typecheck, build, and a feel-test on the target hardware should all show identical observable behavior to M1.5.
+
+**Scope.**
+
+- **Decompose `main.ts`.** Extract `pan.ts`, `clearflow.ts`, `helpoverlay.ts`, `pill.ts`, `keymap.ts`. `main.ts` becomes a thin orchestrator (~250 LOC).
+- **Tool abstraction** (`tools/`). Define `Tool` interface (`onPointerDown` / `onPointerMove` / `onPointerUp` / optional cleanup); implement `PenTool` as the only initial tool. Pointer pipeline routes events to the active tool. ADR 0005 captures the choice.
+- **Operation-based undo** (`ops.ts`). Replace the per-stroke redo stack with a uniform `Op` type (`create` / `delete` / `move` / `clearAll`), each with `apply` / `unapply`. Existing undo behavior reproduces; future tools (eraser, lasso-move, lasso-delete) plug in without growing the undo logic. ADR 0006.
+- **Soft-delete strokes**. Honor `Stroke.deleted` from the spec: render loop filters deleted strokes; undo of stroke creation flips the flag rather than removing from IDB. Sets up M3's CRDT-friendly persistence.
+
+**Exit criteria.**
+
+- Lint, typecheck, web build, Docker smoke all clean.
+- `bun run --filter @whiteboard/web build` bundle within ±1 KB gz of M1.5.
+- Feel-test on the target hardware: the user notices no change in drawing, panning, theme, persistence, undo/redo, or any other interaction. Anything subtly different is a regression.
+- ADRs 0005 and 0006 written; architecture as-built table updated; CHANGELOG entry.
+- Tagged commit `m1.4-refactor`.
 
 ### M1 — Eraser + lasso + brush presets ⬜
 
