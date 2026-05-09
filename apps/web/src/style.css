@@ -214,23 +214,51 @@ body {
   top: 24px;
   left: 50%;
   transform: translateX(-50%);
-  padding: 10px 16px;
+  padding: 8px 8px 8px 16px;
   background: var(--hud-bg);
   color: var(--hud-fg);
   font: 12px / 1.4 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
   border: 1px solid var(--hud-border);
   border-radius: 999px;
-  pointer-events: none;
+  pointer-events: auto;
   z-index: 1500;
   letter-spacing: 0.02em;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
   backdrop-filter: blur(8px) saturate(1.2);
   -webkit-backdrop-filter: blur(8px) saturate(1.2);
+  align-items: center;
+  gap: 8px;
 }
 
-#whiteboard-toast b {
+.whiteboard-toast-message {
+  padding-right: 4px;
+}
+
+.whiteboard-toast-button {
+  background: transparent;
+  border: 1px solid var(--hud-border);
   color: var(--banner-fg);
+  padding: 6px 14px;
+  border-radius: 999px;
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.12s, opacity 0.12s;
+}
+
+.whiteboard-toast-button:hover {
+  background: var(--pill-bg);
+}
+
+.whiteboard-toast-confirm {
+  background: var(--banner-fg);
+  color: var(--banner-bg);
+  border-color: var(--banner-fg);
   font-weight: 600;
+}
+
+.whiteboard-toast-confirm:hover {
+  opacity: 0.85;
+  background: var(--banner-fg);
 }
 
 /* ---- Popover primitive ----------------------------------------------- */
@@ -365,8 +393,60 @@ body {
 /* ---- Tool menu ------------------------------------------------------- */
 
 .whiteboard-tools {
-  padding: 6px;
-  min-width: 200px;
+  padding: 10px;
+  min-width: 240px;
+}
+
+.whiteboard-tools-palette {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.whiteboard-tools-recent {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.whiteboard-color-swatch-small {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+
+.whiteboard-tools-row {
+  display: flex;
+  gap: 4px;
+}
+
+.whiteboard-tool-pill {
+  flex: 1;
+  background: var(--pill-bg);
+  color: var(--banner-fg);
+  border: 1px solid var(--hud-border);
+  border-radius: 6px;
+  padding: 7px 8px;
+  font: 11px / 1.4 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  cursor: pointer;
+  text-align: center;
+  letter-spacing: 0.01em;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.whiteboard-tool-pill:hover:not(.disabled):not(.active) {
+  background: var(--hud-border);
+}
+
+.whiteboard-tool-pill.active {
+  background: var(--banner-fg);
+  color: var(--banner-bg);
+  border-color: var(--banner-fg);
+}
+
+.whiteboard-tool-pill.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .whiteboard-tool-item {
@@ -376,7 +456,7 @@ body {
   background: transparent;
   border: none;
   color: var(--banner-fg);
-  padding: 8px 12px;
+  padding: 7px 10px;
   font: 12px / 1.4 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
   cursor: pointer;
   border-radius: 6px;
@@ -389,7 +469,7 @@ body {
 
 .whiteboard-tool-sep {
   height: 1px;
-  margin: 4px 8px;
+  margin: 8px 4px;
   background: var(--hud-border);
 }
 

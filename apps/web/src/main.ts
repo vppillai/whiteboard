@@ -296,11 +296,12 @@ async function main(): Promise<void> {
     committedDirty = true
   })
 
-  // Clear-board confirmation: first key press primes; second press within
-  // CLEAR_CONFIRM_MS clears. Esc cancels. A native confirm() modal is jarring;
-  // a transient toast at the top of the screen is nicer and works without
-  // a toolbar in place yet.
-  const CLEAR_CONFIRM_MS = 3000
+  // Clear-board confirmation: a transient toast at the top of the screen with
+  // explicit Cancel / Clear buttons. The keyboard path (⌘/Ctrl+Shift+K twice
+  // within the window, or Esc to cancel) still works, but the pen-only path —
+  // tap "Clear board…" in the right-click menu, then tap Clear in the toast —
+  // doesn't require a keyboard at all.
+  const CLEAR_CONFIRM_MS = 4000
   const toast = document.createElement('div')
   toast.id = 'whiteboard-toast'
   toast.style.display = 'none'
@@ -308,13 +309,13 @@ async function main(): Promise<void> {
 
   let clearTimer: ReturnType<typeof setTimeout> | null = null
 
-  const showToast = (html: string): void => {
-    toast.innerHTML = html
-    toast.style.display = 'block'
-  }
-
-  const hideToast = (): void => {
-    toast.style.display = 'none'
+  const performClear = (): void => {
+    strokes.length = 0
+    redoStack.length = 0
+    committedDirty = true
+    void clearAllStrokes().catch((err) => {
+      console.warn('whiteboard/web: clear failed:', err)
+    })
   }
 
   const cancelClearConfirm = (): void => {
@@ -322,22 +323,44 @@ async function main(): Promise<void> {
       clearTimeout(clearTimer)
       clearTimer = null
     }
-    hideToast()
+    toast.replaceChildren()
+    toast.style.display = 'none'
+  }
+
+  const showClearToast = (): void => {
+    toast.replaceChildren()
+    toast.style.display = 'flex'
+
+    const msg = document.createElement('span')
+    msg.className = 'whiteboard-toast-message'
+    msg.textContent = 'Clear the whole board?'
+
+    const cancelBtn = document.createElement('button')
+    cancelBtn.type = 'button'
+    cancelBtn.className = 'whiteboard-toast-button whiteboard-toast-cancel'
+    cancelBtn.textContent = 'Cancel'
+    cancelBtn.addEventListener('click', cancelClearConfirm)
+
+    const confirmBtn = document.createElement('button')
+    confirmBtn.type = 'button'
+    confirmBtn.className = 'whiteboard-toast-button whiteboard-toast-confirm'
+    confirmBtn.textContent = 'Clear'
+    confirmBtn.addEventListener('click', () => {
+      cancelClearConfirm()
+      performClear()
+    })
+
+    toast.append(msg, cancelBtn, confirmBtn)
   }
 
   const requestClear = (): void => {
     if (clearTimer) {
-      // Second press — perform the clear.
+      // Second press of the keyboard shortcut — short-circuit to confirm.
       cancelClearConfirm()
-      strokes.length = 0
-      redoStack.length = 0
-      committedDirty = true
-      void clearAllStrokes().catch((err) => {
-        console.warn('whiteboard/web: clear failed:', err)
-      })
+      performClear()
       return
     }
-    showToast('Press <b>⌘/Ctrl + Shift + K</b> again to clear · <b>Esc</b> cancels')
+    showClearToast()
     clearTimer = setTimeout(cancelClearConfirm, CLEAR_CONFIRM_MS)
   }
 
