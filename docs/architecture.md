@@ -44,21 +44,29 @@ Key submodules:
 
 | Module          | Status   | Responsibility                                           |
 |-----------------|----------|----------------------------------------------------------|
-| `pointer.ts`    | M0 ✅    | Pointer pipeline; coalesced + predicted event handling.  |
+| `pointer.ts`    | M1.4 ✅  | Pure event router; dispatches to active `Tool` (ADR 0005). |
+| `tools/`        | M1.4 ✅  | `Tool` interface + `PenTool` impl. Eraser / lasso / etc. land at M1+. |
+| `ops.ts`        | M1.4 ✅  | Operation-based undo (create / delete / move). ADR 0006. |
 | `stroke.ts`     | M0 ✅    | Stroke geometry via `perfect-freehand`; pressure curve.  |
 | `render.ts`     | M0 ✅    | Two-canvas render loop with camera transform.            |
 | `camera.ts`     | M0 ✅    | Pan / zoom state; screen ↔ board coordinate math.        |
+| `viewstate.ts`  | M1.5 ✅  | Per-device camera persistence (debounced localStorage).  |
 | `grid.ts`       | M1.5 ✅  | Configurable grid (dots / lines / ruled / none + spacing). |
 | `theme.ts`      | M0 ✅    | Light / dark / system themes; theme-aware "ink" color.   |
 | `metrics.ts`    | M0 ✅    | Live FPS / events / samples / event→frame HUD.           |
 | `perftest.ts`   | M0 ✅    | Synthetic stroke harness; reports JS-side latency.       |
 | `storage.ts`    | M0 ✅    | Local persistence via IndexedDB.                         |
-| `settings.ts`   | M1.5 ✅  | Brush color, recent colors, grid config; localStorage.   |
+| `settings.ts`   | M1.5 ✅  | Brush color, grid config; localStorage.                  |
 | `popover.ts`    | M1.5 ✅  | Anchored, viewport-clamped, pinnable popover primitive.  |
-| `colorpicker.ts`| M1.5 ✅  | Color picker popover content (swatches + recent).        |
+| `colorpicker.ts`| M1.5 ✅  | Color picker popover content (swatches).                 |
 | `optionsmenu.ts`| M1.5 ✅  | Options popover content (grid type, spacing).            |
-| `tools/`        | M1 ⬜    | Brush, eraser, lasso, pan tool implementations.          |
-| `ui/`           | M2 ⬜    | Floating toolbar, full settings panel, shortcut help.    |
+| `toolmenu.ts`   | M1.5 ✅  | Right-click tool menu (inline color swatches + tools).   |
+| `pan.ts`        | M1.4 ✅  | Spacebar / middle-mouse pan handler.                     |
+| `clearflow.ts`  | M1.4 ✅  | Clear-board confirmation flow + toast.                   |
+| `keymap.ts`     | M1.4 ✅  | Keyboard shortcut registry + dispatcher.                 |
+| `helpoverlay.ts`| M1.4 ✅  | `?` help overlay (shortcuts + repo link).                |
+| `pill.ts`       | M1.4 ✅  | Bottom-left "? for help" pill.                           |
+| `ui/`           | M2 ⬜    | Floating toolbar, full settings side panel.              |
 | `sync/`         | M3 ⬜    | Y.Doc binding; WebSocket transport; presence.            |
 | `export/`       | M2 ⬜    | PNG / SVG / PDF serialization.                           |
 | `ai/`           | v2 ⬜    | Shape recognition, HTR, math — `transformers.js`.        |
@@ -187,7 +195,9 @@ This section reflects what is *actually in the code right now*. It is updated at
 | Static file serving               | ✅ Complete    | Server serves built SPA with SPA fallback + immutable cache for `/assets/*`. |
 | Metrics HUD + perftest            | ✅ Complete    | `M` to toggle; `?perftest=1` runs synthetic harness.     |
 | Brushes (marker / pencil / etc.)  | ❌ Not started | M1.                                                      |
-| **Undo / redo**                   | ✅ Complete    | Pulled forward from M1; per-stroke LIFO; in-memory redo. |
+| **Undo / redo**                   | ✅ Complete    | Pulled forward from M1; M1.4 rewrote as op-based (ADR 0006). |
+| **Tool abstraction**              | ✅ Complete    | M1.4; ADR 0005. PenTool is the only impl; eraser / lasso land at M1. |
+| **Soft-delete strokes**           | ✅ Complete    | M1.4; `Stroke.deleted` flag, render filter, op-driven flips. |
 | **Color picker** (popover at pointer) | ✅ Complete | M1.5; swatches + recent colors; pin to keep open.        |
 | **Options menu** (popover)        | ✅ Complete    | M1.5; grid type + spacing.                               |
 | **Configurable grid**             | ✅ Complete    | M1.5; dots / lines / ruled / none.                       |

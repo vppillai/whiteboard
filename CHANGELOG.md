@@ -51,6 +51,20 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 - **Options menu** (`O` to open at pointer; `O` again to dismiss). Grid type selector (dots / lines / ruled / none) and spacing pills (16 / 24 / 32 / 48 px). Defaults to pinned because options are usually adjusted iteratively.
 - **Configurable grid lines now visible**. Lines and ruled grids use a separate `--grid-line` CSS token (more visible alpha) than the dot grid's `--grid-dot`. Per-pixel alpha for spread-out lines must be higher than for pixel-sized dots to read at the same overall weight; M1.5's first cut shared the value and lines were nearly invisible.
 
+### Added (M1.4 — refactor pass before M1; closed)
+
+- **Tool abstraction.** New `Tool` interface (`apps/web/src/tools/types.ts`) with `onPointerDown` / `onPointerMove` / `onPointerUp` / optional `cleanup`. `pointer.ts` becomes a pure event router that dispatches to whichever tool is active. `PenTool` (`tools/pen.ts`) is the only implementation today; eraser / lasso / laser / text plug in at M1+ without touching `pointer.ts`. See ADR 0005.
+- **Operation-based undo / redo.** New `ops.ts` defines `Op = create | delete | move` with `apply` / `unapply`. The undo and redo stacks are now uniform `Op[]`; stroke-create emits `{ kind: 'create', strokeId }`. M1's eraser and lasso work plug in by emitting a different op kind. See ADR 0006.
+- **Soft-delete strokes.** `Stroke.deleted` is now honored — render loop filters strokes with `deleted: true`. Strokes never leave the in-memory array or IDB on undo; just a flag flip. Cheaper, CRDT-friendlier (M3), position-stable.
+- **`main.ts` decomposed.** Extracted `pan.ts`, `helpoverlay.ts`, `pill.ts`, `clearflow.ts`, `keymap.ts`, `viewstate.ts`. `main.ts` now ~470 LOC of orchestration, down from 641.
+- **Camera position persists across reload.** Per-device localStorage. Reset to origin only on clear-board. Infinite canvas means there's no canonical home — wherever you left off is home.
+- ADR 0005 (tool abstraction) and ADR 0006 (op-based undo) added.
+
+### Performance
+
+- **Cached canvas-rect.** `toBoard` no longer calls `getBoundingClientRect()` per pointer sample; the rect is captured at init and refreshed on `resize`. Surfaced as input lag during sustained drawing because incidental DOM mutations (popover open / close, dataset attr flips, theme toggles) had been invalidating layout.
+- **Removed duplicate document-level `pointermove` listener.** Was tracking lastPointer for an edge case (popovers anchoring at cursor when cursor is over a popover); fired on every pointer movement anywhere in the document.
+
 ### Changed (M0+ feel polish)
 
 - **Pen-pressure response strengthened**. `thinning` 0.45 → 0.6 (wider line-width range between light and heavy pressure), `pressureGamma` 1.7 → 1.3 (more responsive at low pressure). New: stroke opacity scales with the stroke's average pressure (0.65× to 1.0× of the base brush opacity), so light strokes appear faded and heavy strokes saturated. Per-segment shade *within* a stroke (Procreate-style) requires a different render approach (variable-width line segments instead of a filled outline) — deferred to M2 with an ADR.

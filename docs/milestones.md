@@ -17,6 +17,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | M2 | Toolbar UI, keyboard shortcuts, export                                   | ⬜     |
 | M3 | Server, sync, room URLs                                                  | ⬜     |
 | M4 | Production deployment polish                                             | ⬜     |
+| M4.5 | PWA install + offline (manifest, service worker)                       | ⬜     |
 | **v1 ship** |                                                                 | **—**  |
 | M5 | AI: shape recognition                                                    | ⬜     |
 | M6 | AI: handwriting → text                                                   | ⬜     |
@@ -167,6 +168,9 @@ The settings panel is the natural home for the screen-tablet prediction toggle (
 - All M2-tagged keyboard shortcuts in [SPEC § 4.3](../SPEC.md#43-keyboard-shortcuts) work.
 - Pressure curve UI saves per-brush; survives reload.
 - Export PNG / SVG / PDF produces visually correct output (manual visual diff acceptable for v1).
+- **Cursor preview**: a small circle at the cursor showing the brush's effective size + color before any stroke. Disappears during contact.
+- **First-run hint**: empty board shows a single subtle line ("Right-click for tools · ? for help") that fades on first stroke. Not shown on subsequent visits.
+- **Color eyedropper** (per [SPEC § 4.1](../SPEC.md#41-tool-set-v1)): a tool-menu entry / shortcut that samples color from existing strokes and sets the brush color.
 - **Feel-test gate** on the target hardware: toolbar interaction doesn't disrupt drawing; settings persist sensibly.
 - `docs/architecture.md` updated; CHANGELOG entry.
 
@@ -181,6 +185,7 @@ The settings panel is the natural home for the screen-tablet prediction toggle (
 - `OWNER_TOKEN` gates rename / delete / export-all.
 - Snapshots written every 30 s idle and on last-disconnect.
 - 16 concurrent peers in one room, no dropped updates over 5 minutes of mixed editing.
+- **In-flight stroke crash recovery**: client auto-saves the in-flight stroke every ~2 s during long strokes, so a tab crash mid-stroke loses at most a couple of seconds of pen movement.
 - `docs/architecture.md` § 6 updated; deployment doc cross-checked; CHANGELOG entry; ADR if the protocol or auth design materially changed from spec.
 
 ### M4 — v1 deployment polish ⬜
@@ -196,9 +201,29 @@ The settings panel is the natural home for the screen-tablet prediction toggle (
 - v1.0.0 release notes drafted from the `[Unreleased]` section of `CHANGELOG.md`.
 - Tag `v1.0.0`.
 
+### M4.5 — PWA install + offline ⬜
+
+**Scope.** Make a deployed instance installable as a Progressive Web App so users can run it from their dock / home screen with a native-app feel. Strong tenet fit ("sleek").
+
+- `manifest.json` with name, theme colors honoring `prefers-color-scheme`, `display: standalone`, scope, start URL.
+- App icons (square + maskable, 192 / 512 px).
+- Service worker caching the SPA shell (HTML, CSS, JS, fonts) with stale-while-revalidate for updates.
+- Install affordance: a single subtle option in the help overlay or a one-time pill nudge after N strokes ("Install as app"). No browser-default install banners on first load.
+- Theme color and splash adapt to system theme so the install feels native in light / dark.
+- Service worker is no-op in dev (Vite dev server) and only registers in production build.
+
+**Exit criteria.**
+
+- App is installable via the browser's address-bar install icon (Chrome / Edge desktop, Safari iOS).
+- After install, app launches in standalone mode (no URL chrome) with correct theme color.
+- Offline: app loads, draws, persists strokes locally with no network. Reload after going offline still works.
+- Lighthouse PWA score ≥ 90.
+- ADR if any non-obvious choice surfaces (e.g. the install-prompt policy).
+- `docs/deployment.md` updated; CHANGELOG entry; tag `m4.5-pwa`.
+
 ### v1 ship 🎯
 
-After M4: tag `v1.0.0`, write release notes, publish.
+After M4.5: tag `v1.0.0`, write release notes, publish.
 
 ### M5 — AI: shape recognition ⬜
 
