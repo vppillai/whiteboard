@@ -9,11 +9,20 @@ import { getStroke } from 'perfect-freehand'
 const sampleToPoint = (s: Sample): [number, number, number] => [s.x, s.y, s.p]
 
 /**
- * Build a fillable Path2D for `stroke`. If `predicted` is provided, those
- * samples are appended to the live geometry as visual lookahead — they do
- * NOT become part of the committed stroke.
+ * Build a fillable Path2D for `stroke`.
+ *
+ * @param predicted optional lookahead samples to draw visually but not commit.
+ * @param last      `true` when the stroke is finalized (pointerup or persisted).
+ *                  Controls perfect-freehand's end-cap algorithm: `true` produces
+ *                  a clean polished cap; `false` leaves the end smoothed for
+ *                  more samples. **Always pass `true` for committed strokes**;
+ *                  passing `false` produces a serrated terminus.
  */
-export function getStrokePath(stroke: Stroke, predicted: readonly Sample[] = []): Path2D | null {
+export function getStrokePath(
+  stroke: Stroke,
+  predicted: readonly Sample[] = [],
+  last = false,
+): Path2D | null {
   const points = [...stroke.samples, ...predicted].map(sampleToPoint)
   if (points.length === 0) return null
 
@@ -24,7 +33,7 @@ export function getStrokePath(stroke: Stroke, predicted: readonly Sample[] = [])
     streamline: stroke.brush.streamline,
     start: { taper: stroke.brush.taperStart, cap: stroke.brush.capStart },
     end: { taper: stroke.brush.taperEnd, cap: stroke.brush.capEnd },
-    last: false,
+    last,
   })
 
   return outline.length === 0 ? null : outlineToPath2D(outline)
