@@ -66,12 +66,13 @@ export function attachPointer(target: HTMLElement, opts: AttachOptions): () => v
 
   const onDown = (e: PointerEvent) => {
     if (e.pointerType !== 'pen' && e.pointerType !== 'mouse' && e.pointerType !== 'touch') return
-    // Only the primary button starts a stroke. Middle (1) and right (2) are
-    // owned by pan / context-menu handlers above this in main.ts. Without
-    // this guard, right-click fires onDown, captures the pointer, and starts
-    // a stroke that doesn't end normally because the browser's contextmenu
-    // event hijacks pointerup focus.
-    if (e.button !== 0) return
+    // Only the primary button (and *only* the primary button) starts a stroke.
+    // - `button !== 0` rules out events whose transition is middle / right.
+    // - `buttons !== 1` additionally rules out cases where a Wacom pen barrel
+    //   button is held during contact: some drivers fire `button=0,
+    //   buttons=3` (primary + secondary), which slipped past a button-only
+    //   check and produced a single-sample dot stroke on right-click.
+    if (e.button !== 0 || e.buttons !== 1) return
     if (opts.shouldSkip?.(e)) return
 
     target.setPointerCapture(e.pointerId)

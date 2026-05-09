@@ -205,21 +205,31 @@ async function main(): Promise<void> {
   // takes its place. Works with the pen too if the user maps a barrel button
   // to right-click in their tablet driver — that's the path to fully pen-only
   // operation, no keyboard or mouse needed.
+  //
+  // Registered with `capture: true` and uses `stopImmediatePropagation` so the
+  // draw-pointer handler (registered earlier via attachPointer) cannot also
+  // see this event. Relying on registration order alone proved fragile when
+  // pen drivers report `button=0, buttons=3` for barrel-as-right-click.
   root.addEventListener('contextmenu', (e) => e.preventDefault())
-  root.addEventListener('pointerdown', (e) => {
-    if (e.button !== 2) return
-    e.preventDefault()
-    if (getActiveTag() === 'tools') {
-      dismissAllPopovers()
-      return
-    }
-    openToolMenu({
-      at: { x: e.clientX, y: e.clientY },
-      onUndo: undo,
-      onRedo: redo,
-      onClear: requestClear,
-    })
-  })
+  root.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (e.button !== 2) return
+      e.stopImmediatePropagation()
+      e.preventDefault()
+      if (getActiveTag() === 'tools') {
+        dismissAllPopovers()
+        return
+      }
+      openToolMenu({
+        at: { x: e.clientX, y: e.clientY },
+        onUndo: undo,
+        onRedo: redo,
+        onClear: requestClear,
+      })
+    },
+    { capture: true },
+  )
 
   const detachPointer = attachPointer(root, {
     getBrush: makeBrush,
