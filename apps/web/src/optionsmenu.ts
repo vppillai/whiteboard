@@ -63,6 +63,7 @@ export function openOptionsMenu(at: { x: number; y: number }): Popover {
     title: 'options',
     content: root,
     pinned: true,
+    tag: 'options',
   })
 }
 

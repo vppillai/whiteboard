@@ -17,6 +17,12 @@ export interface PopoverOptions {
   content: HTMLElement
   /** Initial pin state. Defaults to false. */
   pinned?: boolean
+  /**
+   * Identity tag, exposed via `getActiveTag()`. Lets callers implement toggle
+   * behavior — pressing the same shortcut again to dismiss the popover —
+   * without having to retain a reference to the Popover themselves.
+   */
+  tag?: string
   /** Called after the popover dismisses (manually or via outside / Esc). */
   onDismiss?: () => void
 }
@@ -31,7 +37,11 @@ export interface Popover {
   noteSelection(): void
 }
 
-const open = new Set<Popover>()
+// Single-instance: at most one popover is alive at a time. Opening another
+// replaces the previous one (regardless of pin state — pin keeps a popover
+// alive across click-outside and selection events, not across explicit
+// requests to open a different popover).
+let active: { popover: Popover; tag?: string } | null = null
 
 const PIN_SVG_OUTLINE =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>'
@@ -43,6 +53,9 @@ const CLOSE_SVG =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
 
 export function showPopover(opts: PopoverOptions): Popover {
+  // Single-instance: replace any existing popover.
+  active?.popover.dismiss()
+
   const el = document.createElement('div')
   el.className = 'whiteboard-popover'
 
@@ -91,7 +104,7 @@ export function showPopover(opts: PopoverOptions): Popover {
   function dismiss(): void {
     if (dismissed) return
     dismissed = true
-    open.delete(popover)
+    if (active?.popover === popover) active = null
     document.removeEventListener('keydown', onKey, true)
     document.removeEventListener('pointerdown', onOutsidePointer, true)
     el.remove()
@@ -133,15 +146,20 @@ export function showPopover(opts: PopoverOptions): Popover {
       if (!pinned) dismiss()
     },
   }
-  open.add(popover)
+  active = { popover, tag: opts.tag }
   return popover
 }
 
-/** Dismisses every open popover. Returns true if any were dismissed. */
+/** Dismisses the active popover, if any. Returns true if one was dismissed. */
 export function dismissAllPopovers(): boolean {
-  if (open.size === 0) return false
-  for (const p of [...open]) p.dismiss()
+  if (!active) return false
+  active.popover.dismiss()
   return true
+}
+
+/** Returns the tag of the active popover, or undefined if none is open. */
+export function getActiveTag(): string | undefined {
+  return active?.tag
 }
 
 function positionPopover(el: HTMLElement, anchor: { x: number; y: number }): void {

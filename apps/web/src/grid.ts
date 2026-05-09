@@ -31,10 +31,7 @@ export function drawGrid(
   const screenSpacing = config.spacing * camera.scale
   if (screenSpacing < MIN_SCREEN_SPACING) return
 
-  const color =
-    getComputedStyle(document.documentElement).getPropertyValue('--grid-dot').trim() ||
-    'rgba(0,0,0,0.06)'
-
+  const styles = getComputedStyle(document.documentElement)
   const ctx = layer.ctx
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
@@ -42,8 +39,10 @@ export function drawGrid(
   const dpr = window.devicePixelRatio || 1
 
   if (config.type === 'dots') {
+    const color = styles.getPropertyValue('--grid-dot').trim() || 'rgba(0,0,0,0.18)'
     drawDots(ctx, camera, screenW, screenH, config.spacing, dpr, color)
   } else {
+    const color = styles.getPropertyValue('--grid-line').trim() || 'rgba(0,0,0,0.12)'
     drawLines(ctx, camera, screenW, screenH, config.spacing, dpr, color, config.type === 'lines')
   }
 

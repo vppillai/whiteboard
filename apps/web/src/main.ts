@@ -10,7 +10,7 @@
  *   Cmd/Ctrl + Shift + Z — redo (also Cmd/Ctrl + Y).
  *   Cmd/Ctrl + 0 — reset zoom.
  *   Cmd/Ctrl + +/- — zoom in / out.
- *   Cmd/Ctrl + Shift + C — clear board (press twice within 3 s; Esc cancels).
+ *   Cmd/Ctrl + Shift + K — clear board (press twice within 3 s; Esc cancels).
  *   Esc — cancel a pending action (e.g. clear-confirm).
  *
  * Pointer:
@@ -30,7 +30,7 @@ import { MetricsCollector, bindHudToggle, createHud } from './metrics'
 import { openOptionsMenu } from './optionsmenu'
 import { runPerftest } from './perftest'
 import { attachPointer } from './pointer'
-import { dismissAllPopovers } from './popover'
+import { dismissAllPopovers, getActiveTag } from './popover'
 import { applyCamera, clearLayer, drawStrokePath, setupCanvas } from './render'
 import { getColor, getSettings, onChange as onSettingsChange } from './settings'
 import { clearAllStrokes, deleteStroke, loadAllStrokes, saveStroke } from './storage'
@@ -311,7 +311,7 @@ async function main(): Promise<void> {
       })
       return
     }
-    showToast('Press <b>⌘/Ctrl + Shift + C</b> again to clear · <b>Esc</b> cancels')
+    showToast('Press <b>⌘/Ctrl + Shift + K</b> again to clear · <b>Esc</b> cancels')
     clearTimer = setTimeout(cancelClearConfirm, CLEAR_CONFIRM_MS)
   }
 
@@ -376,7 +376,7 @@ async function main(): Promise<void> {
       committedDirty = true
       return
     }
-    if (meta && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'c') {
+    if (meta && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
       e.preventDefault()
       requestClear()
       return
@@ -398,12 +398,14 @@ async function main(): Promise<void> {
     }
     if (e.key === 'c' && !meta && !e.altKey && !e.repeat) {
       e.preventDefault()
-      openColorPicker(lastPointer)
+      if (getActiveTag() === 'color') dismissAllPopovers()
+      else openColorPicker(lastPointer)
       return
     }
     if (e.key === 'o' && !meta && !e.altKey && !e.repeat) {
       e.preventDefault()
-      openOptionsMenu(lastPointer)
+      if (getActiveTag() === 'options') dismissAllPopovers()
+      else openOptionsMenu(lastPointer)
       return
     }
     if (e.key === '?' || (e.shiftKey && e.key === '/')) {
@@ -487,7 +489,7 @@ function createHelp(): Help {
     '',
     '⌘/Ctrl + Z         undo',
     '⌘/Ctrl + Shift + Z redo   (also ⌘/Ctrl + Y)',
-    '⌘/Ctrl + Shift + C clear board (confirm twice)',
+    '⌘/Ctrl + Shift + K clear board (confirm twice)',
     '',
     'M                  toggle metrics',
     'T                  cycle theme',

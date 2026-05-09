@@ -100,6 +100,7 @@ export function openColorPicker(at: { x: number; y: number }): Popover {
     anchor: at,
     title: 'color',
     content: root,
+    tag: 'color',
     onDismiss: unsubscribe,
   })
 

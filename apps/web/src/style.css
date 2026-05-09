@@ -5,7 +5,11 @@
   --fg-text: #1a1a1a;
   --fg-muted: #6b7280;
   --ink: #1a1a1a;
-  --grid-dot: rgba(0, 0, 0, 0.07);
+  /* Grid colors: dots are pixel-sized so a low alpha reads as visible.
+     Lines are spread across the whole canvas, so the per-pixel alpha must
+     be higher to read at the same overall weight. */
+  --grid-dot: rgba(0, 0, 0, 0.18);
+  --grid-line: rgba(0, 0, 0, 0.12);
   --hud-bg: rgba(20, 24, 30, 0.85);
   --hud-fg: #e6f0fa;
   --hud-border: rgba(255, 255, 255, 0.06);
@@ -22,7 +26,8 @@
   --fg-text: #e8eef5;
   --fg-muted: #8a93a3;
   --ink: #e8eef5;
-  --grid-dot: rgba(255, 255, 255, 0.06);
+  --grid-dot: rgba(255, 255, 255, 0.16);
+  --grid-line: rgba(255, 255, 255, 0.1);
   --hud-bg: rgba(20, 24, 30, 0.92);
   --hud-fg: #cfeeff;
   --hud-border: rgba(255, 255, 255, 0.06);
@@ -40,7 +45,8 @@
     --fg-text: #e8eef5;
     --fg-muted: #8a93a3;
     --ink: #e8eef5;
-    --grid-dot: rgba(255, 255, 255, 0.06);
+    --grid-dot: rgba(255, 255, 255, 0.16);
+    --grid-line: rgba(255, 255, 255, 0.1);
     --hud-bg: rgba(20, 24, 30, 0.92);
     --hud-fg: #cfeeff;
     --hud-border: rgba(255, 255, 255, 0.06);
