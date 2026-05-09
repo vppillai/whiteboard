@@ -36,3 +36,10 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 - Committed strokes now finalize with `last: true` in `perfect-freehand`, producing a clean polished cap. Previously strokes (including persisted ones) re-rendered with `last: false`, leaving a slightly serrated leading edge that read as "blocky" under inspection.
 - Live stroke rendering moved out of the RAF queue and into the pointer handlers themselves. With `desynchronized: true` on the canvas context, this trims roughly half a frame of perceived latency on the wet ink.
 - Default brush retuned for a more felt-marker-like feel: `size 3 → 3.5`, `thinning 0.6 → 0.45`, `smoothing 0.5 → 0.7`, `streamline 0.5 → 0.4`, `pressureGamma 2.0 → 1.7`. Streamline was deliberately *reduced* — higher streamline trades latency for smoothing.
+- Predicted events disabled by default. On indirect-input devices (Wacom Intuos non-screen), the predicted lookahead leads the cursor and visibly flickers when the pen changes direction. Re-enable with `?predict=1` to A/B-test on hardware where the trade-off is favorable (e.g. screen tablets).
+- Brush gained an `opacity` field; the default pen now renders at 0.94 alpha so overlapping strokes layer subtly, which reads as "real ink" rather than digital fill.
+
+### Added
+
+- **Cross-device panning**: spacebar-held drag pans on any pointer device (pen, mouse, trackpad). Middle-mouse-button drag also pans (for Wacom users who map a pen barrel-button to middle-click via the tablet driver). Cursor switches to grab/grabbing accordingly via the `[data-input]` CSS hook. Wheel and trackpad two-finger pan still work, unchanged.
+- Help overlay (`?`) refreshed with the new pan options.

@@ -30,21 +30,23 @@ import { clearAllStrokes, loadAllStrokes, saveStroke } from './storage'
 import { getStrokePath } from './stroke'
 import { cycleMode, getEffective, getMode, initTheme, resolveInkColor } from './theme'
 
-// Default brush. Tuned for a felt-marker-like feel: slightly thicker than a
-// fine technical pen, smoother outline, less pressure-driven thinning. Streamline
-// is kept low because it directly trades latency for smoothing — high streamline
-// makes the wet ink visibly trail the pen.
+// Default brush. Tuned for a felt-marker feel: slightly thicker than a fine
+// technical pen, smoother outline, less pressure-driven thinning. Streamline
+// is kept low because it trades latency for smoothing — high streamline makes
+// the wet ink visibly trail the pen. Opacity is < 1 so overlapping strokes
+// layer subtly, which reads as "real ink" rather than digital fill.
 const PEN_BRUSH: BrushConfig = {
   size: 3.5,
   color: 'ink',
   thinning: 0.45,
-  smoothing: 0.7,
+  smoothing: 0.72,
   streamline: 0.4,
   taperStart: 0,
   taperEnd: 0,
   capStart: true,
   capEnd: true,
   pressureGamma: 1.7,
+  opacity: 0.94,
 }
 
 const ZOOM_WHEEL_FACTOR = 1.0015 // per pixel of deltaY when zooming
@@ -101,12 +103,91 @@ async function main(): Promise<void> {
     if (!liveStroke) return
     applyCamera(target.live, camera, target.dpr)
     const path = getStrokePath(liveStroke, livePredicted, false)
-    if (path) drawStrokePath(target.live, path, resolveInkColor(liveStroke.brush.color))
+    if (path) {
+      drawStrokePath(
+        target.live,
+        path,
+        resolveInkColor(liveStroke.brush.color),
+        liveStroke.brush.opacity ?? 1,
+      )
+    }
   }
+
+  const params = new URLSearchParams(location.search)
+  const usePrediction = params.has('predict')
+
+  // ---- Pan: spacebar+drag (universal) and middle-mouse-button drag.
+  //
+  // Wacom users typically map a pen barrel-button to middle-click via the
+  // tablet's driver — that lets them pan without leaving the pen. Trackpad
+  // two-finger swipe already pans via the wheel handler below.
+  let spaceHeld = false
+  let panState: {
+    pointerId: number
+    startClientX: number
+    startClientY: number
+    startCameraX: number
+    startCameraY: number
+  } | null = null
+
+  const isPanIntent = (e: PointerEvent): boolean => spaceHeld || e.button === 1
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === ' ' && !e.repeat) {
+      spaceHeld = true
+      if (!panState) root.dataset.input = 'pan'
+    }
+  })
+  document.addEventListener('keyup', (e) => {
+    if (e.key === ' ') {
+      spaceHeld = false
+      if (!panState) delete root.dataset.input
+    }
+  })
+
+  root.addEventListener('pointerdown', (e) => {
+    if (!isPanIntent(e)) return
+    e.preventDefault()
+    root.setPointerCapture(e.pointerId)
+    root.dataset.input = 'panning'
+    panState = {
+      pointerId: e.pointerId,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startCameraX: camera.x,
+      startCameraY: camera.y,
+    }
+  })
+
+  root.addEventListener('pointermove', (e) => {
+    if (!panState || e.pointerId !== panState.pointerId) return
+    const dx = e.clientX - panState.startClientX
+    const dy = e.clientY - panState.startClientY
+    camera.x = panState.startCameraX - dx / camera.scale
+    camera.y = panState.startCameraY - dy / camera.scale
+    committedDirty = true
+  })
+
+  const endPan = (e: PointerEvent): void => {
+    if (!panState || e.pointerId !== panState.pointerId) return
+    if (root.hasPointerCapture(e.pointerId)) root.releasePointerCapture(e.pointerId)
+    panState = null
+    if (spaceHeld) root.dataset.input = 'pan'
+    else delete root.dataset.input
+  }
+  root.addEventListener('pointerup', endPan)
+  root.addEventListener('pointercancel', endPan)
+
+  // Suppress the browser's middle-click auto-scroll cursor on Windows/Linux.
+  root.addEventListener('auxclick', (e) => {
+    if (e.button === 1) e.preventDefault()
+  })
 
   const detachPointer = attachPointer(root, {
     getBrush: () => PEN_BRUSH,
     toBoard,
+    usePrediction,
+    shouldSkip: isPanIntent,
     callbacks: {
       onStrokeStart(stroke) {
         liveStroke = stroke
@@ -220,7 +301,14 @@ async function main(): Promise<void> {
       applyCamera(target.committed, camera, target.dpr)
       for (const s of strokes) {
         const path = getStrokePath(s, [], true)
-        if (path) drawStrokePath(target.committed, path, resolveInkColor(s.brush.color))
+        if (path) {
+          drawStrokePath(
+            target.committed,
+            path,
+            resolveInkColor(s.brush.color),
+            s.brush.opacity ?? 1,
+          )
+        }
       }
       committedDirty = false
       // Refresh live layer too (camera transform, or just-committed stroke now
@@ -237,7 +325,7 @@ async function main(): Promise<void> {
   window.addEventListener('beforeunload', () => detachPointer())
 
   // Perftest mode.
-  if (new URLSearchParams(location.search).has('perftest')) {
+  if (params.has('perftest')) {
     void runPerfMode(camera, target, root, () => {
       committedDirty = true
     })
@@ -271,14 +359,18 @@ function createHelp(): Help {
   el.id = 'whiteboard-help'
   el.style.display = 'none'
   el.textContent = [
-    'M               toggle metrics',
-    'T               cycle theme',
-    '?               toggle this help',
-    '⌘/Ctrl + 0      reset zoom',
-    '⌘/Ctrl + +/-    zoom in/out',
-    '⌘/Ctrl+Shift+K  clear board',
-    'wheel           pan',
-    '⌘/Ctrl + wheel  zoom',
+    'M                  toggle metrics',
+    'T                  cycle theme',
+    '?                  toggle this help',
+    '⌘/Ctrl + 0         reset zoom',
+    '⌘/Ctrl + +/-       zoom in/out',
+    '⌘/Ctrl+Shift+K     clear board',
+    '',
+    'wheel / 2-finger   pan',
+    '⌘/Ctrl + wheel     zoom',
+    'pinch              zoom',
+    'space + drag       pan (any device)',
+    'middle-mouse drag  pan',
   ].join('\n')
   const toggle = () => {
     el.style.display = el.style.display === 'none' ? 'block' : 'none'
@@ -304,21 +396,32 @@ async function runPerfMode(
     startedAt: performance.now(),
   }
 
+  const drawSynth = (last: boolean): void => {
+    const path = getStrokePath(synth, [], last)
+    if (!path) return
+    drawStrokePath(target.live, path, resolveInkColor(synth.brush.color), synth.brush.opacity ?? 1)
+  }
+
   const result = await runPerftest({ width: target.width, height: target.height }, (s: Sample) => {
-    // Translate screen-space synth coordinates into board space so the
-    // stroke ends up where expected under the current camera.
+    // Translate screen-space synth coordinates into board space so the stroke
+    // ends up where expected under the current camera.
     const board = screenToBoard(camera, s.x, s.y)
     synth.samples.push({ ...s, x: board.x, y: board.y })
     clearLayer(target.live)
     applyCamera(target.live, camera, target.dpr)
-    const path = getStrokePath(synth)
-    if (path) drawStrokePath(target.live, path, resolveInkColor(synth.brush.color))
+    drawSynth(false)
   })
 
-  // Commit synthetic stroke to the persistent set so it's visible after the
-  // banner closes.
-  const path = getStrokePath(synth)
-  if (path) drawStrokePath(target.committed, path, resolveInkColor(synth.brush.color))
+  // Commit synthetic stroke to the committed layer so it stays after dismiss.
+  const finalPath = getStrokePath(synth, [], true)
+  if (finalPath) {
+    drawStrokePath(
+      target.committed,
+      finalPath,
+      resolveInkColor(synth.brush.color),
+      synth.brush.opacity ?? 1,
+    )
+  }
   clearLayer(target.live)
   markCommittedDirty()
 

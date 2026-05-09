@@ -84,7 +84,17 @@ export function clearLayer(layer: CanvasLayer): void {
   ctx.restore()
 }
 
-export function drawStrokePath(layer: CanvasLayer, path: Path2D, color: string): void {
-  layer.ctx.fillStyle = color
-  layer.ctx.fill(path)
+export function drawStrokePath(layer: CanvasLayer, path: Path2D, color: string, opacity = 1): void {
+  const { ctx } = layer
+  if (opacity >= 1) {
+    ctx.fillStyle = color
+    ctx.fill(path)
+    return
+  }
+  // Wrap in save/restore so we don't leak globalAlpha to subsequent draws.
+  ctx.save()
+  ctx.globalAlpha = opacity
+  ctx.fillStyle = color
+  ctx.fill(path)
+  ctx.restore()
 }

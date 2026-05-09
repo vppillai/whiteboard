@@ -30,6 +30,13 @@ export interface AttachOptions {
   toBoard: (clientX: number, clientY: number) => { x: number; y: number }
   /** Return true to skip drawing on this pointerdown (e.g. caller is panning). */
   shouldSkip?: (e: PointerEvent) => boolean
+  /**
+   * Whether to feed predicted events into the live render. Useful on screen
+   * tablets where pen tip and ink coincide; on indirect input (Intuos non-
+   * screen) prediction artifacts are visible because the predicted ink leads
+   * the cursor — leave this off unless you've A/B-tested it on the device.
+   */
+  usePrediction?: boolean
   callbacks: PointerCallbacks
 }
 
@@ -85,7 +92,9 @@ export function attachPointer(target: HTMLElement, opts: AttachOptions): () => v
       for (const ce of coalesced) active.samples.push(sample(ce, brush))
     }
 
-    const predicted = e.getPredictedEvents().map((pe) => sample(pe, brush))
+    const predicted = opts.usePrediction
+      ? e.getPredictedEvents().map((pe) => sample(pe, brush))
+      : []
     opts.callbacks.onStrokeUpdate(active, predicted)
   }
 

@@ -37,6 +37,9 @@ export interface BrushConfig {
   capEnd: boolean
   /** Pressure curve gamma. p_out = p_in ** gamma. ~2.0 for Wacom Intuos. */
   pressureGamma: number
+  /** 0..1 fill alpha. Defaults to 1 when omitted. < 1 produces visible
+   *  layering where strokes overlap, which reads as "real ink". */
+  opacity?: number
 }
 
 export interface Stroke {
