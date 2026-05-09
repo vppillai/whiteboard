@@ -43,17 +43,24 @@ import {
   ERASER_RADII,
   getBrushId,
   getColor,
+  getEraserMode,
   getEraserSize,
   getSettings,
   onChange as onSettingsChange,
   setBrushId,
-  setEraserSize,
+  setEraserConfig,
 } from './settings'
 import { clearAllStrokes, loadAllStrokes, saveStroke } from './storage'
 import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { openToolMenu } from './toolmenu'
-import { type EraserMode, type Tool, type ToolId, createEraserTool, createPenTool } from './tools'
+import {
+  type EraserGestureMode,
+  type Tool,
+  type ToolId,
+  createEraserTool,
+  createPenTool,
+} from './tools'
 import { clearView, loadView, makeViewSaver } from './viewstate'
 import { fitToContent } from './zoomfit'
 
@@ -157,22 +164,57 @@ async function main(): Promise<void> {
   }
 
   /**
-   * Pen-hover preview — small semi-transparent dot at the cursor showing
-   * the active brush's effective size and color. Renders on the live layer.
-   * Replaced by the actual stroke as soon as drawing starts.
+   * Pen-hover preview. Each brush gets a slightly different cursor shape so
+   * the user sees what they're about to draw — pen / marker / pencil / brush
+   * are circles of varying weight; highlighter is a chisel-shaped rectangle.
+   * Renders on the live layer; replaced by the actual stroke when drawing
+   * starts.
    */
   const renderPenHover = (boardX: number, boardY: number): void => {
-    if (liveStroke) return // a stroke is in flight; live render handles cursor
-    const brushPreset = BRUSH_PRESETS[getBrushId()]
+    if (liveStroke) return
+    const brushId = getBrushId()
+    const preset = BRUSH_PRESETS[brushId]
     clearLayer(target.live)
     applyCamera(target.live, camera, target.dpr)
     const c = target.live.ctx
     c.save()
-    c.fillStyle = resolveInkColor(getColor())
-    c.globalAlpha = 0.4
-    c.beginPath()
-    c.arc(boardX, boardY, brushPreset.size / 2, 0, Math.PI * 2)
-    c.fill()
+    const color = resolveInkColor(getColor())
+    c.fillStyle = color
+    if (brushId === 'highlighter') {
+      // Chisel: wide rectangle, mostly translucent.
+      c.globalAlpha = 0.45
+      const w = preset.size
+      const h = Math.max(2, preset.size * 0.4)
+      c.fillRect(boardX - w / 2, boardY - h / 2, w, h)
+    } else if (brushId === 'brush') {
+      // Filled core + soft halo to suggest a softer brush.
+      c.globalAlpha = 0.5
+      c.beginPath()
+      c.arc(boardX, boardY, preset.size / 2, 0, Math.PI * 2)
+      c.fill()
+      c.globalAlpha = 0.18
+      c.beginPath()
+      c.arc(boardX, boardY, preset.size * 0.85, 0, Math.PI * 2)
+      c.fill()
+    } else if (brushId === 'marker') {
+      // Bolder, less translucent dot.
+      c.globalAlpha = 0.7
+      c.beginPath()
+      c.arc(boardX, boardY, preset.size / 2, 0, Math.PI * 2)
+      c.fill()
+    } else if (brushId === 'pencil') {
+      // Lighter dot — pencil reads as lower-contrast on paper.
+      c.globalAlpha = 0.4
+      c.beginPath()
+      c.arc(boardX, boardY, preset.size / 2, 0, Math.PI * 2)
+      c.fill()
+    } else {
+      // Pen (default): clean small filled dot.
+      c.globalAlpha = 0.5
+      c.beginPath()
+      c.arc(boardX, boardY, preset.size / 2, 0, Math.PI * 2)
+      c.fill()
+    }
     c.restore()
   }
   const clearHover = (): void => {
@@ -217,9 +259,10 @@ async function main(): Promise<void> {
         getActiveToolId,
         getActiveBrushId: getBrushId,
         getEraserSize,
+        getEraserMode,
         onSelectTool: setTool,
         onSelectBrush: setBrushId,
-        onSelectEraserSize: setEraserSize,
+        onSelectEraserConfig: setEraserConfig,
         onResetZoom: () => {
           resetZoom(camera)
           onCameraChange()
@@ -275,7 +318,7 @@ async function main(): Promise<void> {
     boardX: number,
     boardY: number,
     radius: number,
-    mode: EraserMode,
+    mode: EraserGestureMode,
   ): void => {
     clearLayer(target.live)
     applyCamera(target.live, camera, target.dpr)
@@ -297,6 +340,7 @@ async function main(): Promise<void> {
 
   const eraserTool = createEraserTool({
     getRadius: () => ERASER_RADII[getEraserSize()],
+    getMode: getEraserMode,
     callbacks: {
       getStrokes: () => strokes,
       onErase: (ids) => {

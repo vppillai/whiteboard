@@ -13,6 +13,7 @@ import { type BrushId, isValidBrushId } from './brushes'
 
 export type GridType = 'dots' | 'lines' | 'ruled' | 'none'
 export type EraserSize = 'small' | 'medium' | 'large'
+export type EraserMode = 'wipe' | 'item'
 
 /** Eraser hit radii (board-space pixels) keyed on user-facing size label. */
 export const ERASER_RADII: Readonly<Record<EraserSize, number>> = {
@@ -24,6 +25,7 @@ export const ERASER_RADII: Readonly<Record<EraserSize, number>> = {
 const ERASER_SIZES: readonly EraserSize[] = ['small', 'medium', 'large']
 const isValidEraserSize = (s: string): s is EraserSize =>
   (ERASER_SIZES as readonly string[]).includes(s)
+const isValidEraserMode = (s: string): s is EraserMode => s === 'wipe' || s === 'item'
 
 export interface GridConfig {
   type: GridType
@@ -35,6 +37,7 @@ interface PersistedShape {
   color?: string
   brush?: string
   eraserSize?: string
+  eraserMode?: string
   grid?: { type?: GridType; spacing?: number }
 }
 
@@ -42,6 +45,7 @@ interface State {
   color: string
   brush: BrushId
   eraserSize: EraserSize
+  eraserMode: EraserMode
   grid: GridConfig
 }
 
@@ -53,6 +57,7 @@ const DEFAULTS: State = {
   color: 'ink',
   brush: 'pen',
   eraserSize: 'medium',
+  eraserMode: 'wipe',
   grid: { type: 'dots', spacing: 24 },
 }
 
@@ -74,6 +79,10 @@ function load(): State {
         typeof parsed.eraserSize === 'string' && isValidEraserSize(parsed.eraserSize)
           ? parsed.eraserSize
           : DEFAULTS.eraserSize,
+      eraserMode:
+        typeof parsed.eraserMode === 'string' && isValidEraserMode(parsed.eraserMode)
+          ? parsed.eraserMode
+          : DEFAULTS.eraserMode,
       grid: {
         type:
           parsed.grid?.type && VALID_GRID_TYPES.includes(parsed.grid.type)
@@ -91,7 +100,13 @@ function load(): State {
 }
 
 function clone(s: State): State {
-  return { color: s.color, brush: s.brush, eraserSize: s.eraserSize, grid: { ...s.grid } }
+  return {
+    color: s.color,
+    brush: s.brush,
+    eraserSize: s.eraserSize,
+    eraserMode: s.eraserMode,
+    grid: { ...s.grid },
+  }
 }
 
 function persist(): void {
@@ -141,6 +156,38 @@ export function setEraserSize(size: EraserSize): void {
   state.eraserSize = size
   persist()
   emit()
+}
+
+export function getEraserMode(): EraserMode {
+  return state.eraserMode
+}
+
+export function setEraserMode(mode: EraserMode): void {
+  if (state.eraserMode === mode) return
+  state.eraserMode = mode
+  persist()
+  emit()
+}
+
+/**
+ * Single-shot setter used by the tool menu's "Small / Medium / Large / Item"
+ * pills. Picking a size implies wipe mode; picking Item leaves the size at
+ * its previous value (which doesn't matter for item mode).
+ */
+export function setEraserConfig(config: { mode: EraserMode; size?: EraserSize }): void {
+  let changed = false
+  if (state.eraserMode !== config.mode) {
+    state.eraserMode = config.mode
+    changed = true
+  }
+  if (config.size !== undefined && state.eraserSize !== config.size) {
+    state.eraserSize = config.size
+    changed = true
+  }
+  if (changed) {
+    persist()
+    emit()
+  }
 }
 
 export function getGrid(): Readonly<GridConfig> {

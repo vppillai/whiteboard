@@ -29,7 +29,7 @@
 import { BRUSH_IDS, BRUSH_LABELS, type BrushId } from './brushes'
 import { openOptionsMenu } from './optionsmenu'
 import { type Popover, showPopover } from './popover'
-import { type EraserSize, getColor, setColor } from './settings'
+import { type EraserMode, type EraserSize, getColor, setColor } from './settings'
 import type { ToolId } from './tools'
 
 const PALETTE: readonly string[] = [
@@ -64,18 +64,44 @@ export interface ToolMenuOptions {
   getActiveToolId: () => ToolId
   getActiveBrushId: () => BrushId
   getEraserSize: () => EraserSize
+  getEraserMode: () => EraserMode
   onSelectTool: (id: ToolId) => void
   onSelectBrush: (id: BrushId) => void
-  onSelectEraserSize: (size: EraserSize) => void
+  onSelectEraserConfig: (config: { mode: EraserMode; size?: EraserSize }) => void
   onResetZoom: () => void
   onZoomToFit: () => void
   onClear: () => void
 }
 
-const ERASER_SIZE_PILLS: readonly { id: EraserSize; label: string }[] = [
-  { id: 'small', label: 'Small' },
-  { id: 'medium', label: 'Medium' },
-  { id: 'large', label: 'Large' },
+interface EraserPill {
+  label: string
+  /** What happens when this pill is selected. */
+  config: { mode: EraserMode; size?: EraserSize }
+  /** Predicate against current state to decide if this pill is active. */
+  isActive: (mode: EraserMode, size: EraserSize) => boolean
+}
+
+const ERASER_PILLS: readonly EraserPill[] = [
+  {
+    label: 'Small',
+    config: { mode: 'wipe', size: 'small' },
+    isActive: (m, s) => m === 'wipe' && s === 'small',
+  },
+  {
+    label: 'Medium',
+    config: { mode: 'wipe', size: 'medium' },
+    isActive: (m, s) => m === 'wipe' && s === 'medium',
+  },
+  {
+    label: 'Large',
+    config: { mode: 'wipe', size: 'large' },
+    isActive: (m, s) => m === 'wipe' && s === 'large',
+  },
+  {
+    label: 'Item',
+    config: { mode: 'item' },
+    isActive: (m) => m === 'item',
+  },
 ]
 
 export function openToolMenu(opts: ToolMenuOptions): Popover {
@@ -125,19 +151,23 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
   }
 
   const renderContextualForEraser = (): void => {
-    root.appendChild(sectionLabel('Eraser size'))
+    root.appendChild(sectionLabel('Eraser'))
     const row = document.createElement('div')
     row.className = 'whiteboard-tools-row'
-    const activeSize = opts.getEraserSize()
-    for (const { id, label } of ERASER_SIZE_PILLS) {
+    const mode = opts.getEraserMode()
+    const size = opts.getEraserSize()
+    for (const pill of ERASER_PILLS) {
       const btn = document.createElement('button')
       btn.type = 'button'
       btn.className = 'whiteboard-tool-pill'
-      if (id === activeSize) btn.classList.add('active')
-      btn.textContent = label
-      btn.title = `${label} eraser`
+      if (pill.isActive(mode, size)) btn.classList.add('active')
+      btn.textContent = pill.label
+      btn.title =
+        pill.config.mode === 'item'
+          ? 'Tap a single stroke to delete it'
+          : `Wipe — ${pill.label.toLowerCase()} radius`
       btn.addEventListener('click', () => {
-        opts.onSelectEraserSize(id)
+        opts.onSelectEraserConfig(pill.config)
         dismiss()
       })
       row.appendChild(btn)

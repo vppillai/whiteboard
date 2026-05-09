@@ -21,9 +21,11 @@
  */
 
 import type { Stroke } from '@whiteboard/shared'
+import type { EraserMode } from '../settings'
 import type { Tool, ToolContext } from './types'
 
-export type EraserMode = 'wipe' | 'object'
+/** Visual / behavioral mode at the moment of an eraser gesture. */
+export type EraserGestureMode = 'wipe' | 'object'
 
 export interface EraserToolCallbacks {
   /** Returns the live strokes list. Called on each hit-test. */
@@ -31,7 +33,7 @@ export interface EraserToolCallbacks {
   /** Emit a delete op for the swept strokes. Called once per gesture. */
   onErase: (strokeIds: string[]) => void
   /** Live cursor render, board coordinates. Mode passed for visual differentiation. */
-  onCursorMove: (boardX: number, boardY: number, radius: number, mode: EraserMode) => void
+  onCursorMove: (boardX: number, boardY: number, radius: number, mode: EraserGestureMode) => void
   /** Cursor cleared. */
   onCursorEnd: () => void
 }
@@ -41,12 +43,18 @@ export interface EraserToolOptions {
   /** Eraser hit radius in board-space pixels. Read on every event so a
    *  size change in settings applies immediately. */
   getRadius: () => number
+  /**
+   * Default mode. The user may temporarily override to 'item' by holding
+   * Shift at pointerdown — useful when in wipe mode but wanting one
+   * surgical erase.
+   */
+  getMode: () => EraserMode
 }
 
 export function createEraserTool(opts: EraserToolOptions): Tool {
   const swept = new Set<string>()
   let active = false
-  let mode: EraserMode = 'wipe'
+  let mode: EraserGestureMode = 'wipe'
 
   /** Wipe-mode hit: accumulate every match within tolerance. */
   const sweepHit = (px: number, py: number): void => {
@@ -84,7 +92,9 @@ export function createEraserTool(opts: EraserToolOptions): Tool {
     onPointerDown(e, ctx) {
       const { x, y } = ctx.toBoard(e.clientX, e.clientY)
       active = true
-      mode = e.shiftKey ? 'object' : 'wipe'
+      // Configured default mode, or item if Shift held (Shift always wins).
+      const wantItem = e.shiftKey || opts.getMode() === 'item'
+      mode = wantItem ? 'object' : 'wipe'
       swept.clear()
       if (mode === 'wipe') {
         sweepHit(x, y)
@@ -94,10 +104,12 @@ export function createEraserTool(opts: EraserToolOptions): Tool {
     onPointerMove(e, ctx) {
       if (!active) {
         // Hover: render the cursor so the user sees where they'll erase. The
-        // mode here is the *prospective* mode (what would happen if they
-        // pressed now) so it reflects current Shift state.
+        // mode shown is the *prospective* mode — what would happen if they
+        // pressed now (Shift override always wins, otherwise the configured
+        // default applies).
         const { x, y } = ctx.toBoard(e.clientX, e.clientY)
-        opts.callbacks.onCursorMove(x, y, opts.getRadius(), e.shiftKey ? 'object' : 'wipe')
+        const previewItem = e.shiftKey || opts.getMode() === 'item'
+        opts.callbacks.onCursorMove(x, y, opts.getRadius(), previewItem ? 'object' : 'wipe')
         return
       }
       if (mode === 'wipe') {
