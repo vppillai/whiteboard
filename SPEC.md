@@ -266,11 +266,11 @@ Each milestone closes only after: feature complete, doc-update reviewed, lint + 
 
 - **Toolbar UI framework**: vanilla TS + nanostores vs Solid.js. Decide at the start of M2 based on bundle-size headroom and the toolbar's reactive needs.
 - **Anonymous user names**: server-issued vs client-generated. Decide at M3.
-- **Image import / paste in v1**: still leaning against. Reassess at the start of M2.
 
 ### Backlog (post-v1; tracked, not committed)
 
 - **Screen-tablet support.** Re-enable predicted events for direct-input devices (iPad Pencil, Wacom MobileStudio, Surface Pro pen) where prediction is a clear win. Likely shape: a per-device-class preference exposed via the M2 settings panel, defaulting to off for indirect input and on for direct input. Trigger: a user with a screen tablet asks.
 - **Performance under stroke count.** The current 2D-canvas + perfect-freehand rasterizes each stroke on the CPU (~1 ms each). Pan / zoom redraws all committed strokes; at ~500+ strokes this is the WebGL trigger. Track in `?perftest=scale` (planned at M1).
+- **Paste image, draw on top.** User intent: `Cmd/Ctrl+V` a screenshot or image into the board; image appears as a non-editable layer; pen strokes draw on top. Implications: a new object kind in the data model (image vs stroke), an image rendering layer between the grid and the strokes, Blob persistence in IndexedDB, and at M3 a binary-data sync story (likely out-of-band via the WebSocket relay rather than encoded into the Y.Doc to avoid bloating CRDT updates). Likely lands as a discrete milestone post-v1 ship; placeholder name **M5.1: image-paste**. The current `Stroke` type doesn't accommodate this — when we get here, an ADR formalizes a `BoardObject = Stroke | ImageObject` discriminated union and rerouting through that.
 - **Mobile / touch UX.** Currently a non-goal. Touch *works* (pointer events handle it) but is not optimized. Reassess if a use case emerges.
 - **Accessibility.** Currently silent. Keyboard-only navigation is largely covered (every action has a shortcut), but ARIA / focus management for the eventual toolbar is not. Address as part of M2's UI work.
