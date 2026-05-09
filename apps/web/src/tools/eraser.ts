@@ -4,9 +4,13 @@
  *
  * Two modes, locked at pointerdown:
  *
- *   - **Wipe** (default): drag-through. Every stroke whose path passes within
- *     `(radius + stroke.brush.size/2)` of the eraser cursor gets queued.
- *     On pointerup, the whole queue becomes one delete op.
+ *   - **Wipe** (default): drag-through. Each stroke the eraser passes over
+ *     is **immediately soft-deleted** so the user sees it vanish in real
+ *     time — that's what makes a wipe feel like a wipe rather than an
+ *     end-of-gesture batch action. The accumulated stroke ids are still
+ *     emitted as **one** delete op at pointerup so a single Cmd+Z brings
+ *     the whole sweep back. The op's apply is idempotent on already-deleted
+ *     strokes (no double-flip), so undo / redo work cleanly.
  *
  *   - **Object**: a single tap deletes the **topmost** stroke under the
  *     cursor (and only that one). Selected as a top-level option from the
@@ -80,26 +84,36 @@ export function createEraserTool(opts: EraserToolOptions): Tool {
 
   const radius = (): number => ERASER_RADII[getEraserSize()]
 
-  const sweepHit = (px: number, py: number): void => {
+  /** Wipe-mode hit: accumulate every match within tolerance AND immediately
+   *  soft-delete each newly-hit stroke so the user sees it vanish under the
+   *  eraser. Returns true if anything new was hit (caller marks committed
+   *  dirty if so). */
+  const sweepHit = (px: number, py: number): boolean => {
+    let hitSomething = false
     for (const stroke of opts.callbacks.getStrokes()) {
       if (stroke.deleted) continue
       if (swept.has(stroke.id)) continue
       if (strokeNearPoint(stroke, px, py, radius())) {
         swept.add(stroke.id)
+        stroke.deleted = true
+        hitSomething = true
       }
     }
+    return hitSomething
   }
 
-  const objectHit = (px: number, py: number): void => {
+  const objectHit = (px: number, py: number): boolean => {
     const strokes = opts.callbacks.getStrokes()
     for (let i = strokes.length - 1; i >= 0; i--) {
       const stroke = strokes[i]
       if (!stroke || stroke.deleted || swept.has(stroke.id)) continue
       if (strokeNearPoint(stroke, px, py, radius())) {
         swept.add(stroke.id)
-        return
+        stroke.deleted = true
+        return true
       }
     }
+    return false
   }
 
   const renderCursor = (
@@ -142,7 +156,9 @@ export function createEraserTool(opts: EraserToolOptions): Tool {
       const wantItem = e.shiftKey || getEraserMode() === 'item'
       mode = wantItem ? 'object' : 'wipe'
       swept.clear()
-      if (mode === 'wipe') sweepHit(x, y)
+      if (mode === 'wipe') {
+        if (sweepHit(x, y)) ctx.markCommittedDirty()
+      }
       renderCursor(x, y, mode, ctx)
     },
 
@@ -157,10 +173,12 @@ export function createEraserTool(opts: EraserToolOptions): Tool {
       if (mode === 'wipe') {
         const coalesced = e.getCoalescedEvents()
         const events = coalesced.length > 0 ? coalesced : [e]
+        let anyHit = false
         for (const ce of events) {
           const { x, y } = ctx.toBoard(ce.clientX, ce.clientY)
-          sweepHit(x, y)
+          if (sweepHit(x, y)) anyHit = true
         }
+        if (anyHit) ctx.markCommittedDirty()
       }
       const last = ctx.toBoard(e.clientX, e.clientY)
       renderCursor(last.x, last.y, mode, ctx)
@@ -171,7 +189,7 @@ export function createEraserTool(opts: EraserToolOptions): Tool {
       active = false
       if (mode === 'object') {
         const { x, y } = ctx.toBoard(e.clientX, e.clientY)
-        objectHit(x, y)
+        if (objectHit(x, y)) ctx.markCommittedDirty()
       }
       if (swept.size > 0) opts.callbacks.onErase([...swept])
       swept.clear()

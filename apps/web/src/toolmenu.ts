@@ -82,27 +82,39 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
   }
   root.appendChild(toolsRow)
 
-  // VIEW section.
+  // VIEW section — pen-friendly pills, matching the TOOL / BRUSH rows.
   root.appendChild(separator())
   root.appendChild(sectionLabel('View'))
-  root.appendChild(
-    fullItem('Reset zoom', () => {
-      dismiss()
-      opts.onResetZoom()
+  const viewRow = pillRow()
+  viewRow.appendChild(
+    pill({
+      label: 'Reset zoom',
+      onClick: () => {
+        dismiss()
+        opts.onResetZoom()
+      },
     }),
   )
-  root.appendChild(
-    fullItem('Fit to view', () => {
-      dismiss()
-      opts.onZoomToFit()
+  viewRow.appendChild(
+    pill({
+      label: 'Fit to view',
+      onClick: () => {
+        dismiss()
+        opts.onZoomToFit()
+      },
     }),
   )
-  root.appendChild(
-    fullItem('Grid options…', () => {
-      dismiss()
-      openOptionsMenu(opts.at)
+  viewRow.appendChild(
+    pill({
+      label: 'Grid…',
+      title: 'Grid options',
+      onClick: () => {
+        dismiss()
+        openOptionsMenu(opts.at)
+      },
     }),
   )
+  root.appendChild(viewRow)
 
   // Destructive — at the bottom, separated.
   root.appendChild(separator())

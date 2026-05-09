@@ -29,6 +29,14 @@ export interface ToolContext {
   dpr: number
   /** Resolve a brush-color token (e.g. `'ink'`) to a CSS color. */
   resolveColor(token: string): string
+  /**
+   * Tools that mutate the strokes array in place (wipe-eraser doing
+   * progressive deletion during a sweep, future move/edit tools) call this
+   * to ask the orchestrator to re-render the committed layer on the next
+   * frame. The undo / redo op is still emitted separately via the tool's
+   * own callback path.
+   */
+  markCommittedDirty(): void
 }
 
 export type ToolId = 'pen' | 'eraser' | 'lasso' | 'laser' | 'text'

@@ -208,6 +208,9 @@ async function main(): Promise<void> {
     camera,
     dpr: target.dpr,
     resolveColor: resolveInkColor,
+    markCommittedDirty: () => {
+      committedDirty = true
+    },
   }
 
   // ---------------------------------------------------------------------

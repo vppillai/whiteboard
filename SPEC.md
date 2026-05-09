@@ -15,6 +15,7 @@ When a feature trades latency, visual minimalism, or pen-friendliness for capabi
 - **Pen-friendly takes precedence** over mouse / keyboard convenience. If the pen path is awkward, fix it even if it makes the keyboard path slightly less direct.
 - **Cleanups are part of the deliverable.** Architectural debt that produces sluggishness, glitches, or muddled state is treated as a milestone-critical bug, not a "later" item.
 - **Discovery via shortcuts and tooltips, not tutorials.** New users figure things out by trying, not by reading. The right-click tool menu, the `?` help overlay, the keyboard shortcuts are first-class onboarding. Walkthroughs and intro modals are not.
+- **The architecture enforces the tenet.** "Snappy" isn't asserted in a checklist — it's a structural property of the build: pointer dispatch is sync; the live layer renders inside the input handler (not RAF); each tool owns its render so cross-tool concerns can't accumulate latency; perfect-freehand math is cached per stroke; the committed layer culls off-viewport strokes; every contextual menu section is owned by the surface that needs it (so menus can't grow into walls of pills). When a regression appears, the fix lives in the layer that owns it — not as a special-case in main.
 
 These aren't aspirational bullets. They are the test every design decision in this project is held against.
 
