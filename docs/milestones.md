@@ -13,6 +13,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | M1.5 | Popover primitive · color picker · options menu · configurable grid    | ⬜     |
 | M1.4 | Refactor pass: tool abstraction, op-based undo, soft-delete, decompose main.ts | ⬜ |
 | M1 | Eraser, lasso, additional brush presets                                  | ⬜     |
+| M1.7 | Settings side panel + sync-ready schema (brush presets, fonts, swatches) | ⬜  |
 | M2 | Toolbar UI, keyboard shortcuts, export                                   | ⬜     |
 | M3 | Server, sync, room URLs                                                  | ⬜     |
 | M4 | Production deployment polish                                             | ⬜     |
@@ -124,6 +125,35 @@ The toolbar UI is **explicitly held back to M2** so this milestone stays tight (
 - **Perf-at-scale gate**: `?perftest=scale&n=500` keeps pan / zoom under the 16 ms frame budget. If we miss, that's the WebGL trigger and an ADR.
 - **Feel-test gate** on the target hardware (Wacom Intuos): user signs off that the new tools feel right.
 - Architecture doc § 6 updated; CHANGELOG entry; per-tool notes as needed.
+
+### M1.7 — Settings side panel + sync-ready schema ⬜
+
+**Why this exists.** User wants a discoverable settings surface — a side panel with controls for brush presets (sizes, opacities), text fonts (for the Text tool when it lands), and custom user-defined color swatches beyond the curated palette. Longer-term, those settings will sync to a backend after user login lands. Designing the data model now (versioned, ID-keyed, serializable) avoids a breaking migration when sync arrives.
+
+**Scope.**
+
+- **Side panel UI.** Slide-in from one edge (right is the typical default), pen-friendly hit targets, dismissible. Lives alongside the existing popover system but is a longer-lived surface — opened deliberately via keyboard or the tool menu, closed deliberately. Sections: **Brush presets**, **Custom swatches**, **Fonts** (placeholder for Text tool), **Grid** (move from the popover here?), **Theme**, **Advanced**.
+- **`settings.ts` schema redesign**:
+  - Versioned root (`{ schemaVersion: 1, ... }`).
+  - Brush presets as a keyed map: `{ presets: Record<string, BrushPreset>, activePresetId: string }`.
+  - Custom swatches as `string[]` (user-added hex colors that show in the color picker alongside the curated palette).
+  - Fonts (for the Text tool) as `string[]`.
+  - Reserved fields for future sync: `syncedAt?: number`, `remoteId?: string`.
+  - Migration path from the current schema (color + grid).
+- **No backend.** No user login, no remote sync, no auth. Local-only storage. The schema fields are *placeholders* the future sync layer will fill in.
+- **ADR 0007** — settings data model design (sync-readiness, migration strategy).
+
+**Exit criteria.**
+
+- Side panel toggleable (likely a key like `S` and a tool-menu entry).
+- Brush size adjustable from the panel; immediately reflects in the active brush.
+- Custom swatch addable (small "+" tile in the color picker that opens a hex input or color sampler); shows alongside the curated palette and persists.
+- Theme selector and grid options accessible from the panel (in addition to existing popovers — gives people who prefer panels a single place to find everything).
+- Schema version field present; loading old `whiteboard:settings` localStorage data migrates cleanly.
+- ADR 0007 written; architecture as-built and SPEC § 10 updated; CHANGELOG entry.
+- Tagged commit `m1.7-settings-panel`.
+
+**Future sync (post-M1.7, post-v1):** when a backend lands, the settings store gets a "synced" boolean per record and conflict resolution (last-write-wins or per-field merge). That work is *not* in M1.7's scope — just the schema design that won't need to break.
 
 ### M2 — Toolbar UI, settings, export ⬜
 
