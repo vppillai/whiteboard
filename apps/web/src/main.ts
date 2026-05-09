@@ -10,7 +10,7 @@
  *   Cmd/Ctrl + Shift + Z — redo (also Cmd/Ctrl + Y).
  *   Cmd/Ctrl + 0 — reset zoom.
  *   Cmd/Ctrl + +/- — zoom in / out.
- *   Cmd/Ctrl + Shift + Backspace — clear board (press twice within 3 s).
+ *   Cmd/Ctrl + Shift + C — clear board (press twice within 3 s; Esc cancels).
  *   Esc — cancel a pending action (e.g. clear-confirm).
  *
  * Pointer:
@@ -296,7 +296,7 @@ async function main(): Promise<void> {
       })
       return
     }
-    showToast('Press <b>⌘/Ctrl + Shift + Backspace</b> again to clear · <b>Esc</b> cancels')
+    showToast('Press <b>⌘/Ctrl + Shift + C</b> again to clear · <b>Esc</b> cancels')
     clearTimer = setTimeout(cancelClearConfirm, CLEAR_CONFIRM_MS)
   }
 
@@ -361,7 +361,7 @@ async function main(): Promise<void> {
       committedDirty = true
       return
     }
-    if (meta && e.shiftKey && e.key === 'Backspace') {
+    if (meta && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'c') {
       e.preventDefault()
       requestClear()
       return
@@ -462,7 +462,7 @@ function createHelp(): Help {
     '?                  toggle this help',
     '⌘/Ctrl + 0         reset zoom',
     '⌘/Ctrl + +/-       zoom in/out',
-    '⌘/Ctrl + Shift + ⌫ clear board (confirm twice)',
+    '⌘/Ctrl + Shift + C clear board (confirm twice)',
     '',
     'wheel / 2-finger   pan',
     '⌘/Ctrl + wheel     zoom',

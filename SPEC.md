@@ -166,7 +166,7 @@ Floating, draggable, dockable to any edge. Compact (icon-only) with hover labels
 | `Cmd/Ctrl + =` / `-`           | Zoom in / out                             | ✅     |
 | `Cmd/Ctrl + A`                 | Select all                                | M1     |
 | `Delete` / `Backspace`         | Delete selected                           | M1     |
-| `Cmd/Ctrl + Shift + Backspace` | Clear board (confirm)                     | ✅     |
+| `Cmd/Ctrl + Shift + C`         | Clear board (confirm twice within 3 s)    | ✅     |
 | `M`                            | Toggle metrics HUD                        | ✅     |
 | `T`                            | Cycle theme (system → light → dark)       | ✅     |
 | `F`                            | Toggle fullscreen / hide UI               | M2     |
