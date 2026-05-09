@@ -10,6 +10,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 |----|--------------------------------------------------------------------------|--------|
 | —  | Repo + dev / deploy environment                                          | ✅     |
 | M0 | Drawing core: latency, pan/zoom, theme, local persistence, undo/redo     | ✅ *(closed 2026-05-09; tagged `m0-drawing-core`)* |
+| M1.5 | Popover primitive · color picker · options menu · configurable grid    | ⬜     |
 | M1 | Eraser, lasso, additional brush presets                                  | ⬜     |
 | M2 | Toolbar UI, keyboard shortcuts, export                                   | ⬜     |
 | M3 | Server, sync, room URLs                                                  | ⬜     |
@@ -63,6 +64,28 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 - [ ] **Pen-to-photon during drag with prediction: ≤ 33 ms.** Validate on Intuos.
 - [ ] **No dropped Wacom samples at 200 Hz on a 60 Hz display.** HUD `samples / event` should average > 1 during fast strokes.
 - [ ] ADR added if the latency work surfaces an architectural choice.
+
+### M1.5 — Popover primitive · color picker · options · grid config ⬜
+
+**Why this exists** (out of order: it ships *before* M1). The user feel-test of M0 surfaced three asks at once — quick color picking, configurable grid / ruled paper, and a discoverable settings surface. All three want the same UI primitive: a **popover anchored at the pointer, dismissible, optionally pinnable**. Building that primitive once and reusing it three ways is much cleaner than the three ad-hoc popovers we'd otherwise grow into. Doing it before M1 means the eraser / lasso / brush-switcher tooling at M1 plugs into the existing popover system rather than getting retrofitted later.
+
+**Scope.**
+
+- **Popover primitive** (`apps/web/src/popover.ts`). Anchored at a client point, viewport-clamped, pin / close in the header, Esc + click-outside dismiss, single-instance arbitration (opening another closes the previous unless pinned).
+- **Color picker popover** (`apps/web/src/colorpicker.ts`). Compact 5×2 swatch grid: the theme `ink` token plus nine curated accent colors (red, orange, yellow, green, cyan, blue, purple, pink, gray). Inline row of "recent colors" (max 6) below. Click selects → applies to the active brush → dismisses (unless pinned). `C` opens it at the current pointer position.
+- **Options popover** (`apps/web/src/optionsmenu.ts`). Hosts grid type (dots / lines / ruled / none) and spacing (16 / 24 / 32 / 48 px). `O` opens it at the current pointer position. Same primitive, same pin behavior, room to grow as more settings show up at M2.
+- **Configurable grid renderer** (`apps/web/src/grid.ts`). Extends from the M0 dot grid to support all four types and configurable spacing; reads from a settings module.
+- **Settings module** (`apps/web/src/settings.ts`). Holds current brush color, recent colors, and grid config. Persists to localStorage. Emits a change event so the renderer redraws.
+
+**Exit criteria.**
+
+- All four grid types render correctly at all four spacings; switching is immediate and persistent across reloads.
+- Color picker opens at the pointer; selecting a color applies to the next stroke; pinning keeps the popover after selection; recent-colors row updates correctly and persists across reloads.
+- Theme cycle (`T`) still works — `ink` strokes update with theme; literal-color strokes don't.
+- Bundle stays under 30 KB raw / 12 KB gz (popover + picker + options should add ~3–4 KB gz).
+- **Feel-test gate**: pen interaction with the popovers feels right (hit targets are pen-friendly; popovers don't get in the way of drawing; pinning behavior matches expectation).
+- `docs/architecture.md` § 6 updated; CHANGELOG entry; per-module notes as needed.
+- Tagged commit `m1.5-popover-foundation`.
 
 ### M1 — Eraser + lasso + brush presets ⬜
 

@@ -48,13 +48,17 @@ Key submodules:
 | `stroke.ts`     | M0 ✅    | Stroke geometry via `perfect-freehand`; pressure curve.  |
 | `render.ts`     | M0 ✅    | Two-canvas render loop with camera transform.            |
 | `camera.ts`     | M0 ✅    | Pan / zoom state; screen ↔ board coordinate math.        |
-| `grid.ts`       | M0 ✅    | Subtle dot grid in screen space.                         |
+| `grid.ts`       | M1.5 ✅  | Configurable grid (dots / lines / ruled / none + spacing). |
 | `theme.ts`      | M0 ✅    | Light / dark / system themes; theme-aware "ink" color.   |
 | `metrics.ts`    | M0 ✅    | Live FPS / events / samples / event→frame HUD.           |
 | `perftest.ts`   | M0 ✅    | Synthetic stroke harness; reports JS-side latency.       |
 | `storage.ts`    | M0 ✅    | Local persistence via IndexedDB.                         |
+| `settings.ts`   | M1.5 ✅  | Brush color, recent colors, grid config; localStorage.   |
+| `popover.ts`    | M1.5 ✅  | Anchored, viewport-clamped, pinnable popover primitive.  |
+| `colorpicker.ts`| M1.5 ✅  | Color picker popover content (swatches + recent).        |
+| `optionsmenu.ts`| M1.5 ✅  | Options popover content (grid type, spacing).            |
 | `tools/`        | M1 ⬜    | Brush, eraser, lasso, pan tool implementations.          |
-| `ui/`           | M2 ⬜    | Floating toolbar, palette, settings, shortcut help.      |
+| `ui/`           | M2 ⬜    | Floating toolbar, full settings panel, shortcut help.    |
 | `sync/`         | M3 ⬜    | Y.Doc binding; WebSocket transport; presence.            |
 | `export/`       | M2 ⬜    | PNG / SVG / PDF serialization.                           |
 | `ai/`           | v2 ⬜    | Shape recognition, HTR, math — `transformers.js`.        |
@@ -184,6 +188,9 @@ This section reflects what is *actually in the code right now*. It is updated at
 | Metrics HUD + perftest            | ✅ Complete    | `M` to toggle; `?perftest=1` runs synthetic harness.     |
 | Brushes (marker / pencil / etc.)  | ❌ Not started | M1.                                                      |
 | **Undo / redo**                   | ✅ Complete    | Pulled forward from M1; per-stroke LIFO; in-memory redo. |
+| **Color picker** (popover at pointer) | ✅ Complete | M1.5; swatches + recent colors; pin to keep open.        |
+| **Options menu** (popover)        | ✅ Complete    | M1.5; grid type + spacing.                               |
+| **Configurable grid**             | ✅ Complete    | M1.5; dots / lines / ruled / none.                       |
 | Eraser, lasso                     | ❌ Not started | M1.                                                      |
 | Floating toolbar / palette        | ❌ Not started | M2.                                                      |
 | Pressure curve UI                 | ❌ Not started | M2.                                                      |

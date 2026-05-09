@@ -201,3 +201,172 @@ body {
   color: var(--banner-fg);
   font-weight: 600;
 }
+
+/* ---- Popover primitive ----------------------------------------------- */
+
+.whiteboard-popover {
+  position: fixed;
+  background: var(--banner-bg);
+  color: var(--banner-fg);
+  border: 1px solid var(--hud-border);
+  border-radius: 12px;
+  box-shadow: var(--banner-shadow);
+  backdrop-filter: blur(10px) saturate(1.2);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  z-index: 1500;
+  pointer-events: auto;
+  font: 12px / 1.4 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+  min-width: 220px;
+  max-width: 320px;
+  overflow: hidden;
+}
+
+.whiteboard-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 8px 14px;
+  border-bottom: 1px solid var(--hud-border);
+}
+
+.whiteboard-popover-title {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+
+.whiteboard-popover-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.whiteboard-popover-icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s;
+}
+
+.whiteboard-popover-icon-btn:hover {
+  background: var(--pill-bg);
+  color: var(--banner-fg);
+}
+
+.whiteboard-popover-pin.pinned {
+  background: var(--pill-bg);
+  color: var(--banner-fg);
+}
+
+.whiteboard-popover-section-label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  margin: 10px 0 6px;
+}
+
+.whiteboard-popover-section-label:first-child {
+  margin-top: 0;
+}
+
+/* ---- Color picker ---------------------------------------------------- */
+
+.whiteboard-color-picker {
+  padding: 14px;
+}
+
+.whiteboard-color-palette {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+.whiteboard-color-swatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--hud-border);
+  cursor: pointer;
+  padding: 0;
+  background: transparent;
+  transition: transform 0.08s, box-shadow 0.12s;
+}
+
+.whiteboard-color-swatch:hover {
+  transform: scale(1.08);
+}
+
+.whiteboard-color-swatch.active {
+  box-shadow: 0 0 0 2px var(--banner-bg), 0 0 0 4px var(--banner-fg);
+}
+
+.whiteboard-color-swatch-ink {
+  background: var(--ink);
+}
+
+.whiteboard-color-recent {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hud-border);
+}
+
+.whiteboard-color-recent-list {
+  display: flex;
+  gap: 8px;
+}
+
+.whiteboard-color-recent-empty {
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+/* ---- Options menu ---------------------------------------------------- */
+
+.whiteboard-options {
+  padding: 14px;
+  min-width: 240px;
+}
+
+.whiteboard-options-section + .whiteboard-options-section {
+  margin-top: 12px;
+}
+
+.whiteboard-options-pills {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.whiteboard-options-pill {
+  background: var(--pill-bg);
+  color: var(--banner-fg);
+  border: 1px solid var(--hud-border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+  letter-spacing: 0.01em;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.whiteboard-options-pill:hover {
+  background: var(--hud-border);
+}
+
+.whiteboard-options-pill.active {
+  background: var(--banner-fg);
+  color: var(--banner-bg);
+  border-color: var(--banner-fg);
+}

@@ -44,7 +44,16 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 ### Added
 
-- **Cross-device panning**: spacebar-held drag pans on any pointer device (pen, mouse, trackpad). Middle-mouse-button drag also pans (for Wacom users who map a pen barrel-button to middle-click via the tablet driver). Cursor switches to grab/grabbing accordingly via the `[data-input]` CSS hook. Wheel and trackpad two-finger pan still work, unchanged.
+#### Milestone M1.5 — popover foundation
+
+- **Popover primitive** (`popover.ts`). Anchored at a client point, viewport-clamped, with a header containing pin and close buttons. Multiple popovers may be open simultaneously; pinning keeps a popover alive across click-outside and selection events. `Esc` and the close button always dismiss.
+- **Color picker** (`C` to open at pointer). 5×2 swatch grid: theme `ink` token plus nine curated accent colors that read on both light and dark backgrounds. Selection sets the brush color and dismisses unless pinned. Inline "recent colors" row updates on selection, persists across reloads (max 6).
+- **Options menu** (`O` to open at pointer). Grid type selector (dots / lines / ruled / none) and spacing pills (16 / 24 / 32 / 48 px). Defaults to pinned because options are usually adjusted iteratively.
+- **Configurable grid renderer** (`grid.ts`). Square-line and ruled (horizontal-only) grids in addition to the existing dot grid; reads from the settings store. None disables the grid entirely.
+- **Settings module** (`settings.ts`). Single source of truth for current brush color, recent colors, and grid configuration. Persists to localStorage. Subscribers notified synchronously on change so the renderer can mark itself dirty.
+- Help overlay updated; `Esc` now closes any open popover (and still cancels a pending clear-confirm).
+
+#### Milestone M0 — drawing core (closed)
 - **Undo / redo** for stroke creation. `Cmd/Ctrl+Z` undoes; `Cmd/Ctrl+Shift+Z` (or `Cmd/Ctrl+Y` for Windows muscle-memory) redoes. Redo history clears whenever a new stroke is committed and is not persisted across reloads — matches every other drawing tool. Undone strokes are removed from the IndexedDB store; redoing re-persists them.
 - Help overlay (`?`) refreshed with the new pan and undo options.
 - GPU compositor hints on canvas elements (`transform: translateZ(0)`, `will-change: transform`) so the present-to-screen path doesn't repaint neighbouring DOM. The 2D canvas was already GPU-composited; this just makes each layer its own compositor surface.

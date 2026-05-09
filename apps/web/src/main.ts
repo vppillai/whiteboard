@@ -24,23 +24,23 @@
 import './style.css'
 import type { BrushConfig, Sample, Stroke } from '@whiteboard/shared'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
+import { openColorPicker } from './colorpicker'
 import { drawGrid } from './grid'
 import { MetricsCollector, bindHudToggle, createHud } from './metrics'
+import { openOptionsMenu } from './optionsmenu'
 import { runPerftest } from './perftest'
 import { attachPointer } from './pointer'
+import { dismissAllPopovers } from './popover'
 import { applyCamera, clearLayer, drawStrokePath, setupCanvas } from './render'
+import { getColor, getSettings, onChange as onSettingsChange } from './settings'
 import { clearAllStrokes, deleteStroke, loadAllStrokes, saveStroke } from './storage'
 import { getStrokePath } from './stroke'
 import { cycleMode, getEffective, getMode, initTheme, resolveInkColor } from './theme'
 
-// Default brush. Tuned for a felt-marker feel: slightly thicker than a fine
-// technical pen, smoother outline, less pressure-driven thinning. Streamline
-// is kept low because it trades latency for smoothing — high streamline makes
-// the wet ink visibly trail the pen. Opacity is < 1 so overlapping strokes
-// layer subtly, which reads as "real ink" rather than digital fill.
-const PEN_BRUSH: BrushConfig = {
+// Default brush shape. Color is supplied at stroke-start time from the settings
+// store so the color picker can change it dynamically.
+const PEN_BRUSH_BASE: Omit<BrushConfig, 'color'> = {
   size: 3.5,
-  color: 'ink',
   thinning: 0.45,
   smoothing: 0.72,
   streamline: 0.4,
@@ -51,6 +51,8 @@ const PEN_BRUSH: BrushConfig = {
   pressureGamma: 1.7,
   opacity: 0.94,
 }
+
+const makeBrush = (): BrushConfig => ({ ...PEN_BRUSH_BASE, color: getColor() })
 
 const ZOOM_WHEEL_FACTOR = 1.0015 // per pixel of deltaY when zooming
 
@@ -192,7 +194,7 @@ async function main(): Promise<void> {
   })
 
   const detachPointer = attachPointer(root, {
-    getBrush: () => PEN_BRUSH,
+    getBrush: makeBrush,
     toBoard,
     usePrediction,
     shouldSkip: isPanIntent,
@@ -221,12 +223,20 @@ async function main(): Promise<void> {
     },
   })
 
-  // Metrics: separate pointermove listener so the HUD reflects the actual
-  // coalesced sample count, regardless of stroke state.
+  // Metrics + last-pointer tracking: a separate pointermove listener so the
+  // HUD reflects the actual coalesced sample count regardless of stroke state,
+  // and so popover keyboard shortcuts can anchor at the most recent pointer.
+  let lastPointer = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
   root.addEventListener('pointermove', (e) => {
     if (!(e instanceof PointerEvent)) return
+    lastPointer = { x: e.clientX, y: e.clientY }
     const coalesced = e.getCoalescedEvents().length || 1
     metrics.notePointerEvent(coalesced)
+  })
+  document.addEventListener('pointermove', (e) => {
+    // Track even outside the canvas so popovers anchor sensibly when the user
+    // moves between the pen and the keyboard.
+    lastPointer = { x: e.clientX, y: e.clientY }
   })
 
   // Wheel: pan (plain) or zoom (Cmd/Ctrl/pinch).
@@ -254,6 +264,11 @@ async function main(): Promise<void> {
     pill.update()
   })
   pill.update()
+
+  // Settings change: grid type / spacing / color affects what's rendered.
+  onSettingsChange(() => {
+    committedDirty = true
+  })
 
   // Clear-board confirmation: first key press primes; second press within
   // CLEAR_CONFIRM_MS clears. Esc cancels. A native confirm() modal is jarring;
@@ -367,15 +382,28 @@ async function main(): Promise<void> {
       return
     }
     if (e.key === 'Escape') {
+      let handled = false
       if (clearTimer) {
         cancelClearConfirm()
-        e.preventDefault()
+        handled = true
       }
+      if (dismissAllPopovers()) handled = true
+      if (handled) e.preventDefault()
       return
     }
-    if (e.key === 't' && !meta && !e.altKey) {
+    if (e.key === 't' && !meta && !e.altKey && !e.repeat) {
       cycleMode()
       pill.update()
+      return
+    }
+    if (e.key === 'c' && !meta && !e.altKey && !e.repeat) {
+      e.preventDefault()
+      openColorPicker(lastPointer)
+      return
+    }
+    if (e.key === 'o' && !meta && !e.altKey && !e.repeat) {
+      e.preventDefault()
+      openOptionsMenu(lastPointer)
       return
     }
     if (e.key === '?' || (e.shiftKey && e.key === '/')) {
@@ -392,7 +420,7 @@ async function main(): Promise<void> {
 
     if (committedDirty) {
       clearLayer(target.committed)
-      drawGrid(target.committed, camera, target.width, target.height)
+      drawGrid(target.committed, camera, target.width, target.height, getSettings().grid)
       applyCamera(target.committed, camera, target.dpr)
       for (const s of strokes) {
         const path = getStrokePath(s, [], true)
@@ -454,21 +482,25 @@ function createHelp(): Help {
   el.id = 'whiteboard-help'
   el.style.display = 'none'
   el.textContent = [
+    'C                  color picker (at pointer)',
+    'O                  options (grid type, spacing)',
+    '',
     '⌘/Ctrl + Z         undo',
     '⌘/Ctrl + Shift + Z redo   (also ⌘/Ctrl + Y)',
+    '⌘/Ctrl + Shift + C clear board (confirm twice)',
     '',
     'M                  toggle metrics',
     'T                  cycle theme',
     '?                  toggle this help',
+    '',
     '⌘/Ctrl + 0         reset zoom',
     '⌘/Ctrl + +/-       zoom in/out',
-    '⌘/Ctrl + Shift + C clear board (confirm twice)',
-    '',
     'wheel / 2-finger   pan',
     '⌘/Ctrl + wheel     zoom',
     'pinch              zoom',
     'space + drag       pan (any device)',
     'middle-mouse drag  pan',
+    'Esc                close popover / cancel',
   ].join('\n')
   const toggle = () => {
     el.style.display = el.style.display === 'none' ? 'block' : 'none'
@@ -489,7 +521,7 @@ async function runPerfMode(
 
   const synth: Stroke = {
     id: 'perftest',
-    brush: PEN_BRUSH,
+    brush: makeBrush(),
     samples: [],
     startedAt: performance.now(),
   }
