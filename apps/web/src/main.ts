@@ -28,6 +28,7 @@ import { createClearFlow } from './clearflow'
 import { openColorPicker } from './colorpicker'
 import { drawGrid } from './grid'
 import { createHelpOverlay } from './helpoverlay'
+import { attachKeymap } from './keymap'
 import { MetricsCollector, bindHudToggle, createHud } from './metrics'
 import { openOptionsMenu } from './optionsmenu'
 import { attachPan } from './pan'
@@ -311,74 +312,38 @@ async function main(): Promise<void> {
     })
   }
 
-  // Keyboard shortcuts.
-  document.addEventListener('keydown', (e) => {
-    const meta = e.metaKey || e.ctrlKey
-    if (meta && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
-      e.preventDefault()
-      undo()
-      return
-    }
-    if (meta && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
-      e.preventDefault()
-      redo()
-      return
-    }
-    if (meta && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'y') {
-      // Cmd/Ctrl+Y is the Windows convention for redo.
-      e.preventDefault()
-      redo()
-      return
-    }
-    if (meta && e.key === '0') {
-      e.preventDefault()
+  attachKeymap({
+    undo,
+    redo,
+    zoomReset: () => {
       resetZoom(camera)
       onCameraChange()
-      return
-    }
-    if (meta && (e.key === '=' || e.key === '+')) {
-      e.preventDefault()
+    },
+    zoomIn: () => {
       zoomAt(camera, target.width / 2, target.height / 2, 1.2)
       onCameraChange()
-      return
-    }
-    if (meta && e.key === '-') {
-      e.preventDefault()
+    },
+    zoomOut: () => {
       zoomAt(camera, target.width / 2, target.height / 2, 1 / 1.2)
       onCameraChange()
-      return
-    }
-    if (meta && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
-      e.preventDefault()
-      clearFlow.request()
-      return
-    }
-    if (e.key === 'Escape') {
+    },
+    clear: clearFlow.request,
+    toggleTheme: cycleMode,
+    toggleColor: () => {
+      if (getActiveTag() === 'color') dismissAllPopovers()
+      else openColorPicker(lastPointer)
+    },
+    toggleOptions: () => {
+      if (getActiveTag() === 'options') dismissAllPopovers()
+      else openOptionsMenu(lastPointer)
+    },
+    toggleHelp: help.toggle,
+    cancel: () => {
       let handled = false
       if (clearFlow.cancel()) handled = true
       if (dismissAllPopovers()) handled = true
-      if (handled) e.preventDefault()
-      return
-    }
-    if (e.key === 't' && !meta && !e.altKey && !e.repeat) {
-      cycleMode()
-      return
-    }
-    if (e.key === 'c' && !meta && !e.altKey && !e.repeat) {
-      e.preventDefault()
-      if (getActiveTag() === 'color') dismissAllPopovers()
-      else openColorPicker(lastPointer)
-      return
-    }
-    if (e.key === 'o' && !meta && !e.altKey && !e.repeat) {
-      e.preventDefault()
-      if (getActiveTag() === 'options') dismissAllPopovers()
-      else openOptionsMenu(lastPointer)
-      return
-    }
-    if (e.key === '?' || (e.shiftKey && e.key === '/')) {
-      help.toggle()
-    }
+      return handled
+    },
   })
 
   // Render loop. The committed layer is rebuilt only when something invalidates
