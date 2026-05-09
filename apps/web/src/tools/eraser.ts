@@ -1,33 +1,37 @@
 /**
- * Eraser tool. Stroke-hit erasing — sweeping the eraser across a stroke marks
- * it for soft-deletion (Stroke.deleted = true). Operates on whole strokes, not
- * pixels; matches the SPEC.md design.
+ * Eraser tool. Stroke-hit erasing — operates on whole strokes via the
+ * `Stroke.deleted` soft-delete flag (ADR 0006); never splits stroke geometry.
  *
- * Behavior:
- *   - On pointerdown / pointermove the tool hit-tests the cursor against
- *     every non-deleted stroke. Any stroke whose path passes within
- *     `radius + stroke.brush.size/2` of the cursor gets queued for erasure.
- *   - The hit set accumulates throughout the gesture; on pointerup, the
- *     accumulated ids become a single `delete` op (so the user undoes the
- *     whole sweep with one Cmd+Z, not stroke-by-stroke).
- *   - The tool emits `onCursorMove` for live cursor rendering and
- *     `onCursorEnd` so the renderer can clear it.
+ * Two modes, locked at pointerdown by Shift state:
  *
- * Performance: O(eraser_path_length × strokes × samples_per_stroke). Stroke
- * clipping (M1, separate task) cuts this proportionally to viewport size.
- * For typical hundreds-of-strokes boards this is comfortably under-budget.
+ *   - **Wipe** (default): drag-through. Every stroke whose path passes within
+ *     `(radius + stroke.brush.size/2)` of the eraser cursor gets queued. On
+ *     pointerup, the whole queue becomes one delete op.
+ *
+ *   - **Object** (Shift held at pointerdown): a single tap deletes the
+ *     **topmost** stroke under the cursor (and only that one). No sweep
+ *     accumulation. Surgical removal without touching neighbouring strokes.
+ *
+ * The cursor visual differentiates the modes — wipe is just the red circle,
+ * object adds a small filled center dot (target reticle).
+ *
+ * Performance: O(eraser_path_length × strokes × samples_per_stroke) for wipe,
+ * O(strokes × samples) for object. Stroke clipping (M1) cuts both
+ * proportionally to viewport size.
  */
 
 import type { Stroke } from '@whiteboard/shared'
 import type { Tool, ToolContext } from './types'
+
+export type EraserMode = 'wipe' | 'object'
 
 export interface EraserToolCallbacks {
   /** Returns the live strokes list. Called on each hit-test. */
   getStrokes: () => readonly Stroke[]
   /** Emit a delete op for the swept strokes. Called once per gesture. */
   onErase: (strokeIds: string[]) => void
-  /** Live cursor render, board coordinates. */
-  onCursorMove: (boardX: number, boardY: number, radius: number) => void
+  /** Live cursor render, board coordinates. Mode passed for visual differentiation. */
+  onCursorMove: (boardX: number, boardY: number, radius: number, mode: EraserMode) => void
   /** Cursor cleared. */
   onCursorEnd: () => void
 }
@@ -41,13 +45,28 @@ export interface EraserToolOptions {
 export function createEraserTool(opts: EraserToolOptions): Tool {
   const swept = new Set<string>()
   let active = false
+  let mode: EraserMode = 'wipe'
 
-  const handlePoint = (boardX: number, boardY: number): void => {
+  /** Wipe-mode hit: accumulate every match within tolerance. */
+  const sweepHit = (px: number, py: number): void => {
     for (const stroke of opts.callbacks.getStrokes()) {
       if (stroke.deleted) continue
       if (swept.has(stroke.id)) continue
-      if (strokeNearPoint(stroke, boardX, boardY, opts.radius)) {
+      if (strokeNearPoint(stroke, px, py, opts.radius)) {
         swept.add(stroke.id)
+      }
+    }
+  }
+
+  /** Object-mode hit: take only the topmost match (last in the strokes array). */
+  const objectHit = (px: number, py: number): void => {
+    const strokes = opts.callbacks.getStrokes()
+    for (let i = strokes.length - 1; i >= 0; i--) {
+      const stroke = strokes[i]
+      if (!stroke || stroke.deleted || swept.has(stroke.id)) continue
+      if (strokeNearPoint(stroke, px, py, opts.radius)) {
+        swept.add(stroke.id)
+        return
       }
     }
   }
@@ -64,30 +83,42 @@ export function createEraserTool(opts: EraserToolOptions): Tool {
     onPointerDown(e, ctx) {
       const { x, y } = ctx.toBoard(e.clientX, e.clientY)
       active = true
+      mode = e.shiftKey ? 'object' : 'wipe'
       swept.clear()
-      handlePoint(x, y)
-      opts.callbacks.onCursorMove(x, y, opts.radius)
+      if (mode === 'wipe') {
+        sweepHit(x, y)
+      }
+      opts.callbacks.onCursorMove(x, y, opts.radius, mode)
     },
     onPointerMove(e, ctx) {
       if (!active) {
-        // Hover: still render the cursor so the user sees where they'll erase.
+        // Hover: render the cursor so the user sees where they'll erase. The
+        // mode here is the *prospective* mode (what would happen if they
+        // pressed now) so it reflects current Shift state.
         const { x, y } = ctx.toBoard(e.clientX, e.clientY)
-        opts.callbacks.onCursorMove(x, y, opts.radius)
+        opts.callbacks.onCursorMove(x, y, opts.radius, e.shiftKey ? 'object' : 'wipe')
         return
       }
-      const coalesced = e.getCoalescedEvents()
-      const events = coalesced.length > 0 ? coalesced : [e]
-      for (const ce of events) {
-        const { x, y } = ctx.toBoard(ce.clientX, ce.clientY)
-        handlePoint(x, y)
+      if (mode === 'wipe') {
+        const coalesced = e.getCoalescedEvents()
+        const events = coalesced.length > 0 ? coalesced : [e]
+        for (const ce of events) {
+          const { x, y } = ctx.toBoard(ce.clientX, ce.clientY)
+          sweepHit(x, y)
+        }
       }
+      // Object mode: don't accumulate during move; only commit at pointerup.
       const last = ctx.toBoard(e.clientX, e.clientY)
-      opts.callbacks.onCursorMove(last.x, last.y, opts.radius)
+      opts.callbacks.onCursorMove(last.x, last.y, opts.radius, mode)
     },
-    onPointerUp(_e, _ctx) {
+    onPointerUp(e, ctx) {
       if (!active) return
       active = false
       opts.callbacks.onCursorEnd()
+      if (mode === 'object') {
+        const { x, y } = ctx.toBoard(e.clientX, e.clientY)
+        objectHit(x, y)
+      }
       if (swept.size > 0) opts.callbacks.onErase([...swept])
       swept.clear()
     },

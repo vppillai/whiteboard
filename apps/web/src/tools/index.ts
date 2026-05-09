@@ -4,4 +4,5 @@ export {
   createEraserTool,
   type EraserToolCallbacks,
   type EraserToolOptions,
+  type EraserMode,
 } from './eraser'

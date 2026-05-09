@@ -11,7 +11,8 @@ export interface HelpOverlay {
 
 const SHORTCUTS = [
   'right-click        tool menu (pen-friendly)',
-  'B / E              tool: brush / eraser',
+  'B / E              tool: draw / eraser',
+  'Shift + erase      object mode (single stroke per click)',
   '1 – 5              brush preset (pen / marker / pencil / hi / brush)',
   'C                  color picker (at pointer)',
   'O                  options (grid type, spacing)',

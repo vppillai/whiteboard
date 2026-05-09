@@ -50,7 +50,7 @@ import { clearAllStrokes, loadAllStrokes, saveStroke } from './storage'
 import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { openToolMenu } from './toolmenu'
-import { type Tool, type ToolId, createEraserTool, createPenTool } from './tools'
+import { type EraserMode, type Tool, type ToolId, createEraserTool, createPenTool } from './tools'
 import { clearView, loadView, makeViewSaver } from './viewstate'
 import { fitToContent } from './zoomfit'
 
@@ -263,17 +263,30 @@ async function main(): Promise<void> {
     },
   })
 
-  // Eraser cursor renderer — draws a circle outline on the live layer.
-  const renderEraserCursor = (boardX: number, boardY: number, radius: number): void => {
+  // Eraser cursor renderer — draws a circle outline on the live layer. In
+  // object mode (Shift held) a small filled center dot is added as a target
+  // reticle so the user can tell which mode they're in at a glance.
+  const renderEraserCursor = (
+    boardX: number,
+    boardY: number,
+    radius: number,
+    mode: EraserMode,
+  ): void => {
     clearLayer(target.live)
     applyCamera(target.live, camera, target.dpr)
     const c = target.live.ctx
     c.save()
-    c.strokeStyle = 'rgba(239, 68, 68, 0.65)'
+    c.strokeStyle = 'rgba(239, 68, 68, 0.7)'
     c.lineWidth = 1.5 / camera.scale
     c.beginPath()
     c.arc(boardX, boardY, radius, 0, Math.PI * 2)
     c.stroke()
+    if (mode === 'object') {
+      c.fillStyle = 'rgba(239, 68, 68, 0.85)'
+      c.beginPath()
+      c.arc(boardX, boardY, Math.max(2 / camera.scale, 1.5), 0, Math.PI * 2)
+      c.fill()
+    }
     c.restore()
   }
 
