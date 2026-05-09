@@ -51,13 +51,16 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 - **Options menu** (`O` to open at pointer; `O` again to dismiss). Grid type selector (dots / lines / ruled / none) and spacing pills (16 / 24 / 32 / 48 px). Defaults to pinned because options are usually adjusted iteratively.
 - **Configurable grid lines now visible**. Lines and ruled grids use a separate `--grid-line` CSS token (more visible alpha) than the dot grid's `--grid-dot`. Per-pixel alpha for spread-out lines must be higher than for pixel-sized dots to read at the same overall weight; M1.5's first cut shared the value and lines were nearly invisible.
 
-### Refactored (M1.6 — tool surface; closed)
+### Refactored (M1.6 — tool surface; code complete, feel-test pending)
 
 - **Tool interface extended** (ADR 0007 supersedes 0005's interface). Each tool now owns its cursor / stroke / hover rendering AND its right-click menu section. `ToolContext` carries `liveLayer`, `camera`, `dpr`, `resolveColor` so tools render directly to the live layer without callbacks.
 - **`renderContextualMenu(host, dismiss)`** — pen owns COLOR + BRUSH; eraser owns the 4-pill ERASER section. `toolmenu.ts` becomes a dispatcher that calls `activeTool.renderContextualMenu()`.
 - **`redraw(ctx)`** — orchestrator can ask the active tool to re-render its in-flight state (e.g., during stroke when camera changes). Pen implements; eraser doesn't need it.
 - New `menu-ui.ts` with shared DOM helpers (sectionLabel / pill / swatch / pillRow / fullItem / separator / paletteGrid). Tools import from it; `toolmenu.ts` does too.
 - `main.ts`: 646 → ~500 LOC. `toolmenu.ts`: 296 → ~120 LOC. Pen / eraser tool modules grow proportionally — net structure-not-size win.
+- **Wipe-erase now deletes progressively during the sweep** (was: only at pointerup). `sweepHit` flips `Stroke.deleted` immediately on each new hit and the eraser asks for a committed-layer redraw via a new `ToolContext.markCommittedDirty()` hook. Single delete op still emits at pointerup so one undo restores the whole sweep; the op's apply is idempotent on already-deleted strokes.
+- **VIEW row uses pills** (Reset zoom · Fit to view · Grid…) matching TOOL / BRUSH / ERASER for pen-friendly consistency.
+- **SPEC § 0** now structurally enforces the snappy tenet — calls out pointer dispatch sync, live render in input handler, per-tool ownership, cached stroke math, viewport culling, per-surface menu ownership as the load-bearing structure.
 
 ### Added (M1 — eraser, brushes, polish)
 
