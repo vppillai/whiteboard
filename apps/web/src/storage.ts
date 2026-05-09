@@ -56,6 +56,16 @@ export async function loadAllStrokes(): Promise<Stroke[]> {
   })
 }
 
+export async function deleteStroke(id: string): Promise<void> {
+  const db = await getDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_STROKES, 'readwrite')
+    tx.objectStore(STORE_STROKES).delete(id)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
 export async function clearAllStrokes(): Promise<void> {
   const db = await getDb()
   return new Promise((resolve, reject) => {

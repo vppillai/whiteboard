@@ -26,7 +26,7 @@ import { MetricsCollector, bindHudToggle, createHud } from './metrics'
 import { runPerftest } from './perftest'
 import { attachPointer } from './pointer'
 import { applyCamera, clearLayer, drawStrokePath, setupCanvas } from './render'
-import { clearAllStrokes, loadAllStrokes, saveStroke } from './storage'
+import { clearAllStrokes, deleteStroke, loadAllStrokes, saveStroke } from './storage'
 import { getStrokePath } from './stroke'
 import { cycleMode, getEffective, getMode, initTheme, resolveInkColor } from './theme'
 
@@ -74,6 +74,11 @@ async function main(): Promise<void> {
 
   // Render state
   const strokes: Stroke[] = []
+  // LIFO of strokes that were undone — re-doing pops from the top. Cleared
+  // whenever a new stroke is committed (any new action invalidates redo).
+  // Not persisted: redo history dies on reload, which matches every other
+  // drawing tool.
+  const redoStack: Stroke[] = []
   let liveStroke: Stroke | null = null
   let livePredicted: Sample[] = []
   let committedDirty = true
@@ -200,6 +205,7 @@ async function main(): Promise<void> {
       },
       onStrokeCommit(stroke) {
         strokes.push(stroke)
+        redoStack.length = 0
         liveStroke = null
         livePredicted = []
         // Don't clear live here — RAF redraws committed (with this stroke
@@ -246,9 +252,45 @@ async function main(): Promise<void> {
   })
   pill.update()
 
+  const undo = (): void => {
+    const stroke = strokes.pop()
+    if (!stroke) return
+    redoStack.push(stroke)
+    committedDirty = true
+    void deleteStroke(stroke.id).catch((err) => {
+      console.warn('whiteboard/web: failed to remove stroke on undo:', err)
+    })
+  }
+
+  const redo = (): void => {
+    const stroke = redoStack.pop()
+    if (!stroke) return
+    strokes.push(stroke)
+    committedDirty = true
+    void saveStroke(stroke).catch((err) => {
+      console.warn('whiteboard/web: failed to re-persist stroke on redo:', err)
+    })
+  }
+
   // Keyboard shortcuts.
   document.addEventListener('keydown', (e) => {
     const meta = e.metaKey || e.ctrlKey
+    if (meta && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
+      e.preventDefault()
+      undo()
+      return
+    }
+    if (meta && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
+      e.preventDefault()
+      redo()
+      return
+    }
+    if (meta && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'y') {
+      // Cmd/Ctrl+Y is the Windows convention for redo.
+      e.preventDefault()
+      redo()
+      return
+    }
     if (meta && e.key === '0') {
       e.preventDefault()
       resetZoom(camera)
@@ -274,6 +316,7 @@ async function main(): Promise<void> {
     if (meta && e.shiftKey && e.key.toLowerCase() === 'k') {
       e.preventDefault()
       strokes.length = 0
+      redoStack.length = 0
       committedDirty = true
       void clearAllStrokes()
       return
@@ -359,12 +402,15 @@ function createHelp(): Help {
   el.id = 'whiteboard-help'
   el.style.display = 'none'
   el.textContent = [
+    '⌘/Ctrl + Z         undo',
+    '⌘/Ctrl + Shift + Z redo   (also ⌘/Ctrl + Y)',
+    '',
     'M                  toggle metrics',
     'T                  cycle theme',
     '?                  toggle this help',
     '⌘/Ctrl + 0         reset zoom',
     '⌘/Ctrl + +/-       zoom in/out',
-    '⌘/Ctrl+Shift+K     clear board',
+    '⌘/Ctrl + Shift + K clear board (irreversible)',
     '',
     'wheel / 2-finger   pan',
     '⌘/Ctrl + wheel     zoom',

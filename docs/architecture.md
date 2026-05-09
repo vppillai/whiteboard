@@ -183,7 +183,8 @@ This section reflects what is *actually in the code right now*. It is updated at
 | Static file serving               | ✅ Complete    | Server serves built SPA with SPA fallback + immutable cache for `/assets/*`. |
 | Metrics HUD + perftest            | ✅ Complete    | `M` to toggle; `?perftest=1` runs synthetic harness.     |
 | Brushes (marker / pencil / etc.)  | ❌ Not started | M1.                                                      |
-| Eraser, lasso, undo/redo          | ❌ Not started | M1.                                                      |
+| **Undo / redo**                   | ✅ Complete    | Pulled forward from M1; per-stroke LIFO; in-memory redo. |
+| Eraser, lasso                     | ❌ Not started | M1.                                                      |
 | Floating toolbar / palette        | ❌ Not started | M2.                                                      |
 | Pressure curve UI                 | ❌ Not started | M2.                                                      |
 | Export PNG / SVG / PDF            | ❌ Not started | M2.                                                      |

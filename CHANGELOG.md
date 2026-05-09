@@ -42,4 +42,6 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 ### Added
 
 - **Cross-device panning**: spacebar-held drag pans on any pointer device (pen, mouse, trackpad). Middle-mouse-button drag also pans (for Wacom users who map a pen barrel-button to middle-click via the tablet driver). Cursor switches to grab/grabbing accordingly via the `[data-input]` CSS hook. Wheel and trackpad two-finger pan still work, unchanged.
-- Help overlay (`?`) refreshed with the new pan options.
+- **Undo / redo** for stroke creation. `Cmd/Ctrl+Z` undoes; `Cmd/Ctrl+Shift+Z` (or `Cmd/Ctrl+Y` for Windows muscle-memory) redoes. Redo history clears whenever a new stroke is committed and is not persisted across reloads — matches every other drawing tool. Undone strokes are removed from the IndexedDB store; redoing re-persists them.
+- Help overlay (`?`) refreshed with the new pan and undo options.
+- GPU compositor hints on canvas elements (`transform: translateZ(0)`, `will-change: transform`) so the present-to-screen path doesn't repaint neighbouring DOM. The 2D canvas was already GPU-composited; this just makes each layer its own compositor surface.

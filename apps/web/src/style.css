@@ -87,6 +87,11 @@ body {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  /* Promote each canvas to its own GPU compositor layer so the present-to-
+     screen path doesn't re-upload neighbouring DOM. translateZ(0) is the
+     classic forcing function; will-change makes the intent explicit. */
+  transform: translateZ(0);
+  will-change: transform;
 }
 
 #app[data-input="pan"] {
