@@ -30,6 +30,9 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 ### Changed
 
 - Milestone scope: M0 expanded to include theme, local persistence, and pan/zoom (originally scoped to M1/M2). M1 and M2 sized down accordingly. See `docs/milestones.md`.
+- **Clear-board shortcut**: `⌘/Ctrl + Shift + K` → `⌘/Ctrl + Shift + Backspace` (more conventional for destructive-clear, less collision with editor muscle memory) and now requires a **two-step confirmation**: first press primes a 3-second toast; second press within that window actually clears. `Esc` cancels. Removes the foot-gun where a single accidental keypress wiped the board.
+- Plan refreshed against M0 learnings: `M4` trimmed (multi-stage Dockerfile, static serving, healthcheck, `deploy.sh` already shipped at M0); `process.md` adds an explicit *feel-test on target hardware* gate per milestone close, plus a `?perftest=scale` performance-at-stroke-count gate from M1 onward; `SPEC § 10` reorganized into "decided", "still open", and "backlog" (screen-tablet support, mobile / touch UX, accessibility now tracked there).
+- New ADR [0004](docs/decisions/0004-input-pipeline-tuning.md) captures the input-pipeline decisions that drove M0 feel.
 
 ### Fixed
 

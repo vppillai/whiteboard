@@ -148,23 +148,30 @@ Floating, draggable, dockable to any edge. Compact (icon-only) with hover labels
 
 ### 4.3 Keyboard shortcuts
 
-| Key            | Action                               |
-|----------------|--------------------------------------|
-| `B`            | Brush                                |
-| `E`            | Eraser                               |
-| `S`            | Select (lasso)                       |
-| `Space` (hold) | Pan                                  |
-| `1`–`5`        | Switch to brush preset 1–5           |
-| `[` / `]`      | Decrease / increase size             |
-| `Shift+[` / `]`| Cycle color palette                  |
-| `Cmd/Ctrl+Z`   | Undo                                 |
-| `Cmd/Ctrl+Shift+Z` | Redo                             |
-| `Cmd/Ctrl+0`   | Reset zoom                           |
-| `Cmd/Ctrl+=` / `-` | Zoom in / out                    |
-| `Cmd/Ctrl+A`   | Select all                           |
-| `Delete`       | Delete selected                      |
-| `F`            | Toggle fullscreen / hide UI          |
-| `?`            | Show shortcut help overlay           |
+✅ marks shortcuts wired in M0; the rest land in M1 / M2 alongside their tools.
+
+| Key                            | Action                                    | Status |
+|--------------------------------|-------------------------------------------|--------|
+| `B`                            | Brush                                     | M1     |
+| `E`                            | Eraser                                    | M1     |
+| `S`                            | Select (lasso)                            | M1     |
+| `Space` (hold) + drag          | Pan (any pointer device)                  | ✅     |
+| Middle-mouse drag              | Pan                                       | ✅     |
+| `1`–`5`                        | Switch to brush preset 1–5                | M1     |
+| `[` / `]`                      | Decrease / increase size                  | M1     |
+| `Shift+[` / `Shift+]`          | Cycle color palette                       | M2     |
+| `Cmd/Ctrl + Z`                 | Undo                                      | ✅     |
+| `Cmd/Ctrl + Shift + Z`         | Redo (also `Cmd/Ctrl + Y`)                | ✅     |
+| `Cmd/Ctrl + 0`                 | Reset zoom                                | ✅     |
+| `Cmd/Ctrl + =` / `-`           | Zoom in / out                             | ✅     |
+| `Cmd/Ctrl + A`                 | Select all                                | M1     |
+| `Delete` / `Backspace`         | Delete selected                           | M1     |
+| `Cmd/Ctrl + Shift + Backspace` | Clear board (confirm)                     | ✅     |
+| `M`                            | Toggle metrics HUD                        | ✅     |
+| `T`                            | Cycle theme (system → light → dark)       | ✅     |
+| `F`                            | Toggle fullscreen / hide UI               | M2     |
+| `?`                            | Toggle shortcut help overlay              | ✅     |
+| `Esc`                          | Cancel pending action (e.g. clear-confirm)| ✅     |
 
 ### 4.4 Pressure curve UI
 
@@ -244,9 +251,26 @@ The `BASE_PATH` env lets the app live behind a reverse proxy at e.g. `/whiteboar
 
 Each milestone closes only after: feature complete, doc-update reviewed, lint + typecheck clean, perf budget verified where applicable, and a tagged commit.
 
-## 10. Open decisions (won't block v1)
+## 10. Open decisions and backlog (won't block v1)
 
-- **Toolbar UI framework**: vanilla TS + nanostores vs Solid.js. Decided at scaffold time based on bundle size.
-- **`OffscreenCanvas` worker**: ship in v1 if it's a clean win at M0; otherwise defer to v1.1.
-- **Anonymous user names**: server-issued vs client-generated. Likely client-generated with server tiebreak.
-- **Image import in v1**: leaning against. Reassess after M2.
+### Decided during M0
+
+- **Greenfield canvas (not a tldraw / excalidraw fork).** See [ADR 0001](docs/decisions/0001-greenfield-canvas.md).
+- **Bun runtime.** See [ADR 0002](docs/decisions/0002-bun-runtime.md).
+- **Y.js for collaboration.** See [ADR 0003](docs/decisions/0003-yjs-collaboration.md).
+- **Predicted events disabled by default; sync-render in pointer handler.** See [ADR 0004](docs/decisions/0004-input-pipeline-tuning.md).
+- **`OffscreenCanvas` worker — deferred.** Not measured to be a bottleneck at M0; revisit if main-thread work becomes the limit. ADR 0004 covers the latency-sensitive parts of the pipeline that *would* have benefited.
+- **Theme-aware "ink" color token in stroke storage.** Strokes carry `color: 'ink'` rather than a literal hex value; the renderer resolves to the current theme's `--ink` CSS variable. Documented in `docs/architecture.md` § 4.
+
+### Still open
+
+- **Toolbar UI framework**: vanilla TS + nanostores vs Solid.js. Decide at the start of M2 based on bundle-size headroom and the toolbar's reactive needs.
+- **Anonymous user names**: server-issued vs client-generated. Decide at M3.
+- **Image import / paste in v1**: still leaning against. Reassess at the start of M2.
+
+### Backlog (post-v1; tracked, not committed)
+
+- **Screen-tablet support.** Re-enable predicted events for direct-input devices (iPad Pencil, Wacom MobileStudio, Surface Pro pen) where prediction is a clear win. Likely shape: a per-device-class preference exposed via the M2 settings panel, defaulting to off for indirect input and on for direct input. Trigger: a user with a screen tablet asks.
+- **Performance under stroke count.** The current 2D-canvas + perfect-freehand rasterizes each stroke on the CPU (~1 ms each). Pan / zoom redraws all committed strokes; at ~500+ strokes this is the WebGL trigger. Track in `?perftest=scale` (planned at M1).
+- **Mobile / touch UX.** Currently a non-goal. Touch *works* (pointer events handle it) but is not optimized. Reassess if a use case emerges.
+- **Accessibility.** Currently silent. Keyboard-only navigation is largely covered (every action has a shortcut), but ARIA / focus management for the eventual toolbar is not. Address as part of M2's UI work.

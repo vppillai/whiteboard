@@ -9,8 +9,8 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | M  | Title                                                                    | Status |
 |----|--------------------------------------------------------------------------|--------|
 | —  | Repo + dev / deploy environment                                          | ✅     |
-| M0 | Drawing core: latency, pan/zoom, theme, local persistence                | 🟦 *(code complete, Intuos latency validation pending)* |
-| M1 | Brushes + eraser + lasso + undo/redo                                     | ⬜     |
+| M0 | Drawing core: latency, pan/zoom, theme, local persistence, undo/redo     | ✅ *(closed 2026-05-09; tagged `m0-drawing-core`)* |
+| M1 | Eraser, lasso, additional brush presets                                  | ⬜     |
 | M2 | Toolbar UI, keyboard shortcuts, export                                   | ⬜     |
 | M3 | Server, sync, room URLs                                                  | ⬜     |
 | M4 | Production deployment polish                                             | ⬜     |
@@ -64,29 +64,35 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 - [ ] **No dropped Wacom samples at 200 Hz on a 60 Hz display.** HUD `samples / event` should average > 1 during fast strokes.
 - [ ] ADR added if the latency work surfaces an architectural choice.
 
-### M1 — Brushes + eraser + lasso + undo/redo ⬜
+### M1 — Eraser + lasso + brush presets ⬜
 
-**Scope (revised).** Adds the remaining brush presets, eraser, lasso select, undo/redo. Pan/zoom and persistence already shipped at M0+.
+**Scope (revised after M0 close).** The remaining four brush presets (marker, pencil, highlighter, brush), the stroke-hit eraser, and lasso-select. Pan/zoom, undo/redo for stroke create, and persistence all shipped at M0. Lasso-driven move/delete extends undo/redo to those operations.
+
+The toolbar UI is **explicitly held back to M2** so this milestone stays tight (~2–3 days). Brushes are switched in M1 via the existing keyboard shortcuts (`1`–`5`); the visual brush picker is M2.
 
 **Exit criteria.**
 
 - All five brushes render correctly with their tabled parameters.
-- Stroke-hit eraser deletes (soft) within hit radius.
-- Lasso selects strokes; selected strokes can be deleted, moved.
-- Undo / redo across stroke create, delete, move.
-- 1000-stroke board pans / zooms at 60 fps on the M0 reference machine.
-- Architecture doc updated; CHANGELOG entry; per-tool docs as needed.
+- Stroke-hit eraser soft-deletes within hit radius (deleted flag on the Stroke; renderer skips deleted; redo restores).
+- Lasso selects strokes; selected strokes can be deleted and moved.
+- Undo / redo extends to delete and move (not just create).
+- **Perf-at-scale gate**: `?perftest=scale&n=500` keeps pan / zoom under the 16 ms frame budget. If we miss, that's the WebGL trigger and an ADR.
+- **Feel-test gate** on the target hardware (Wacom Intuos): user signs off that the new tools feel right.
+- Architecture doc § 6 updated; CHANGELOG entry; per-tool notes as needed.
 
-### M2 — Toolbar UI, keyboard shortcuts, export ⬜
+### M2 — Toolbar UI, settings, export ⬜
 
-**Scope (revised).** Floating toolbar, palette, brush presets, settings UI (pressure curve, hide-toolbar mode), PNG / SVG / PDF export. Local persistence already shipped at M0+; if needed, refine here.
+**Scope (revised).** Floating toolbar, palette, brush picker, settings panel (pressure curve, theme override, predicted-events toggle for screen-tablet users), PNG / SVG / PDF export. Local persistence already shipped at M0; image import decision happens at the start of this milestone.
+
+The settings panel is the natural home for the screen-tablet prediction toggle (see SPEC § 10 backlog) and for any per-device pressure presets.
 
 **Exit criteria.**
 
-- Toolbar dockable to any edge, draggable.
-- All keyboard shortcuts in [SPEC § 4.3](../SPEC.md#43-keyboard-shortcuts) work.
+- Toolbar dockable to any edge, draggable. Decision on UI framework (vanilla vs Solid) made and noted (ADR if non-obvious).
+- All M2-tagged keyboard shortcuts in [SPEC § 4.3](../SPEC.md#43-keyboard-shortcuts) work.
 - Pressure curve UI saves per-brush; survives reload.
 - Export PNG / SVG / PDF produces visually correct output (manual visual diff acceptable for v1).
+- **Feel-test gate** on the target hardware: toolbar interaction doesn't disrupt drawing; settings persist sensibly.
 - `docs/architecture.md` updated; CHANGELOG entry.
 
 ### M3 — Server, sync, room URLs ⬜
@@ -102,17 +108,18 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 - 16 concurrent peers in one room, no dropped updates over 5 minutes of mixed editing.
 - `docs/architecture.md` § 6 updated; deployment doc cross-checked; CHANGELOG entry; ADR if the protocol or auth design materially changed from spec.
 
-### M4 — Production deployment polish ⬜
+### M4 — v1 deployment polish ⬜
 
-**Scope.** Static-file serving from the server, sub-path support, healthcheck, structured logging, deploy.sh polish.
+**Scope (revised — much shipped early).** Most of the original M4 scope landed at M0 (multi-stage Dockerfile, static-file serving with SPA fallback, immutable-asset caching, healthcheck, `deploy.sh` with `.env` validation). M4 is now the v1-ship gate: validate end-to-end on a clean host, exercise the reverse-proxy paths against real proxies, and write release notes.
 
 **Exit criteria.**
 
-- `./deploy.sh` produces a working production stack on a clean host given only Docker.
-- `BASE_PATH=/whiteboard` works behind a reverse proxy (verified with the provided Caddy / Nginx examples).
-- Healthcheck passes; container marked healthy by `docker compose ps`.
-- Resource usage matches `deployment.md` § "Resource sizing" expectations.
-- `docs/deployment.md` cross-validated against the actual deploy.
+- `./deploy.sh` produces a working production stack on a clean host given only Docker (validated by re-pulling on a fresh VM).
+- `BASE_PATH=/whiteboard` works behind a real reverse proxy (Caddy and Nginx, both tested against the provided snippets).
+- WebSocket upgrade works through the proxy (relevant once M3 ships sync).
+- Backup / restore procedure in `docs/deployment.md` exercised end-to-end at least once.
+- v1.0.0 release notes drafted from the `[Unreleased]` section of `CHANGELOG.md`.
+- Tag `v1.0.0`.
 
 ### v1 ship 🎯
 

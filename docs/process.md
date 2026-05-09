@@ -23,12 +23,14 @@ The milestone-close checklist:
 - All exit criteria met (the criteria are written down for the milestone — see milestones.md).
 - `bun run lint` clean.
 - `bun run typecheck` clean.
+- **Feel-test on the target hardware passes.** Subjective; the user signs off that the milestone "feels" right when used as intended. M0 surfaced the value of this — the synthetic perftest passed but real-pen feel uncovered the blocky terminus, the prediction flicker, and the cross-device pan gap. None of those would have been caught by lint and typecheck.
+- **Perf-at-scale gate (M1+).** From M1 onward, `?perftest=scale&n=500` (or the milestone's own scale benchmark) holds within the 16 ms frame budget. A miss is data, not vibes — it's the trigger for revisiting the WebGL deferral or other rendering work, and it warrants an ADR.
 - The "as-built" section of `docs/architecture.md` reflects reality.
 - Other docs updated if the milestone changed how to develop or deploy.
 - `CHANGELOG.md` has an entry under `[Unreleased]`.
 - An ADR exists for any non-obvious architectural choice made during the milestone.
 - `docs/milestones.md` status updated.
-- Tagged commit created (e.g. `m1-stroke-engine`).
+- Tagged commit created (e.g. `m1-eraser-lasso`).
 
 ## ADRs (Architecture Decision Records)
 

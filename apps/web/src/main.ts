@@ -6,9 +6,12 @@
  *   M  — toggle metrics HUD.
  *   T  — cycle theme (system → light → dark).
  *   ?  — toggle help overlay.
+ *   Cmd/Ctrl + Z — undo.
+ *   Cmd/Ctrl + Shift + Z — redo (also Cmd/Ctrl + Y).
  *   Cmd/Ctrl + 0 — reset zoom.
  *   Cmd/Ctrl + +/- — zoom in / out.
- *   Cmd/Ctrl + Shift + K — clear board (irreversible at v1; M2 will add undo).
+ *   Cmd/Ctrl + Shift + Backspace — clear board (press twice within 3 s).
+ *   Esc — cancel a pending action (e.g. clear-confirm).
  *
  * Pointer:
  *   Pen / mouse / touch — draw.
@@ -252,6 +255,51 @@ async function main(): Promise<void> {
   })
   pill.update()
 
+  // Clear-board confirmation: first key press primes; second press within
+  // CLEAR_CONFIRM_MS clears. Esc cancels. A native confirm() modal is jarring;
+  // a transient toast at the top of the screen is nicer and works without
+  // a toolbar in place yet.
+  const CLEAR_CONFIRM_MS = 3000
+  const toast = document.createElement('div')
+  toast.id = 'whiteboard-toast'
+  toast.style.display = 'none'
+  document.body.appendChild(toast)
+
+  let clearTimer: ReturnType<typeof setTimeout> | null = null
+
+  const showToast = (html: string): void => {
+    toast.innerHTML = html
+    toast.style.display = 'block'
+  }
+
+  const hideToast = (): void => {
+    toast.style.display = 'none'
+  }
+
+  const cancelClearConfirm = (): void => {
+    if (clearTimer) {
+      clearTimeout(clearTimer)
+      clearTimer = null
+    }
+    hideToast()
+  }
+
+  const requestClear = (): void => {
+    if (clearTimer) {
+      // Second press — perform the clear.
+      cancelClearConfirm()
+      strokes.length = 0
+      redoStack.length = 0
+      committedDirty = true
+      void clearAllStrokes().catch((err) => {
+        console.warn('whiteboard/web: clear failed:', err)
+      })
+      return
+    }
+    showToast('Press <b>⌘/Ctrl + Shift + Backspace</b> again to clear · <b>Esc</b> cancels')
+    clearTimer = setTimeout(cancelClearConfirm, CLEAR_CONFIRM_MS)
+  }
+
   const undo = (): void => {
     const stroke = strokes.pop()
     if (!stroke) return
@@ -313,12 +361,16 @@ async function main(): Promise<void> {
       committedDirty = true
       return
     }
-    if (meta && e.shiftKey && e.key.toLowerCase() === 'k') {
+    if (meta && e.shiftKey && e.key === 'Backspace') {
       e.preventDefault()
-      strokes.length = 0
-      redoStack.length = 0
-      committedDirty = true
-      void clearAllStrokes()
+      requestClear()
+      return
+    }
+    if (e.key === 'Escape') {
+      if (clearTimer) {
+        cancelClearConfirm()
+        e.preventDefault()
+      }
       return
     }
     if (e.key === 't' && !meta && !e.altKey) {
@@ -410,7 +462,7 @@ function createHelp(): Help {
     '?                  toggle this help',
     '⌘/Ctrl + 0         reset zoom',
     '⌘/Ctrl + +/-       zoom in/out',
-    '⌘/Ctrl + Shift + K clear board (irreversible)',
+    '⌘/Ctrl + Shift + ⌫ clear board (confirm twice)',
     '',
     'wheel / 2-finger   pan',
     '⌘/Ctrl + wheel     zoom',
