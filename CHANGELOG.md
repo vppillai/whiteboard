@@ -51,6 +51,19 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 - **Options menu** (`O` to open at pointer; `O` again to dismiss). Grid type selector (dots / lines / ruled / none) and spacing pills (16 / 24 / 32 / 48 px). Defaults to pinned because options are usually adjusted iteratively.
 - **Configurable grid lines now visible**. Lines and ruled grids use a separate `--grid-line` CSS token (more visible alpha) than the dot grid's `--grid-dot`. Per-pixel alpha for spread-out lines must be higher than for pixel-sized dots to read at the same overall weight; M1.5's first cut shared the value and lines were nearly invisible.
 
+### Fixed / Changed (M1 — eraser UX + keyboard expansion + clear-flow focus)
+
+- **Eraser mode no longer persists across sessions.** Selecting the **Item** pill in the right-click ERASER section was being written to localStorage as `eraserMode: 'item'`, which then stuck across reloads. Users perceived this as "wipe-erase doesn't work" because every gesture locked into Object/Item mode at pointerdown (eraser.ts:156). Fix: `eraserMode` is session-scoped — `settings.ts` reloads default `'wipe'` on every session, and the persisted shape excludes the field. Item is still selectable via the menu (within the session) and via Shift held at pointerdown (mid-gesture). Wipe size, brush, color, and grid persistence are unchanged.
+- **`P` key** — switch to Draw tool **and** the Pen brush preset. The "go to my default drawing setup" key. Equivalent to right-click → Draw + Pen brush in one keystroke. `B` still works as before (Draw tool, current brush preset preserved).
+- **`E` key is now pure spring-loaded.** Press E → eraser; release E → revert to the previous tool. Always reverts. Mirrors the pen-tablet idiom of spring-loaded modifier keys (Photoshop, Krita). Implemented in a small dedicated module `apps/web/src/eraserhold.ts` modeled on `pan.ts`'s spacebar-pan pattern.
+- **`Shift+E` is the new sticky-eraser** (separate key from the spring-loaded modifier — avoids fragile time- or stroke-based discrimination on the same key). `Shift+E` toggles the eraser tool persistently; switch back via `B` / `P` / right-click.
+- **Clear-board confirm focuses the destructive button.** When `⌘/Ctrl+Shift+K` opens the "Clear the whole board?" toast, the **Clear** button now receives focus, so Enter activates it (native button behavior). On both confirm and cancel paths, focus is handed back to `#app` (made programmatically focusable via `tabindex="-1"`) so subsequent keystrokes don't go through a stale button. CSS suppresses the focus ring on `#app`.
+- SPEC § 4.3 keyboard table updated with `B` / `P` / `E (hold)` / `Shift+E` rows; help overlay (`?`) updated to match.
+
+### Planned (M1.x — segment-eraser)
+
+- **Eraser model upgrade scheduled** as a dedicated milestone. Feel-test on Intuos surfaced that stroke-hit erasure (touch any sample → whole stroke removed) doesn't feel like a real eraser. M1.x switches to **segment-level** erasure ("cuts through") via a per-sample mask. Design captured in [ADR 0008](docs/decisions/0008-segment-eraser.md): rejected alternatives (split-stroke, pixel-erase) documented; sample-mask chosen for cache-friendliness, CRDT-friendliness, and identity preservation. Implementation lands as M1.x between M1 and M1.7. SPEC § 4.1 carries a v1 caveat until M1.x ships.
+
 ### Refactored (M1.6 — tool surface; code complete, feel-test pending)
 
 - **Tool interface extended** (ADR 0007 supersedes 0005's interface). Each tool now owns its cursor / stroke / hover rendering AND its right-click menu section. `ToolContext` carries `liveLayer`, `camera`, `dpr`, `resolveColor` so tools render directly to the live layer without callbacks.

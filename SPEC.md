@@ -155,7 +155,9 @@ Stored in Y.js as `Y.Array<Y.Map>`. Soft-deletes (not removals) so undo across c
 
 ### 4.1 Tool set (v1)
 
-Brush, Eraser (stroke-hit erase, not pixel), Lasso-select, Pan, Color-eyedropper. That's it.
+Brush, Eraser, Lasso-select, Pan, Color-eyedropper. That's it.
+
+> **Eraser model:** v1 ships with stroke-hit erasure (cross any sample → whole stroke removed). [ADR 0008](docs/decisions/0008-segment-eraser.md) plans the switch to **segment-level** erasure ("cuts through") via a per-sample mask, scheduled as milestone M1.x. Once shipped, this paragraph collapses to "segment-level erasure" and the SPEC drops the v1 caveat.
 
 ### 4.2 Toolbar
 
@@ -167,8 +169,10 @@ Floating, draggable, dockable to any edge. Compact (icon-only) with hover labels
 
 | Key                            | Action                                    | Status |
 |--------------------------------|-------------------------------------------|--------|
-| `B`                            | Brush                                     | M1     |
-| `E`                            | Eraser                                    | M1     |
+| `B`                            | Draw tool (keep current brush preset)     | ✅     |
+| `P`                            | Draw tool + Pen brush preset              | ✅     |
+| `E` (hold)                     | Spring-loaded eraser — release reverts    | ✅     |
+| `Shift + E`                    | Sticky eraser (toggle to eraser tool)     | ✅     |
 | `S`                            | Select (lasso)                            | M1     |
 | `Space` (hold) + drag          | Pan (any pointer device)                  | ✅     |
 | Middle-mouse drag              | Pan                                       | ✅     |

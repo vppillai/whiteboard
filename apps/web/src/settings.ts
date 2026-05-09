@@ -25,7 +25,6 @@ export const ERASER_RADII: Readonly<Record<EraserSize, number>> = {
 const ERASER_SIZES: readonly EraserSize[] = ['small', 'medium', 'large']
 const isValidEraserSize = (s: string): s is EraserSize =>
   (ERASER_SIZES as readonly string[]).includes(s)
-const isValidEraserMode = (s: string): s is EraserMode => s === 'wipe' || s === 'item'
 
 export interface GridConfig {
   type: GridType
@@ -37,8 +36,8 @@ interface PersistedShape {
   color?: string
   brush?: string
   eraserSize?: string
-  eraserMode?: string
   grid?: { type?: GridType; spacing?: number }
+  // eraserMode is intentionally NOT persisted — see load() / persist().
 }
 
 interface State {
@@ -79,10 +78,11 @@ function load(): State {
         typeof parsed.eraserSize === 'string' && isValidEraserSize(parsed.eraserSize)
           ? parsed.eraserSize
           : DEFAULTS.eraserSize,
-      eraserMode:
-        typeof parsed.eraserMode === 'string' && isValidEraserMode(parsed.eraserMode)
-          ? parsed.eraserMode
-          : DEFAULTS.eraserMode,
+      // eraserMode is intentionally session-scoped — Item is a niche surgical
+      // mode; persisting it across sessions traps users in Item mode after
+      // they've forgotten they selected the pill. Shift gives momentary Item
+      // mid-gesture; the menu pill gives session-scoped Item. Reload resets.
+      eraserMode: DEFAULTS.eraserMode,
       grid: {
         type:
           parsed.grid?.type && VALID_GRID_TYPES.includes(parsed.grid.type)
@@ -111,7 +111,10 @@ function clone(s: State): State {
 
 function persist(): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    // eraserMode is intentionally excluded — see load().
+    const { color, brush, eraserSize, grid } = state
+    const payload: PersistedShape = { color, brush, eraserSize, grid }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
   } catch (err) {
     console.warn('whiteboard/settings: failed to persist:', err)
   }

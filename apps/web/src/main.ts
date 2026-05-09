@@ -5,7 +5,9 @@
  * menu surfaces live inside each tool module (ADR 0007).
  *
  * Keyboard:
- *   B / E              — drawing / eraser tool
+ *   B                  — drawing tool (current brush preset)
+ *   P                  — drawing tool + Pen brush preset (default setup)
+ *   E                  — eraser (tap toggles, hold spring-loads — see eraserhold.ts)
  *   1 – 5              — brush preset
  *   M                  — toggle metrics HUD
  *   T                  — cycle theme
@@ -36,6 +38,7 @@ import { BRUSH_IDS, BRUSH_PRESETS } from './brushes'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
 import { createClearFlow } from './clearflow'
 import { openColorPicker } from './colorpicker'
+import { attachEraserHold } from './eraserhold'
 import { drawGrid } from './grid'
 import { createHelpOverlay } from './helpoverlay'
 import { attachKeymap } from './keymap'
@@ -74,6 +77,9 @@ async function main(): Promise<void> {
 
   const root = document.getElementById('app')
   if (!root) throw new Error('#app not found')
+  // Programmatically focusable (without joining the tab order) so dialogs
+  // like the clear-board toast can hand focus back here on close.
+  root.tabIndex = -1
 
   const target = setupCanvas(root)
   const camera = makeCamera()
@@ -300,6 +306,7 @@ async function main(): Promise<void> {
   //  Clear-board flow
   // ---------------------------------------------------------------------
   const clearFlow = createClearFlow({
+    refocusOnClose: root,
     onPerformClear: () => {
       // Destructive boundary by design — undo/redo stacks reset alongside
       // the in-memory strokes and the IDB store. See ops.ts (clear is *not*
@@ -337,6 +344,11 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------
   //  Keyboard shortcuts
   // ---------------------------------------------------------------------
+  attachEraserHold({
+    getActiveToolId: () => tool.current.id,
+    setTool,
+  })
+
   attachKeymap({
     undo,
     redo,
@@ -373,7 +385,11 @@ async function main(): Promise<void> {
       if (id) setBrushId(id)
     },
     selectDrawingTool: () => setTool('pen'),
-    selectEraserTool: () => setTool('eraser'),
+    selectPenDefault: () => {
+      setTool('pen')
+      setBrushId('pen')
+    },
+    selectEraserSticky: () => setTool('eraser'),
     cancel: () => {
       let handled = false
       if (clearFlow.cancel()) handled = true

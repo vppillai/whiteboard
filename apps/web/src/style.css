@@ -86,6 +86,9 @@ body {
   user-select: none;
   -webkit-user-select: none;
   overscroll-behavior: none;
+  /* Refocusable via tabindex="-1" but never showing a focus ring on the
+     canvas itself — the canvas is the drawing surface, not a control. */
+  outline: none;
 }
 
 #app canvas {

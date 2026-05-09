@@ -14,6 +14,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | M1.4 | Refactor pass: tool abstraction, op-based undo, soft-delete, decompose main.ts | ✅ *(closed 2026-05-09; tagged `m1.4-refactor`)* |
 | M1.6 | Tool surface refactor: tools own cursor + contextual menu              | 🟦 *(code complete; feel-test pending)* |
 | M1 | Eraser, lasso, additional brush presets                                  | ⬜     |
+| M1.x | Segment-eraser ("cuts through" instead of stroke-hit) — see [ADR 0008](decisions/0008-segment-eraser.md) | ⬜ *(planned)* |
 | M1.7 | Settings side panel + sync-ready schema (brush presets, fonts, swatches) | ⬜  |
 | M2 | Toolbar UI, keyboard shortcuts, export                                   | ⬜     |
 | M3 | Server, sync, room URLs                                                  | ⬜     |
@@ -143,6 +144,21 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 - Tagged commit `m1.6-tool-surface`.
 
 **After M1.6:** Lasso lands as a single new file `tools/lasso.ts` that conforms to the extended Tool. No diffs to `main.ts` or `toolmenu.ts` beyond a registry entry.
+
+### M1.x — Segment-eraser ⬜
+
+**Why this exists.** Feel-test on Wacom Intuos surfaced that stroke-hit erasure (touch any sample → whole stroke deleted) does not feel like an eraser. A real whiteboard eraser cuts through ink — disconnected parts of the original stroke survive. The drawing-tools tenet treats this kind of feel-cost as milestone-critical.
+
+**Scope.** Per [ADR 0008](decisions/0008-segment-eraser.md): per-sample mask (`Stroke.erasedSamples?: number[]`); renderer iterates contiguous live-sample runs per stroke; new `maskSamples` op for undo / redo. Pixel-erase and split-stroke alternatives rejected in the ADR.
+
+**Exit criteria.**
+
+- Wipe-erase visibly cuts through strokes mid-sweep — the part the eraser passes over disappears immediately; the rest of the stroke survives.
+- One `maskSamples` op per gesture; single Cmd+Z restores the whole sweep.
+- `?perftest=erase` synthetic harness shows wipe responsive within 16 ms / frame at 500 strokes.
+- SPEC § 4.1 updated; storage migration tested (legacy strokes without `erasedSamples` load with no erasure); CHANGELOG entry.
+- Feel-test gate on Intuos: user signs off that wipe now feels like a physical eraser.
+- Tagged commit `m1.x-segment-eraser`.
 
 ### M1 — Eraser + lasso + brush presets ⬜
 

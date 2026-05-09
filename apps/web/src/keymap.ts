@@ -29,10 +29,14 @@ export interface KeyHandlers {
   /** Brush preset by 1-based index (1 → pen … 5 → brush). */
   selectBrush: (index1Based: number) => void
 
-  /** Activate the drawing tool (pen). */
+  /** Activate the drawing tool (pen). Brush preset unchanged. */
   selectDrawingTool: () => void
-  /** Activate the eraser tool. */
-  selectEraserTool: () => void
+  /** Activate the drawing tool AND switch to the Pen brush preset — the
+   *  full equivalent of right-click → Draw + Pen. */
+  selectPenDefault: () => void
+  /** Activate the eraser tool persistently (sticky toggle). Bound to Shift+E
+   *  because plain E is pure spring-loaded — see `eraserhold.ts`. */
+  selectEraserSticky: () => void
 
   /**
    * Esc handler. Return `true` if anything was actually cancelled — the
@@ -106,13 +110,24 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
         handlers.selectBrush(Number(e.key))
         return
       }
-      // Tool selection: B = drawing tool, E = eraser.
+      // Tool selection. B = drawing tool (brush unchanged); P = drawing tool
+      // + Pen brush preset (i.e. "go to my default drawing setup"). Plain E
+      // is owned by `eraserhold.ts` (pure spring-loaded modifier).
       if (k === 'b') {
         handlers.selectDrawingTool()
         return
       }
+      if (k === 'p') {
+        handlers.selectPenDefault()
+        return
+      }
+    }
+
+    // Shift-modified single-letter bindings.
+    if (!meta && !alt && shift && !e.repeat) {
+      // Shift+E: sticky eraser (the counterpart to plain E's spring-load).
       if (k === 'e') {
-        handlers.selectEraserTool()
+        handlers.selectEraserSticky()
         return
       }
     }
