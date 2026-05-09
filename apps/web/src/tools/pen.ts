@@ -1,42 +1,40 @@
 /**
- * Pen tool. The only tool that exists in M1.4; eraser / lasso / laser / text
- * land at later milestones as separate `Tool` implementations.
+ * Pen / drawing tool. The only tool that produces strokes; eraser, lasso,
+ * laser, text are separate `Tool` implementations.
  *
- * Behavior carried over from the pre-tool-abstraction `pointer.ts`:
+ * Owns:
+ *   - The in-flight stroke (samples, predicted lookahead, render-as-final flag).
+ *   - Live-layer rendering — both the wet ink during a stroke and the hover
+ *     preview between strokes. The hover preview shape varies per brush so the
+ *     user sees what they're about to draw.
+ *   - The COLOR + BRUSH sections of the right-click menu.
  *
- *   - getCoalescedEvents() to consume every Wacom sample between frames.
- *   - getPredictedEvents() (gated by `usePrediction`) for visual lookahead.
+ * Behavior carried over from earlier iterations (see ADR 0004 / M0):
+ *   - `getCoalescedEvents()` for full Wacom 200 Hz sampling.
+ *   - `getPredictedEvents()` (gated by `usePrediction`) for visual lookahead.
  *   - γ-curve applied to raw pressure before the sample is recorded.
+ *   - Shift-constrained drawing: stroke snaps to a straight line from
+ *     pointerdown to current cursor; rendered with `last: true` so the cap
+ *     shows live (no gap between line end and cursor).
  */
 
 import type { BrushConfig, Sample, Stroke } from '@whiteboard/shared'
+import { BRUSH_IDS, BRUSH_LABELS, BRUSH_PRESETS } from '../brushes'
+import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
+import { applyCamera, clearLayer, drawStrokePath } from '../render'
+import { getBrushId, getColor, setBrushId, setColor } from '../settings'
+import { effectiveOpacity, getStrokePath } from '../stroke'
 import type { Tool, ToolContext } from './types'
 
 export interface PenToolCallbacks {
-  onStrokeStart: (stroke: Stroke) => void
-  /**
-   * Called once per pointermove. `predicted` is replaced each event; do not
-   * retain references across calls. `renderAsFinal` is true when the
-   * in-flight stroke should be rendered with `last: true` (e.g. shift-
-   * constrained mode where the stroke is a finished straight line). For
-   * normal freeform drawing, false — the renderer keeps the last cap open.
-   */
-  onStrokeUpdate: (stroke: Stroke, predicted: Sample[], renderAsFinal: boolean) => void
+  /** Stroke finalized at pointerup. Caller pushes it to the strokes array
+   *  and emits the create op. */
   onStrokeCommit: (stroke: Stroke) => void
-  /** Hover (no contact) — board coordinates. Used to render brush preview. */
-  onHoverMove?: (boardX: number, boardY: number) => void
-  /** Hover ended (pointerleave or stroke begin). */
-  onHoverEnd?: () => void
 }
 
 export interface PenToolOptions {
   callbacks: PenToolCallbacks
-  /**
-   * Whether to feed predicted events into the live render. False is correct
-   * for indirect input (Wacom Intuos non-screen) where the predicted ink
-   * leads the cursor and visibly flickers when the pen changes direction.
-   * See ADR 0004.
-   */
+  /** When false, `getPredictedEvents()` is ignored. */
   usePrediction?: boolean
 }
 
@@ -49,8 +47,23 @@ interface SampleSource {
   timeStamp: number
 }
 
+const PALETTE: readonly string[] = [
+  'ink',
+  '#ef4444',
+  '#f97316',
+  '#eab308',
+  '#22c55e',
+  '#06b6d4',
+  '#3b82f6',
+  '#a855f7',
+  '#ec4899',
+  '#6b7280',
+]
+
 export function createPenTool(opts: PenToolOptions): Tool {
   let active: Stroke | null = null
+  let predicted: Sample[] = []
+  let renderAsFinal = false
 
   const sample = (e: SampleSource, brush: BrushConfig, ctx: ToolContext): Sample => {
     const { x, y } = ctx.toBoard(e.clientX, e.clientY)
@@ -64,13 +77,72 @@ export function createPenTool(opts: PenToolOptions): Tool {
     }
   }
 
+  const renderStroke = (ctx: ToolContext): void => {
+    if (!active) return
+    clearLayer(ctx.liveLayer)
+    applyCamera(ctx.liveLayer, ctx.camera, ctx.dpr)
+    const path = getStrokePath(active, predicted, renderAsFinal)
+    if (path) {
+      drawStrokePath(
+        ctx.liveLayer,
+        path,
+        ctx.resolveColor(active.brush.color),
+        effectiveOpacity(active),
+      )
+    }
+  }
+
+  const renderHover = (boardX: number, boardY: number, ctx: ToolContext): void => {
+    const brushId = getBrushId()
+    const preset = BRUSH_PRESETS[brushId]
+    clearLayer(ctx.liveLayer)
+    applyCamera(ctx.liveLayer, ctx.camera, ctx.dpr)
+    const c = ctx.liveLayer.ctx
+    c.save()
+    c.fillStyle = ctx.resolveColor(getColor())
+    if (brushId === 'highlighter') {
+      c.globalAlpha = 0.45
+      const w = preset.size
+      const h = Math.max(2, preset.size * 0.4)
+      c.fillRect(boardX - w / 2, boardY - h / 2, w, h)
+    } else if (brushId === 'brush') {
+      c.globalAlpha = 0.5
+      c.beginPath()
+      c.arc(boardX, boardY, preset.size / 2, 0, Math.PI * 2)
+      c.fill()
+      c.globalAlpha = 0.18
+      c.beginPath()
+      c.arc(boardX, boardY, preset.size * 0.85, 0, Math.PI * 2)
+      c.fill()
+    } else if (brushId === 'marker') {
+      c.globalAlpha = 0.7
+      c.beginPath()
+      c.arc(boardX, boardY, preset.size / 2, 0, Math.PI * 2)
+      c.fill()
+    } else if (brushId === 'pencil') {
+      c.globalAlpha = 0.4
+      c.beginPath()
+      c.arc(boardX, boardY, preset.size / 2, 0, Math.PI * 2)
+      c.fill()
+    } else {
+      c.globalAlpha = 0.5
+      c.beginPath()
+      c.arc(boardX, boardY, preset.size / 2, 0, Math.PI * 2)
+      c.fill()
+    }
+    c.restore()
+  }
+
   const cancel = (): void => {
     active = null
+    predicted = []
+    renderAsFinal = false
   }
 
   return {
     id: 'pen',
     cursor: 'crosshair',
+
     onPointerDown(e, ctx) {
       const brush = ctx.getBrush()
       active = {
@@ -79,35 +151,29 @@ export function createPenTool(opts: PenToolOptions): Tool {
         samples: [sample(e, brush, ctx)],
         startedAt: e.timeStamp,
       }
-      // Hide hover preview; the live stroke render takes its place.
-      opts.callbacks.onHoverEnd?.()
-      opts.callbacks.onStrokeStart(active)
+      predicted = []
+      renderAsFinal = false
+      renderStroke(ctx)
     },
+
     onPointerMove(e, ctx) {
       if (!active) {
-        // Hover (or any non-contact movement). Render brush preview at cursor.
-        if (opts.callbacks.onHoverMove) {
-          const { x, y } = ctx.toBoard(e.clientX, e.clientY)
-          opts.callbacks.onHoverMove(x, y)
-        }
+        // Hover render — brush preview at cursor.
+        const { x, y } = ctx.toBoard(e.clientX, e.clientY)
+        renderHover(x, y, ctx)
         return
       }
       const brush = active.brush
 
-      // Shift-constrained mode: stroke is a straight line from the start
-      // sample to wherever the cursor is now. Holding Shift mid-stroke "snaps"
-      // the in-flight stroke to a straight line; releasing Shift returns to
-      // freeform from the current position, building on whatever samples are
-      // already present.
-      //
-      // Render as final (last:true) so the cap shows up at the cursor in real
-      // time, not just at commit. Otherwise the visible line stops a few
-      // pixels short of the cursor (perfect-freehand's open-end smoothing).
+      // Shift-constrained: snap to straight line from start sample to current
+      // cursor; render as final so the cap appears live, not at commit.
       if (e.shiftKey) {
         const first = active.samples[0]
         if (first) {
           active.samples = [first, sample(e, brush, ctx)]
-          opts.callbacks.onStrokeUpdate(active, [], true)
+          predicted = []
+          renderAsFinal = true
+          renderStroke(ctx)
         }
         return
       }
@@ -118,16 +184,65 @@ export function createPenTool(opts: PenToolOptions): Tool {
       } else {
         for (const ce of coalesced) active.samples.push(sample(ce, brush, ctx))
       }
-      const predicted = opts.usePrediction
+      predicted = opts.usePrediction
         ? e.getPredictedEvents().map((pe) => sample(pe, brush, ctx))
         : []
-      opts.callbacks.onStrokeUpdate(active, predicted, false)
+      renderAsFinal = false
+      renderStroke(ctx)
     },
+
     onPointerUp(_e, _ctx) {
       if (!active) return
       opts.callbacks.onStrokeCommit(active)
-      active = null
+      cancel()
     },
+
+    redraw(ctx) {
+      // Camera change or committed-layer redraw: re-render the in-flight
+      // stroke (if any) so its position tracks the new camera. Hover preview
+      // can wait for the next pointermove.
+      if (active) renderStroke(ctx)
+    },
+
+    renderContextualMenu(host, dismiss) {
+      // COLOR section.
+      host.appendChild(sectionLabel('Color'))
+      const palette = paletteGrid()
+      for (const c of PALETTE) {
+        palette.appendChild(
+          swatch({
+            color: c,
+            active: getColor() === c,
+            onClick: () => {
+              setColor(c)
+              dismiss()
+            },
+          }),
+        )
+      }
+      host.appendChild(palette)
+
+      // BRUSH section.
+      host.appendChild(separator())
+      host.appendChild(sectionLabel('Brush'))
+      const row = pillRow()
+      const activeBrush = getBrushId()
+      for (const id of BRUSH_IDS) {
+        row.appendChild(
+          pill({
+            label: id === 'highlighter' ? 'Hi' : BRUSH_LABELS[id],
+            title: BRUSH_LABELS[id],
+            active: id === activeBrush,
+            onClick: () => {
+              setBrushId(id)
+              dismiss()
+            },
+          }),
+        )
+      }
+      host.appendChild(row)
+    },
+
     cleanup: cancel,
   }
 }

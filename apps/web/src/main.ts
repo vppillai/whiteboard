@@ -1,24 +1,33 @@
 /**
- * M0 entry point: low-latency drawing surface with infinite pan / zoom canvas,
- * theme-aware ink, and IndexedDB-backed local persistence.
+ * App entry point. Orchestrates: top-level state (strokes, undo / redo
+ * stacks, camera, settings), the render loop, the tool registry, and the
+ * keyboard / pointer / wheel event surfaces. Tool-specific rendering and
+ * menu surfaces live inside each tool module (ADR 0007).
  *
  * Keyboard:
- *   M  — toggle metrics HUD.
- *   T  — cycle theme (system → light → dark).
- *   ?  — toggle help overlay.
- *   Cmd/Ctrl + Z — undo.
- *   Cmd/Ctrl + Shift + Z — redo (also Cmd/Ctrl + Y).
- *   Cmd/Ctrl + 0 — reset zoom.
- *   Cmd/Ctrl + +/- — zoom in / out.
- *   Cmd/Ctrl + Shift + K — clear board (press twice within 3 s; Esc cancels).
- *   Esc — cancel a pending action (e.g. clear-confirm).
+ *   B / E              — drawing / eraser tool
+ *   1 – 5              — brush preset
+ *   M                  — toggle metrics HUD
+ *   T                  — cycle theme
+ *   ?                  — toggle help overlay
+ *   Esc                — cancel / dismiss popover
+ *   ⌘/Ctrl + Z         — undo
+ *   ⌘/Ctrl + Shift + Z — redo (also ⌘/Ctrl + Y)
+ *   ⌘/Ctrl + 0         — reset zoom
+ *   ⌘/Ctrl + 1         — fit all strokes to view
+ *   ⌘/Ctrl + + / -     — zoom in / out
+ *   ⌘/Ctrl + Shift + K — clear board (confirm)
  *
  * Pointer:
- *   Pen / mouse / touch — draw.
- *   Wheel — pan (plain) or zoom around cursor (Cmd/Ctrl + wheel, or pinch).
+ *   Pen / mouse / touch — active tool's behavior
+ *   Right-click         — tool menu (also via Wacom barrel button)
+ *   Wheel               — pan; ⌘/Ctrl+wheel or pinch — zoom
+ *   Space + drag        — pan
+ *   Middle-mouse drag   — pan
  *
  * Query string:
- *   ?perftest=1 — run synthetic stroke harness on load and overlay results.
+ *   ?perftest=1 — synthetic stroke harness on load
+ *   ?predict=1  — re-enable predicted events (off by default — ADR 0004)
  */
 
 import './style.css'
@@ -40,27 +49,17 @@ import { attachPointer } from './pointer'
 import { dismissAllPopovers, getActiveTag } from './popover'
 import { applyCamera, clearLayer, drawStrokePath, setupCanvas } from './render'
 import {
-  ERASER_RADII,
   getBrushId,
   getColor,
-  getEraserMode,
-  getEraserSize,
   getSettings,
   onChange as onSettingsChange,
   setBrushId,
-  setEraserConfig,
 } from './settings'
 import { clearAllStrokes, loadAllStrokes, saveStroke } from './storage'
 import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { openToolMenu } from './toolmenu'
-import {
-  type EraserGestureMode,
-  type Tool,
-  type ToolId,
-  createEraserTool,
-  createPenTool,
-} from './tools'
+import { type Tool, type ToolContext, type ToolId, createEraserTool, createPenTool } from './tools'
 import { clearView, loadView, makeViewSaver } from './viewstate'
 import { fitToContent } from './zoomfit'
 
@@ -68,7 +67,7 @@ import { fitToContent } from './zoomfit'
 // active color (settings). Called once per stroke at pointerdown.
 const makeBrush = (): BrushConfig => ({ ...BRUSH_PRESETS[getBrushId()], color: getColor() })
 
-const ZOOM_WHEEL_FACTOR = 1.0015 // per pixel of deltaY when zooming
+const ZOOM_WHEEL_FACTOR = 1.0015 // per pixel of deltaY
 
 async function main(): Promise<void> {
   initTheme()
@@ -79,9 +78,9 @@ async function main(): Promise<void> {
   const target = setupCanvas(root)
   const camera = makeCamera()
 
-  // Restore last-saved camera position. Per-device, so no sync; reset on
-  // clear-board. The board is infinite — there is no canonical "origin" the
-  // user thinks of as home, just wherever they left off.
+  // Restore last-saved camera position. Per-device, no sync; reset on clear-
+  // board. Infinite canvas has no canonical "origin" — wherever you left off
+  // is home.
   const persistedView = loadView()
   if (persistedView) {
     camera.x = persistedView.x
@@ -90,33 +89,27 @@ async function main(): Promise<void> {
   }
   const viewSaver = makeViewSaver(camera)
 
+  // ---------------------------------------------------------------------
+  //  Static UI: metrics HUD, help overlay, help pill
+  // ---------------------------------------------------------------------
   const metrics = new MetricsCollector()
   const hud = createHud()
   document.body.appendChild(hud.el)
   bindHudToggle(hud)
-  // HUD defaults to hidden — `M` toggles it on. Most of the time the user just
-  // wants to draw; the metrics surface only when something's worth measuring.
-  hud.setVisible(false)
+  hud.setVisible(false) // M to toggle
 
   document.body.appendChild(createHelpPill())
-
   const help = createHelpOverlay()
   document.body.appendChild(help.el)
 
-  // Render state
+  // ---------------------------------------------------------------------
+  //  App state — strokes + op-based undo / redo (ADR 0006)
+  // ---------------------------------------------------------------------
   const strokes: Stroke[] = []
-  // Operation-based undo / redo. Each new committed action pushes an Op to
-  // undoStack and clears redoStack. Undo pops from undoStack, unapplies,
-  // pushes to redoStack. Redo is the inverse. Not persisted: redo history
-  // dies on reload, which matches every other drawing tool.
   const undoStack: Op[] = []
   const redoStack: Op[] = []
-  let liveStroke: Stroke | null = null
-  let livePredicted: Sample[] = []
-  let liveAsFinal = false // shift-constrained → render with last:true so the cap shows live
   let committedDirty = true
 
-  // Hydrate from local storage before the first render.
   try {
     const persisted = await loadAllStrokes()
     strokes.push(...persisted)
@@ -124,125 +117,123 @@ async function main(): Promise<void> {
     console.warn('whiteboard/web: failed to load persisted strokes:', err)
   }
 
-  // Camera-aware coordinate transform for the pointer pipeline.
-  //
-  // Performance: `getBoundingClientRect()` is normally cheap on a static
-  // fixed-position element, but unrelated DOM mutations (popover open/close,
-  // dataset.input changes, theme toggle) invalidate layout and force a
-  // relayout on the next call. Calling it 200 times/sec during a Wacom
-  // stroke surfaced as input lag. Cache the rect and refresh it only when
-  // the viewport actually changes.
+  // ---------------------------------------------------------------------
+  //  Pointer-coordinate mapping. Cached canvas rect (M1.5 perf fix).
+  // ---------------------------------------------------------------------
   let canvasRect = root.getBoundingClientRect()
-  const refreshCanvasRect = (): void => {
+  window.addEventListener('resize', () => {
     canvasRect = root.getBoundingClientRect()
-  }
-  window.addEventListener('resize', refreshCanvasRect)
+  })
+  const toBoard = (clientX: number, clientY: number): { x: number; y: number } =>
+    screenToBoard(camera, clientX - canvasRect.left, clientY - canvasRect.top)
 
-  const toBoard = (clientX: number, clientY: number): { x: number; y: number } => {
-    return screenToBoard(camera, clientX - canvasRect.left, clientY - canvasRect.top)
-  }
-
-  /**
-   * Render the in-flight stroke immediately. Called synchronously inside
-   * pointer handlers so wet ink reaches the screen the same frame the pen
-   * moved, rather than waiting for the next RAF (saves ~8 ms p50). Safe because
-   * the canvas context is `desynchronized` and only the live layer is touched.
-   */
-  const renderLive = (): void => {
-    clearLayer(target.live)
-    if (!liveStroke) return
-    applyCamera(target.live, camera, target.dpr)
-    const path = getStrokePath(liveStroke, livePredicted, liveAsFinal)
-    if (path) {
-      drawStrokePath(
-        target.live,
-        path,
-        resolveInkColor(liveStroke.brush.color),
-        effectiveOpacity(liveStroke),
-      )
-    }
-  }
-
-  /**
-   * Pen-hover preview. Each brush gets a slightly different cursor shape so
-   * the user sees what they're about to draw — pen / marker / pencil / brush
-   * are circles of varying weight; highlighter is a chisel-shaped rectangle.
-   * Renders on the live layer; replaced by the actual stroke when drawing
-   * starts.
-   */
-  const renderPenHover = (boardX: number, boardY: number): void => {
-    if (liveStroke) return
-    const brushId = getBrushId()
-    const preset = BRUSH_PRESETS[brushId]
-    clearLayer(target.live)
-    applyCamera(target.live, camera, target.dpr)
-    const c = target.live.ctx
-    c.save()
-    const color = resolveInkColor(getColor())
-    c.fillStyle = color
-    if (brushId === 'highlighter') {
-      // Chisel: wide rectangle, mostly translucent.
-      c.globalAlpha = 0.45
-      const w = preset.size
-      const h = Math.max(2, preset.size * 0.4)
-      c.fillRect(boardX - w / 2, boardY - h / 2, w, h)
-    } else if (brushId === 'brush') {
-      // Filled core + soft halo to suggest a softer brush.
-      c.globalAlpha = 0.5
-      c.beginPath()
-      c.arc(boardX, boardY, preset.size / 2, 0, Math.PI * 2)
-      c.fill()
-      c.globalAlpha = 0.18
-      c.beginPath()
-      c.arc(boardX, boardY, preset.size * 0.85, 0, Math.PI * 2)
-      c.fill()
-    } else if (brushId === 'marker') {
-      // Bolder, less translucent dot.
-      c.globalAlpha = 0.7
-      c.beginPath()
-      c.arc(boardX, boardY, preset.size / 2, 0, Math.PI * 2)
-      c.fill()
-    } else if (brushId === 'pencil') {
-      // Lighter dot — pencil reads as lower-contrast on paper.
-      c.globalAlpha = 0.4
-      c.beginPath()
-      c.arc(boardX, boardY, preset.size / 2, 0, Math.PI * 2)
-      c.fill()
-    } else {
-      // Pen (default): clean small filled dot.
-      c.globalAlpha = 0.5
-      c.beginPath()
-      c.arc(boardX, boardY, preset.size / 2, 0, Math.PI * 2)
-      c.fill()
-    }
-    c.restore()
-  }
-  const clearHover = (): void => {
-    if (liveStroke) return
-    clearLayer(target.live)
-  }
-
-  const params = new URLSearchParams(location.search)
-  const usePrediction = params.has('predict')
-
-  // Single hook every camera-mutating action calls into. Marks the committed
-  // layer dirty for the next RAF and queues a debounced save of view state.
+  // ---------------------------------------------------------------------
+  //  Camera-change hook: marks committed dirty + queues view save.
+  // ---------------------------------------------------------------------
   const onCameraChange = (): void => {
     committedDirty = true
     viewSaver.queueSave()
   }
-
   const pan = attachPan({ root, camera, onCameraChange })
 
-  // Right-click → tool menu. Suppress the native contextmenu so our own UI
-  // takes its place. Works with the pen too if the user maps a barrel button
-  // to right-click in their tablet driver — that's the path to fully pen-only
-  // operation, no keyboard or mouse needed.
-  //
-  // Registered with `capture: true` and uses `stopImmediatePropagation` so the
-  // draw-pointer handler (registered earlier via attachPointer) cannot also
-  // see this event. Relying on registration order alone proved fragile when
-  // pen drivers report `button=0, buttons=3` for barrel-as-right-click.
+  // ---------------------------------------------------------------------
+  //  Tool registry. Pen and eraser implement the Tool interface (ADR 0005,
+  //  extended in ADR 0007). Each owns its cursor/stroke rendering and
+  //  contextual menu section. Main.ts only handles cross-tool concerns
+  //  (committing strokes, applying ops, switching tools).
+  // ---------------------------------------------------------------------
+  const params = new URLSearchParams(location.search)
+  const usePrediction = params.has('predict')
+
+  const opCtx: OpContext = {
+    strokes,
+    saveStroke: (s) => {
+      void saveStroke(s).catch((err) => {
+        console.warn('whiteboard/web: failed to persist stroke:', err)
+      })
+    },
+    markDirty: () => {
+      committedDirty = true
+    },
+  }
+
+  const penTool = createPenTool({
+    usePrediction,
+    callbacks: {
+      onStrokeCommit(stroke) {
+        strokes.push(stroke)
+        undoStack.push({ kind: 'create', strokeId: stroke.id })
+        redoStack.length = 0
+        // Don't clear live here — the next RAF redraws committed (with this
+        // stroke baked in) and clears live, avoiding a flicker.
+        committedDirty = true
+        void saveStroke(stroke).catch((err) => {
+          console.warn('whiteboard/web: failed to persist stroke:', err)
+        })
+      },
+    },
+  })
+
+  const eraserTool = createEraserTool({
+    callbacks: {
+      getStrokes: () => strokes,
+      onErase: (ids) => {
+        if (ids.length === 0) return
+        const op: Op = { kind: 'delete', strokeIds: ids }
+        applyOp(op, opCtx)
+        undoStack.push(op)
+        redoStack.length = 0
+      },
+    },
+  })
+
+  const allTools: Record<'pen' | 'eraser', Tool> = { pen: penTool, eraser: eraserTool }
+  const tool: { current: Tool } = { current: penTool }
+  const setTool = (id: ToolId): void => {
+    if (tool.current.id === id) return
+    if (id !== 'pen' && id !== 'eraser') return // others land at later milestones
+    tool.current.cleanup?.()
+    tool.current = allTools[id]
+    root.style.cursor = tool.current.cursor ?? ''
+  }
+
+  // ---------------------------------------------------------------------
+  //  Tool context — passed to every tool event. Carries cross-cutting
+  //  capabilities so tools render directly without callbacks.
+  // ---------------------------------------------------------------------
+  const toolCtx: ToolContext = {
+    toBoard,
+    getBrush: makeBrush,
+    liveLayer: target.live,
+    camera,
+    dpr: target.dpr,
+    resolveColor: resolveInkColor,
+  }
+
+  // ---------------------------------------------------------------------
+  //  Pointer pipeline (active tool dispatch + pan filter)
+  // ---------------------------------------------------------------------
+  const detachPointer = attachPointer(root, {
+    getActiveTool: () => tool.current,
+    context: toolCtx,
+    shouldSkip: pan.isPanIntent,
+  })
+
+  // Metrics + last-pointer (for popover anchoring on keyboard shortcuts).
+  let lastPointer = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+  root.addEventListener('pointermove', (e) => {
+    if (!(e instanceof PointerEvent)) return
+    lastPointer = { x: e.clientX, y: e.clientY }
+    const coalesced = e.getCoalescedEvents().length || 1
+    metrics.notePointerEvent(coalesced)
+  })
+
+  // ---------------------------------------------------------------------
+  //  Right-click → tool menu (capture phase + stopImmediatePropagation so
+  //  the draw handler can't see right-click; pen drivers can fire
+  //  button=0,buttons=3 for barrel-as-right-click and we want to handle it
+  //  cleanly regardless).
+  // ---------------------------------------------------------------------
   root.addEventListener('contextmenu', (e) => e.preventDefault())
   root.addEventListener(
     'pointerdown',
@@ -256,13 +247,8 @@ async function main(): Promise<void> {
       }
       openToolMenu({
         at: { x: e.clientX, y: e.clientY },
-        getActiveToolId,
-        getActiveBrushId: getBrushId,
-        getEraserSize,
-        getEraserMode,
+        getActiveTool: () => tool.current,
         onSelectTool: setTool,
-        onSelectBrush: setBrushId,
-        onSelectEraserConfig: setEraserConfig,
         onResetZoom: () => {
           resetZoom(camera)
           onCameraChange()
@@ -278,120 +264,9 @@ async function main(): Promise<void> {
     { capture: true },
   )
 
-  const penTool = createPenTool({
-    usePrediction,
-    callbacks: {
-      onStrokeStart(stroke) {
-        liveStroke = stroke
-        livePredicted = []
-        liveAsFinal = false
-        renderLive()
-      },
-      onStrokeUpdate(_stroke, predicted, renderAsFinal) {
-        livePredicted = predicted
-        liveAsFinal = renderAsFinal
-        renderLive()
-      },
-      onHoverMove: renderPenHover,
-      onHoverEnd: clearHover,
-      onStrokeCommit(stroke) {
-        strokes.push(stroke)
-        undoStack.push({ kind: 'create', strokeId: stroke.id })
-        redoStack.length = 0
-        liveStroke = null
-        livePredicted = []
-        liveAsFinal = false
-        // Don't clear live here — RAF redraws committed (with this stroke
-        // baked in via last:true) and then clears live, avoiding a flicker.
-        committedDirty = true
-        void saveStroke(stroke).catch((err) => {
-          console.warn('whiteboard/web: failed to persist stroke:', err)
-        })
-      },
-    },
-  })
-
-  // Eraser cursor renderer — draws a circle outline on the live layer. In
-  // object mode (Shift held) a small filled center dot is added as a target
-  // reticle so the user can tell which mode they're in at a glance.
-  const renderEraserCursor = (
-    boardX: number,
-    boardY: number,
-    radius: number,
-    mode: EraserGestureMode,
-  ): void => {
-    clearLayer(target.live)
-    applyCamera(target.live, camera, target.dpr)
-    const c = target.live.ctx
-    c.save()
-    c.strokeStyle = 'rgba(239, 68, 68, 0.7)'
-    c.lineWidth = 1.5 / camera.scale
-    c.beginPath()
-    c.arc(boardX, boardY, radius, 0, Math.PI * 2)
-    c.stroke()
-    if (mode === 'object') {
-      c.fillStyle = 'rgba(239, 68, 68, 0.85)'
-      c.beginPath()
-      c.arc(boardX, boardY, Math.max(2 / camera.scale, 1.5), 0, Math.PI * 2)
-      c.fill()
-    }
-    c.restore()
-  }
-
-  const eraserTool = createEraserTool({
-    getRadius: () => ERASER_RADII[getEraserSize()],
-    getMode: getEraserMode,
-    callbacks: {
-      getStrokes: () => strokes,
-      onErase: (ids) => {
-        if (ids.length === 0) return
-        const op: Op = { kind: 'delete', strokeIds: ids }
-        applyOp(op, opCtx)
-        undoStack.push(op)
-        redoStack.length = 0
-      },
-      onCursorMove: renderEraserCursor,
-      onCursorEnd: () => {
-        clearLayer(target.live)
-      },
-    },
-  })
-
-  // Active-tool state, boxed in a ref so tool switching is a single field
-  // write. setTool handles cleanup of the outgoing tool and applies the
-  // incoming tool's preferred cursor.
-  const allTools: Record<'pen' | 'eraser', Tool> = { pen: penTool, eraser: eraserTool }
-  const tool: { current: Tool } = { current: penTool }
-  const setTool = (id: ToolId): void => {
-    if (tool.current.id === id) return
-    if (id !== 'pen' && id !== 'eraser') return // others not implemented yet
-    tool.current.cleanup?.()
-    tool.current = allTools[id]
-    root.style.cursor = tool.current.cursor ?? ''
-  }
-  const getActiveToolId = (): ToolId => tool.current.id
-
-  const detachPointer = attachPointer(root, {
-    getActiveTool: () => tool.current,
-    context: { toBoard, getBrush: makeBrush },
-    shouldSkip: pan.isPanIntent,
-  })
-
-  // Metrics + last-pointer tracking: a single pointermove listener on the
-  // canvas root. The previous version also had a document-level pointermove
-  // for "track cursor when it's over a popover," but that listener fired on
-  // every pointer movement anywhere in the document — non-trivial overhead
-  // for a marginal edge case. Removed; popovers anchor at the last canvas
-  // pointer position, which is correct in all common flows.
-  let lastPointer = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
-  root.addEventListener('pointermove', (e) => {
-    if (!(e instanceof PointerEvent)) return
-    lastPointer = { x: e.clientX, y: e.clientY }
-    const coalesced = e.getCoalescedEvents().length || 1
-    metrics.notePointerEvent(coalesced)
-  })
-
-  // Wheel: pan (plain) or zoom (Cmd/Ctrl/pinch).
+  // ---------------------------------------------------------------------
+  //  Wheel — pan (plain) or zoom (Cmd/Ctrl/pinch).
+  // ---------------------------------------------------------------------
   root.addEventListener(
     'wheel',
     (e) => {
@@ -399,8 +274,7 @@ async function main(): Promise<void> {
       const fx = e.clientX - canvasRect.left
       const fy = e.clientY - canvasRect.top
       if (e.ctrlKey || e.metaKey) {
-        const factor = ZOOM_WHEEL_FACTOR ** -e.deltaY
-        zoomAt(camera, fx, fy, factor)
+        zoomAt(camera, fx, fy, ZOOM_WHEEL_FACTOR ** -e.deltaY)
       } else {
         panByScreen(camera, -e.deltaX, -e.deltaY)
       }
@@ -409,27 +283,27 @@ async function main(): Promise<void> {
     { passive: false },
   )
 
-  // Theme change: re-render committed strokes (color / grid follow theme).
+  // ---------------------------------------------------------------------
+  //  Theme + settings change hooks
+  // ---------------------------------------------------------------------
   document.documentElement.addEventListener('themechange', () => {
     committedDirty = true
   })
-
-  // Settings change: grid type / spacing / color affects what's rendered.
   onSettingsChange(() => {
     committedDirty = true
   })
 
+  // ---------------------------------------------------------------------
+  //  Clear-board flow
+  // ---------------------------------------------------------------------
   const clearFlow = createClearFlow({
     onPerformClear: () => {
-      // Clear is a destructive boundary by design — undo / redo stacks are
-      // reset along with the in-memory strokes and the IDB store. This is
-      // the one operation that's *not* an Op (see ops.ts).
+      // Destructive boundary by design — undo/redo stacks reset alongside
+      // the in-memory strokes and the IDB store. See ops.ts (clear is *not*
+      // an Op).
       strokes.length = 0
       undoStack.length = 0
       redoStack.length = 0
-      // Reset to the canonical origin on clear — gives the user a known
-      // starting point, since the infinite-canvas "wherever you left off"
-      // semantic is no longer meaningful with no strokes.
       camera.x = 0
       camera.y = 0
       camera.scale = 1
@@ -441,27 +315,15 @@ async function main(): Promise<void> {
     },
   })
 
-  // Operation-based undo / redo. Apply / unapply are uniform across stroke
-  // creation, future eraser deletes, and future lasso moves — see ops.ts.
-  const opCtx: OpContext = {
-    strokes,
-    saveStroke: (s) => {
-      void saveStroke(s).catch((err) => {
-        console.warn('whiteboard/web: failed to persist stroke:', err)
-      })
-    },
-    markDirty: () => {
-      committedDirty = true
-    },
-  }
-
+  // ---------------------------------------------------------------------
+  //  Undo / redo
+  // ---------------------------------------------------------------------
   const undo = (): void => {
     const op = undoStack.pop()
     if (!op) return
     unapplyOp(op, opCtx)
     redoStack.push(op)
   }
-
   const redo = (): void => {
     const op = redoStack.pop()
     if (!op) return
@@ -469,6 +331,9 @@ async function main(): Promise<void> {
     undoStack.push(op)
   }
 
+  // ---------------------------------------------------------------------
+  //  Keyboard shortcuts
+  // ---------------------------------------------------------------------
   attachKeymap({
     undo,
     redo,
@@ -514,10 +379,11 @@ async function main(): Promise<void> {
     },
   })
 
-  // Render loop. The committed layer is rebuilt only when something invalidates
-  // it (camera change, stroke commit, theme change). The live layer is rendered
-  // synchronously inside pointer handlers (renderLive) for minimum latency, so
-  // RAF only touches live to refresh after committed redraws.
+  // ---------------------------------------------------------------------
+  //  Render loop. Committed layer rebuilt on dirty (camera, commit, theme,
+  //  settings). Live layer is owned by the active tool; we ask it to redraw
+  //  after committed redraws so in-flight content survives camera changes.
+  // ---------------------------------------------------------------------
   function frame(now: DOMHighResTimeStamp): void {
     metrics.noteFrame(now)
 
@@ -526,8 +392,6 @@ async function main(): Promise<void> {
       drawGrid(target.committed, camera, target.width, target.height, getSettings().grid)
       applyCamera(target.committed, camera, target.dpr)
 
-      // Viewport in board coordinates — strokes whose AABB doesn't intersect
-      // this rectangle are skipped. Pure perf win as boards grow.
       const viewBBox = {
         minX: camera.x,
         minY: camera.y,
@@ -539,19 +403,15 @@ async function main(): Promise<void> {
         if (s.deleted) continue
         if (!bboxesIntersect(getStrokeBBox(s), viewBBox)) continue
         const path = getStrokePath(s, [], true)
-        if (path) {
-          drawStrokePath(
-            target.committed,
-            path,
-            resolveInkColor(s.brush.color),
-            effectiveOpacity(s),
-          )
-        }
+        if (!path) continue
+        drawStrokePath(target.committed, path, resolveInkColor(s.brush.color), effectiveOpacity(s))
       }
       committedDirty = false
-      // Refresh live layer too (camera transform, or just-committed stroke now
-      // belongs to the committed layer and should disappear from live).
-      renderLive()
+
+      // Live layer needs to refresh too: clear stale content; ask the active
+      // tool to re-render its in-flight state if any.
+      clearLayer(target.live)
+      tool.current.redraw?.(toolCtx)
     }
 
     hud.update(metrics.state)
@@ -559,12 +419,12 @@ async function main(): Promise<void> {
   }
   requestAnimationFrame(frame)
 
-  // Cleanup on unload (mostly belt-and-suspenders for HMR).
+  // Cleanup on unload (HMR safety).
   window.addEventListener('beforeunload', () => detachPointer())
 
   // Perftest mode.
   if (params.has('perftest')) {
-    void runPerfMode(camera, target, root, () => {
+    void runPerfMode(camera, target, () => {
       committedDirty = true
     })
   }
@@ -573,7 +433,6 @@ async function main(): Promise<void> {
 async function runPerfMode(
   camera: ReturnType<typeof makeCamera>,
   target: ReturnType<typeof setupCanvas>,
-  _root: HTMLElement,
   markCommittedDirty: () => void,
 ): Promise<void> {
   const banner = document.createElement('div')
@@ -588,23 +447,22 @@ async function runPerfMode(
     startedAt: performance.now(),
   }
 
-  const drawSynth = (last: boolean): void => {
-    const path = getStrokePath(synth, [], last)
-    if (!path) return
-    drawStrokePath(target.live, path, resolveInkColor(synth.brush.color), synth.brush.opacity ?? 1)
-  }
-
   const result = await runPerftest({ width: target.width, height: target.height }, (s: Sample) => {
-    // Translate screen-space synth coordinates into board space so the stroke
-    // ends up where expected under the current camera.
     const board = screenToBoard(camera, s.x, s.y)
     synth.samples.push({ ...s, x: board.x, y: board.y })
     clearLayer(target.live)
     applyCamera(target.live, camera, target.dpr)
-    drawSynth(false)
+    const path = getStrokePath(synth, [], false)
+    if (path) {
+      drawStrokePath(
+        target.live,
+        path,
+        resolveInkColor(synth.brush.color),
+        synth.brush.opacity ?? 1,
+      )
+    }
   })
 
-  // Commit synthetic stroke to the committed layer so it stays after dismiss.
   const finalPath = getStrokePath(synth, [], true)
   if (finalPath) {
     drawStrokePath(
@@ -637,8 +495,6 @@ async function runPerfMode(
     'JS-side input-to-render only. Compositor + display latency adds ~16–32 ms on typical hardware. Tap or click anywhere to dismiss.'
   note.style.cssText = 'margin-top:12px;font-size:11px;color:var(--fg-muted);max-width:520px'
   banner.appendChild(note)
-
-  // Allow click-anywhere to dismiss
   banner.style.pointerEvents = 'auto'
   banner.addEventListener('click', () => banner.remove(), { once: true })
 }

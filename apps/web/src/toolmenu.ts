@@ -1,49 +1,26 @@
 /**
- * Tool menu — opens on right-click (or pen barrel-button mapped to right-
- * click). Designed for fully pen-only operation: tap a swatch to apply a
- * color, tap a brush to select a preset, tap a tool to switch tools, tap a
- * view action to run it. The menu then dismisses automatically.
+ * Right-click tool menu. Thin dispatcher: hosts the active tool's contextual
+ * section (which the tool itself builds), then the static TOOL / VIEW /
+ * CLEAR sections below.
  *
- * Layout (sections labelled to keep the menu scannable as it grows):
+ * Designed for fully pen-only operation: tap to select, menu dismisses.
  *
- *   COLOR
- *   [color swatches grid]
+ * Layout:
+ *
+ *   [active tool's contextual section]   ← e.g. COLOR + BRUSH for Draw,
+ *                                          ERASER for Eraser, etc.
  *   ─
- *   BRUSH
- *   [Pen | Marker | Pencil | Hi | Brush]   brush preset pills
+ *   TOOL   [Draw | Eraser | Lasso | Laser | Text]
  *   ─
- *   TOOL
- *   [Draw | Eraser | Lasso | Laser | Text]  tool pills
- *   ─
- *   VIEW
- *   Reset zoom
- *   Fit to view
- *   Grid options…
+ *   VIEW   [Reset zoom · Fit to view · Grid options…]
  *   ─
  *   Clear board…
- *
- * Tool pills for Lasso / Laser / Text are placeholder-disabled today; they
- * enable as their backing implementations land.
  */
 
-import { BRUSH_IDS, BRUSH_LABELS, type BrushId } from './brushes'
+import { fullItem, pill, pillRow, sectionLabel, separator } from './menu-ui'
 import { openOptionsMenu } from './optionsmenu'
 import { type Popover, showPopover } from './popover'
-import { type EraserMode, type EraserSize, getColor, setColor } from './settings'
-import type { ToolId } from './tools'
-
-const PALETTE: readonly string[] = [
-  'ink',
-  '#ef4444',
-  '#f97316',
-  '#eab308',
-  '#22c55e',
-  '#06b6d4',
-  '#3b82f6',
-  '#a855f7',
-  '#ec4899',
-  '#6b7280',
-]
+import type { Tool, ToolId } from './tools'
 
 interface ToolDef {
   id: ToolId
@@ -61,48 +38,14 @@ const TOOLS: readonly ToolDef[] = [
 
 export interface ToolMenuOptions {
   at: { x: number; y: number }
-  getActiveToolId: () => ToolId
-  getActiveBrushId: () => BrushId
-  getEraserSize: () => EraserSize
-  getEraserMode: () => EraserMode
+  /** The currently-active tool. Its `renderContextualMenu` (if any) is what
+   *  builds the menu's first section. */
+  getActiveTool: () => Tool
   onSelectTool: (id: ToolId) => void
-  onSelectBrush: (id: BrushId) => void
-  onSelectEraserConfig: (config: { mode: EraserMode; size?: EraserSize }) => void
   onResetZoom: () => void
   onZoomToFit: () => void
   onClear: () => void
 }
-
-interface EraserPill {
-  label: string
-  /** What happens when this pill is selected. */
-  config: { mode: EraserMode; size?: EraserSize }
-  /** Predicate against current state to decide if this pill is active. */
-  isActive: (mode: EraserMode, size: EraserSize) => boolean
-}
-
-const ERASER_PILLS: readonly EraserPill[] = [
-  {
-    label: 'Small',
-    config: { mode: 'wipe', size: 'small' },
-    isActive: (m, s) => m === 'wipe' && s === 'small',
-  },
-  {
-    label: 'Medium',
-    config: { mode: 'wipe', size: 'medium' },
-    isActive: (m, s) => m === 'wipe' && s === 'medium',
-  },
-  {
-    label: 'Large',
-    config: { mode: 'wipe', size: 'large' },
-    isActive: (m, s) => m === 'wipe' && s === 'large',
-  },
-  {
-    label: 'Item',
-    config: { mode: 'item' },
-    isActive: (m) => m === 'item',
-  },
-]
 
 export function openToolMenu(opts: ToolMenuOptions): Popover {
   const root = document.createElement('div')
@@ -111,106 +54,35 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
   const popoverRef: { current?: Popover } = {}
   const dismiss = (): void => popoverRef.current?.dismiss()
 
-  // The contextual sections (COLOR + BRUSH for Draw, ERASER SIZE for Eraser,
-  // etc.) come first so the user's eye lands on the most relevant controls.
-  // The TOOL row is below them — switching tools rebuilds the menu next time.
-  const activeToolId = opts.getActiveToolId()
-  const renderContextualForDraw = (): void => {
-    root.appendChild(sectionLabel('Color'))
-    const palette = document.createElement('div')
-    palette.className = 'whiteboard-tools-palette'
-    for (const c of PALETTE) {
-      palette.appendChild(
-        swatch(c, () => {
-          setColor(c)
-          dismiss()
-        }),
-      )
-    }
-    root.appendChild(palette)
-
-    root.appendChild(separator())
-    root.appendChild(sectionLabel('Brush'))
-    const brushRow = document.createElement('div')
-    brushRow.className = 'whiteboard-tools-row'
-    const activeBrush = opts.getActiveBrushId()
-    for (const id of BRUSH_IDS) {
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = 'whiteboard-tool-pill'
-      if (id === activeBrush) btn.classList.add('active')
-      btn.textContent = id === 'highlighter' ? 'Hi' : BRUSH_LABELS[id]
-      btn.title = BRUSH_LABELS[id]
-      btn.addEventListener('click', () => {
-        opts.onSelectBrush(id)
-        dismiss()
-      })
-      brushRow.appendChild(btn)
-    }
-    root.appendChild(brushRow)
+  // Active tool's contextual section comes first (closest to the cursor).
+  const activeTool = opts.getActiveTool()
+  if (activeTool.renderContextualMenu) {
+    activeTool.renderContextualMenu(root, dismiss)
   }
 
-  const renderContextualForEraser = (): void => {
-    root.appendChild(sectionLabel('Eraser'))
-    const row = document.createElement('div')
-    row.className = 'whiteboard-tools-row'
-    const mode = opts.getEraserMode()
-    const size = opts.getEraserSize()
-    for (const pill of ERASER_PILLS) {
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = 'whiteboard-tool-pill'
-      if (pill.isActive(mode, size)) btn.classList.add('active')
-      btn.textContent = pill.label
-      btn.title =
-        pill.config.mode === 'item'
-          ? 'Tap a single stroke to delete it'
-          : `Wipe — ${pill.label.toLowerCase()} radius`
-      btn.addEventListener('click', () => {
-        opts.onSelectEraserConfig(pill.config)
-        dismiss()
-      })
-      row.appendChild(btn)
-    }
-    root.appendChild(row)
-  }
-
-  if (activeToolId === 'pen') {
-    renderContextualForDraw()
-  } else if (activeToolId === 'eraser') {
-    renderContextualForEraser()
-  }
-  // Other tools (lasso / laser / text) get their own contextual sections as
-  // they land. Until then, only the TOOL row is visible.
-
-  // ---- TOOL ---------------------------------------------------------
-  root.appendChild(separator())
+  // TOOL row.
+  if (root.childNodes.length > 0) root.appendChild(separator())
   root.appendChild(sectionLabel('Tool'))
-  const toolsRow = document.createElement('div')
-  toolsRow.className = 'whiteboard-tools-row'
-  const activeId = opts.getActiveToolId()
+  const toolsRow = pillRow()
   for (const t of TOOLS) {
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = 'whiteboard-tool-pill'
-    if (t.id === activeId) btn.classList.add('active')
-    if (!t.enabled) {
-      btn.classList.add('disabled')
-      btn.disabled = true
-      btn.title = 'Coming soon'
-    }
-    btn.textContent = t.label
-    if (t.enabled) {
-      btn.addEventListener('click', () => {
-        opts.onSelectTool(t.id)
-        dismiss()
-      })
-    }
-    toolsRow.appendChild(btn)
+    toolsRow.appendChild(
+      pill({
+        label: t.label,
+        title: t.enabled ? undefined : 'Coming soon',
+        active: t.id === activeTool.id,
+        disabled: !t.enabled,
+        onClick: t.enabled
+          ? () => {
+              opts.onSelectTool(t.id)
+              dismiss()
+            }
+          : undefined,
+      }),
+    )
   }
   root.appendChild(toolsRow)
 
-  // ---- VIEW ---------------------------------------------------------
+  // VIEW section.
   root.appendChild(separator())
   root.appendChild(sectionLabel('View'))
   root.appendChild(
@@ -232,7 +104,7 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
     }),
   )
 
-  // ---- CLEAR --------------------------------------------------------
+  // Destructive — at the bottom, separated.
   root.appendChild(separator())
   root.appendChild(
     fullItem('Clear board…', () => {
@@ -248,49 +120,4 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
     tag: 'tools',
   })
   return popoverRef.current
-}
-
-function swatch(color: string, onClick: () => void): HTMLButtonElement {
-  const sw = document.createElement('button')
-  sw.type = 'button'
-  sw.className = 'whiteboard-color-swatch whiteboard-color-swatch-small'
-  sw.dataset.color = color
-  sw.title = color === 'ink' ? 'theme ink' : color
-  sw.setAttribute('aria-label', sw.title)
-  if (color === 'ink') sw.classList.add('whiteboard-color-swatch-ink')
-  else sw.style.background = color
-  if (getColor() === color) sw.classList.add('active')
-  sw.addEventListener('click', onClick)
-  return sw
-}
-
-function pill(label: string, onClick: () => void): HTMLButtonElement {
-  const btn = document.createElement('button')
-  btn.type = 'button'
-  btn.className = 'whiteboard-tool-pill'
-  btn.textContent = label
-  btn.addEventListener('click', onClick)
-  return btn
-}
-
-function fullItem(label: string, onClick: () => void): HTMLButtonElement {
-  const btn = document.createElement('button')
-  btn.type = 'button'
-  btn.className = 'whiteboard-tool-item'
-  btn.textContent = label
-  btn.addEventListener('click', onClick)
-  return btn
-}
-
-function separator(): HTMLDivElement {
-  const el = document.createElement('div')
-  el.className = 'whiteboard-tool-sep'
-  return el
-}
-
-function sectionLabel(text: string): HTMLDivElement {
-  const el = document.createElement('div')
-  el.className = 'whiteboard-tools-section-label'
-  el.textContent = text
-  return el
 }

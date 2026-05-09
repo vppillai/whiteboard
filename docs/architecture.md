@@ -44,8 +44,12 @@ Key submodules:
 
 | Module          | Status   | Responsibility                                           |
 |-----------------|----------|----------------------------------------------------------|
-| `pointer.ts`    | M1.4 ✅  | Pure event router; dispatches to active `Tool` (ADR 0005). |
-| `tools/`        | M1.4 ✅  | `Tool` interface + `PenTool` impl. Eraser / lasso / etc. land at M1+. |
+| `pointer.ts`    | M1.4 ✅  | Pure event router; dispatches to active `Tool` (ADR 0005, extended in 0007). |
+| `tools/types.ts`| M1.6 ✅  | `Tool` + `ToolContext` interfaces (cursor / menu / redraw owned by tools). |
+| `tools/pen.ts`  | M1.6 ✅  | Drawing tool — strokes, hover preview per brush, COLOR + BRUSH menu section. |
+| `tools/eraser.ts`| M1.6 ✅ | Eraser — wipe / item modes, cursor reticle, ERASER menu section. |
+| `brushes.ts`    | M1 ✅   | Five brush presets (pen / marker / pencil / highlighter / brush). |
+| `menu-ui.ts`    | M1.6 ✅  | Shared DOM helpers — sectionLabel / pill / swatch / fullItem / separator. |
 | `ops.ts`        | M1.4 ✅  | Operation-based undo (create / delete / move). ADR 0006. |
 | `stroke.ts`     | M0 ✅    | Stroke geometry via `perfect-freehand`; pressure curve.  |
 | `render.ts`     | M0 ✅    | Two-canvas render loop with camera transform.            |
@@ -196,8 +200,14 @@ This section reflects what is *actually in the code right now*. It is updated at
 | Metrics HUD + perftest            | ✅ Complete    | `M` to toggle; `?perftest=1` runs synthetic harness.     |
 | Brushes (marker / pencil / etc.)  | ❌ Not started | M1.                                                      |
 | **Undo / redo**                   | ✅ Complete    | Pulled forward from M1; M1.4 rewrote as op-based (ADR 0006). |
-| **Tool abstraction**              | ✅ Complete    | M1.4; ADR 0005. PenTool is the only impl; eraser / lasso land at M1. |
+| **Tool abstraction**              | ✅ Complete    | M1.4 + M1.6; ADRs 0005 + 0007. Tools own cursor / stroke / menu rendering. |
 | **Soft-delete strokes**           | ✅ Complete    | M1.4; `Stroke.deleted` flag, render filter, op-driven flips. |
+| **Brushes (pen / marker / pencil / highlighter / brush)** | ✅ Complete | M1; 1–5 keys + right-click menu BRUSH section. |
+| **Eraser (wipe + item modes, sizes)** | ✅ Complete | M1; `E` shortcut + 4-pill ERASER section in menu. Sizes 6/12/24 px wipe + Item single-stroke. |
+| **Stroke clipping (off-viewport cull)** | ✅ Complete | M1; AABB cache, viewport intersection check in render loop. |
+| **Shift-constrained drawing**     | ✅ Complete    | M1; pen tool snaps to straight line while Shift held. |
+| **`Cmd/Ctrl+1` zoom-to-fit**      | ✅ Complete    | M1; bounding-box of non-deleted strokes. |
+| **Brush-aware hover cursor**      | ✅ Complete    | M1; per-brush cursor shape (pen circle / marker bold / pencil light / highlighter chisel / brush halo). |
 | **Color picker** (popover at pointer) | ✅ Complete | M1.5; swatches + recent colors; pin to keep open.        |
 | **Options menu** (popover)        | ✅ Complete    | M1.5; grid type + spacing.                               |
 | **Configurable grid**             | ✅ Complete    | M1.5; dots / lines / ruled / none.                       |

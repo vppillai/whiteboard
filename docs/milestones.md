@@ -12,6 +12,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | M0 | Drawing core: latency, pan/zoom, theme, local persistence, undo/redo     | ✅ *(closed 2026-05-09; tagged `m0-drawing-core`)* |
 | M1.5 | Popover primitive · color picker · options menu · configurable grid    | ⬜     |
 | M1.4 | Refactor pass: tool abstraction, op-based undo, soft-delete, decompose main.ts | ✅ *(closed 2026-05-09; tagged `m1.4-refactor`)* |
+| M1.6 | Tool surface refactor: tools own cursor + contextual menu              | 🟦 *(code complete; feel-test pending)* |
 | M1 | Eraser, lasso, additional brush presets                                  | ⬜     |
 | M1.7 | Settings side panel + sync-ready schema (brush presets, fonts, swatches) | ⬜  |
 | M2 | Toolbar UI, keyboard shortcuts, export                                   | ⬜     |
@@ -110,6 +111,38 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 - Feel-test on the target hardware: the user notices no change in drawing, panning, theme, persistence, undo/redo, or any other interaction. Anything subtly different is a regression.
 - ADRs 0005 and 0006 written; architecture as-built table updated; CHANGELOG entry.
 - Tagged commit `m1.4-refactor`.
+
+### M1.6 — Tool surface refactor ⬜
+
+**Why this exists** (out of order: ships *between* M1.5 and M1's lasso work). The tool abstraction from M1.4 (ADR 0005) was deliberately thin — `onPointerDown / Move / Up` plus an optional cursor CSS string. With pen and eraser shipped, the pattern's gaps are visible: cursor rendering (~85 LOC) and contextual menu sections (~60 LOC) live in `main.ts` and `toolmenu.ts` respectively. Each new tool would replicate. Lasso is going to repeat both. Better to land the extension now so lasso slots in cleanly.
+
+**No behavior change.** Drawing, erasing, hover preview, menu sections — all observable behavior is identical. Pure code reorganization.
+
+**Scope.**
+
+- **Extend `Tool` interface** (ADR 0007 supersedes 0005's interface, retains the rationale):
+  - `renderLive(layer, camera, dpr, pointerState)` — tool owns its live-layer pixels, called after every pointer event
+  - `renderContextualMenu(host, dismiss)` — tool owns its right-click menu section
+- **Extend `ToolContext`** with `liveLayer`, `camera`, `dpr`, `resolveColor` so tools can render directly without callbacks back into `main.ts`.
+- **Move pen hover preview + per-brush cursor shapes** out of `main.ts` and into `tools/pen.ts`.
+- **Move eraser cursor (with mode reticle)** out of `main.ts` and into `tools/eraser.ts`.
+- **Move COLOR + BRUSH section rendering** out of `toolmenu.ts` and into `tools/pen.ts`.
+- **Move ERASER section** out of `toolmenu.ts` and into `tools/eraser.ts`.
+- **New `menu-ui.ts`** with shared DOM helpers (sectionLabel, pill, swatch, fullItem, separator) imported by both tool modules and `toolmenu.ts`.
+- **`toolmenu.ts` becomes a thin dispatcher** that hosts the active tool's contextual menu plus the static TOOL / VIEW / CLEAR sections.
+- **`main.ts`** drops the cursor renderers and most of the per-tool callback wiring. Pen tool's only callback is `onStrokeCommit`; eraser tool's only callback is `onErase`.
+- **ADR 0007 — extended Tool surface.** Documents the choice and the renaming of "thin Tool" (ADR 0005) into the present interface.
+- **Architecture as-built table updated** (it's stale by ~6 commits anyway).
+
+**Exit criteria.**
+
+- Lint, typecheck, build clean.
+- Bundle size ±1 KB gz of M1.5 close (~14 KB gz).
+- Feel-test: drawing, eraser cursor (both modes), hover preview (all 5 brushes), contextual menu (Draw vs Eraser sections) — *visually identical* to before this commit.
+- ADR 0007 written; architecture as-built refreshed; CHANGELOG entry.
+- Tagged commit `m1.6-tool-surface`.
+
+**After M1.6:** Lasso lands as a single new file `tools/lasso.ts` that conforms to the extended Tool. No diffs to `main.ts` or `toolmenu.ts` beyond a registry entry.
 
 ### M1 — Eraser + lasso + brush presets ⬜
 

@@ -2,26 +2,32 @@
  * Eraser tool. Stroke-hit erasing — operates on whole strokes via the
  * `Stroke.deleted` soft-delete flag (ADR 0006); never splits stroke geometry.
  *
- * Two modes, locked at pointerdown by Shift state:
+ * Two modes, locked at pointerdown:
  *
  *   - **Wipe** (default): drag-through. Every stroke whose path passes within
- *     `(radius + stroke.brush.size/2)` of the eraser cursor gets queued. On
- *     pointerup, the whole queue becomes one delete op.
+ *     `(radius + stroke.brush.size/2)` of the eraser cursor gets queued.
+ *     On pointerup, the whole queue becomes one delete op.
  *
- *   - **Object** (Shift held at pointerdown): a single tap deletes the
- *     **topmost** stroke under the cursor (and only that one). No sweep
- *     accumulation. Surgical removal without touching neighbouring strokes.
+ *   - **Object**: a single tap deletes the **topmost** stroke under the
+ *     cursor (and only that one). Selected as a top-level option from the
+ *     right-click menu, OR temporarily activated by holding Shift at
+ *     pointerdown when in Wipe mode.
  *
  * The cursor visual differentiates the modes — wipe is just the red circle,
  * object adds a small filled center dot (target reticle).
- *
- * Performance: O(eraser_path_length × strokes × samples_per_stroke) for wipe,
- * O(strokes × samples) for object. Stroke clipping (M1) cuts both
- * proportionally to viewport size.
  */
 
 import type { Stroke } from '@whiteboard/shared'
-import type { EraserMode } from '../settings'
+import { pill, pillRow, sectionLabel } from '../menu-ui'
+import { applyCamera, clearLayer } from '../render'
+import {
+  ERASER_RADII,
+  type EraserMode,
+  type EraserSize,
+  getEraserMode,
+  getEraserSize,
+  setEraserConfig,
+} from '../settings'
 import type { Tool, ToolContext } from './types'
 
 /** Visual / behavioral mode at the moment of an eraser gesture. */
@@ -32,84 +38,120 @@ export interface EraserToolCallbacks {
   getStrokes: () => readonly Stroke[]
   /** Emit a delete op for the swept strokes. Called once per gesture. */
   onErase: (strokeIds: string[]) => void
-  /** Live cursor render, board coordinates. Mode passed for visual differentiation. */
-  onCursorMove: (boardX: number, boardY: number, radius: number, mode: EraserGestureMode) => void
-  /** Cursor cleared. */
-  onCursorEnd: () => void
 }
 
 export interface EraserToolOptions {
   callbacks: EraserToolCallbacks
-  /** Eraser hit radius in board-space pixels. Read on every event so a
-   *  size change in settings applies immediately. */
-  getRadius: () => number
-  /**
-   * Default mode. The user may temporarily override to 'item' by holding
-   * Shift at pointerdown — useful when in wipe mode but wanting one
-   * surgical erase.
-   */
-  getMode: () => EraserMode
 }
+
+interface EraserPillSpec {
+  label: string
+  config: { mode: EraserMode; size?: EraserSize }
+  isActive: (mode: EraserMode, size: EraserSize) => boolean
+}
+
+const ERASER_PILLS: readonly EraserPillSpec[] = [
+  {
+    label: 'Small',
+    config: { mode: 'wipe', size: 'small' },
+    isActive: (m, s) => m === 'wipe' && s === 'small',
+  },
+  {
+    label: 'Medium',
+    config: { mode: 'wipe', size: 'medium' },
+    isActive: (m, s) => m === 'wipe' && s === 'medium',
+  },
+  {
+    label: 'Large',
+    config: { mode: 'wipe', size: 'large' },
+    isActive: (m, s) => m === 'wipe' && s === 'large',
+  },
+  {
+    label: 'Item',
+    config: { mode: 'item' },
+    isActive: (m) => m === 'item',
+  },
+]
 
 export function createEraserTool(opts: EraserToolOptions): Tool {
   const swept = new Set<string>()
   let active = false
   let mode: EraserGestureMode = 'wipe'
 
-  /** Wipe-mode hit: accumulate every match within tolerance. */
+  const radius = (): number => ERASER_RADII[getEraserSize()]
+
   const sweepHit = (px: number, py: number): void => {
     for (const stroke of opts.callbacks.getStrokes()) {
       if (stroke.deleted) continue
       if (swept.has(stroke.id)) continue
-      if (strokeNearPoint(stroke, px, py, opts.getRadius())) {
+      if (strokeNearPoint(stroke, px, py, radius())) {
         swept.add(stroke.id)
       }
     }
   }
 
-  /** Object-mode hit: take only the topmost match (last in the strokes array). */
   const objectHit = (px: number, py: number): void => {
     const strokes = opts.callbacks.getStrokes()
     for (let i = strokes.length - 1; i >= 0; i--) {
       const stroke = strokes[i]
       if (!stroke || stroke.deleted || swept.has(stroke.id)) continue
-      if (strokeNearPoint(stroke, px, py, opts.getRadius())) {
+      if (strokeNearPoint(stroke, px, py, radius())) {
         swept.add(stroke.id)
         return
       }
     }
   }
 
+  const renderCursor = (
+    boardX: number,
+    boardY: number,
+    gestureMode: EraserGestureMode,
+    ctx: ToolContext,
+  ): void => {
+    clearLayer(ctx.liveLayer)
+    applyCamera(ctx.liveLayer, ctx.camera, ctx.dpr)
+    const c = ctx.liveLayer.ctx
+    c.save()
+    c.strokeStyle = 'rgba(239, 68, 68, 0.7)'
+    c.lineWidth = 1.5 / ctx.camera.scale
+    c.beginPath()
+    c.arc(boardX, boardY, radius(), 0, Math.PI * 2)
+    c.stroke()
+    if (gestureMode === 'object') {
+      c.fillStyle = 'rgba(239, 68, 68, 0.85)'
+      c.beginPath()
+      c.arc(boardX, boardY, Math.max(2 / ctx.camera.scale, 1.5), 0, Math.PI * 2)
+      c.fill()
+    }
+    c.restore()
+  }
+
   const cancel = (): void => {
     active = false
     swept.clear()
-    opts.callbacks.onCursorEnd()
   }
 
   return {
     id: 'eraser',
     cursor: 'none',
+
     onPointerDown(e, ctx) {
       const { x, y } = ctx.toBoard(e.clientX, e.clientY)
       active = true
-      // Configured default mode, or item if Shift held (Shift always wins).
-      const wantItem = e.shiftKey || opts.getMode() === 'item'
+      // Configured default mode, with Shift always overriding to item.
+      const wantItem = e.shiftKey || getEraserMode() === 'item'
       mode = wantItem ? 'object' : 'wipe'
       swept.clear()
-      if (mode === 'wipe') {
-        sweepHit(x, y)
-      }
-      opts.callbacks.onCursorMove(x, y, opts.getRadius(), mode)
+      if (mode === 'wipe') sweepHit(x, y)
+      renderCursor(x, y, mode, ctx)
     },
+
     onPointerMove(e, ctx) {
       if (!active) {
-        // Hover: render the cursor so the user sees where they'll erase. The
-        // mode shown is the *prospective* mode — what would happen if they
-        // pressed now (Shift override always wins, otherwise the configured
-        // default applies).
+        // Hover: cursor reflects the *prospective* mode (Shift override + setting).
         const { x, y } = ctx.toBoard(e.clientX, e.clientY)
-        const previewItem = e.shiftKey || opts.getMode() === 'item'
-        opts.callbacks.onCursorMove(x, y, opts.getRadius(), previewItem ? 'object' : 'wipe')
+        const previewItem = e.shiftKey || getEraserMode() === 'item'
+        renderCursor(x, y, previewItem ? 'object' : 'wipe', ctx)
         return
       }
       if (mode === 'wipe') {
@@ -120,32 +162,54 @@ export function createEraserTool(opts: EraserToolOptions): Tool {
           sweepHit(x, y)
         }
       }
-      // Object mode: don't accumulate during move; only commit at pointerup.
       const last = ctx.toBoard(e.clientX, e.clientY)
-      opts.callbacks.onCursorMove(last.x, last.y, opts.getRadius(), mode)
+      renderCursor(last.x, last.y, mode, ctx)
     },
+
     onPointerUp(e, ctx) {
       if (!active) return
       active = false
-      opts.callbacks.onCursorEnd()
       if (mode === 'object') {
         const { x, y } = ctx.toBoard(e.clientX, e.clientY)
         objectHit(x, y)
       }
       if (swept.size > 0) opts.callbacks.onErase([...swept])
       swept.clear()
+      // Clear cursor since the gesture is over; hover render will reappear on
+      // the next pointermove.
+      clearLayer(ctx.liveLayer)
     },
+
+    renderContextualMenu(host, dismiss) {
+      host.appendChild(sectionLabel('Eraser'))
+      const row = pillRow()
+      const m = getEraserMode()
+      const s = getEraserSize()
+      for (const spec of ERASER_PILLS) {
+        row.appendChild(
+          pill({
+            label: spec.label,
+            title:
+              spec.config.mode === 'item'
+                ? 'Tap a single stroke to delete it'
+                : `Wipe — ${spec.label.toLowerCase()} radius`,
+            active: spec.isActive(m, s),
+            onClick: () => {
+              setEraserConfig(spec.config)
+              dismiss()
+            },
+          }),
+        )
+      }
+      host.appendChild(row)
+    },
+
     cleanup: cancel,
   }
 }
 
-/**
- * True if any segment of the stroke passes within `(radius + stroke.brush.size/2)`
- * of the point. Empty / single-sample strokes are tested as a circle around
- * the lone sample.
- */
-function strokeNearPoint(stroke: Stroke, px: number, py: number, radius: number): boolean {
-  const tolerance = radius + stroke.brush.size / 2
+function strokeNearPoint(stroke: Stroke, px: number, py: number, r: number): boolean {
+  const tolerance = r + stroke.brush.size / 2
   const tol2 = tolerance * tolerance
   const samples = stroke.samples
   const n = samples.length

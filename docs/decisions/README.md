@@ -12,6 +12,7 @@ ADRs document non-obvious architectural choices. See [process.md](../process.md)
 | [0004](0004-input-pipeline-tuning.md) | Input pipeline tuned for indirect-input pen tablets | Accepted |
 | [0005](0005-tool-abstraction.md)      | Tool abstraction (pointer router + Tool interface)  | Accepted |
 | [0006](0006-op-based-undo.md)         | Operation-based undo + soft-delete strokes          | Accepted |
+| [0007](0007-tool-surface.md)          | Tool surface — cursor + contextual menu owned by tools | Accepted |
 
 ## Format
 

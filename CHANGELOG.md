@@ -51,6 +51,29 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 - **Options menu** (`O` to open at pointer; `O` again to dismiss). Grid type selector (dots / lines / ruled / none) and spacing pills (16 / 24 / 32 / 48 px). Defaults to pinned because options are usually adjusted iteratively.
 - **Configurable grid lines now visible**. Lines and ruled grids use a separate `--grid-line` CSS token (more visible alpha) than the dot grid's `--grid-dot`. Per-pixel alpha for spread-out lines must be higher than for pixel-sized dots to read at the same overall weight; M1.5's first cut shared the value and lines were nearly invisible.
 
+### Refactored (M1.6 — tool surface; closed)
+
+- **Tool interface extended** (ADR 0007 supersedes 0005's interface). Each tool now owns its cursor / stroke / hover rendering AND its right-click menu section. `ToolContext` carries `liveLayer`, `camera`, `dpr`, `resolveColor` so tools render directly to the live layer without callbacks.
+- **`renderContextualMenu(host, dismiss)`** — pen owns COLOR + BRUSH; eraser owns the 4-pill ERASER section. `toolmenu.ts` becomes a dispatcher that calls `activeTool.renderContextualMenu()`.
+- **`redraw(ctx)`** — orchestrator can ask the active tool to re-render its in-flight state (e.g., during stroke when camera changes). Pen implements; eraser doesn't need it.
+- New `menu-ui.ts` with shared DOM helpers (sectionLabel / pill / swatch / pillRow / fullItem / separator / paletteGrid). Tools import from it; `toolmenu.ts` does too.
+- `main.ts`: 646 → ~500 LOC. `toolmenu.ts`: 296 → ~120 LOC. Pen / eraser tool modules grow proportionally — net structure-not-size win.
+
+### Added (M1 — eraser, brushes, polish)
+
+- **5 brush presets** (Pen / Marker / Pencil / Highlighter / Brush). Switch with `1`–`5` keys or the right-click BRUSH section. Per-brush hover cursor: pen / marker / pencil are filled circles of varying weight; highlighter is a chisel rectangle; brush has a soft halo.
+- **Eraser tool** (`E` shortcut). Two modes:
+  - **Wipe** (default) at three sizes (Small / Medium / Large = 6 / 12 / 24 px). Sweep deletes all crossed strokes as one undoable op.
+  - **Item** — single tap deletes only the topmost stroke under the cursor. Selectable as a 4th pill OR temporarily activated by Shift held during a wipe-mode click.
+  - Cursor: red circle for wipe; circle + center reticle for item. Different cursor in hover when Shift is held so the prospective mode is visible.
+- **Shift-constrained drawing**: hold Shift mid-stroke to snap to a straight line from pointerdown to current cursor. Renders with `last: true` so the line cap shows live, not just on commit.
+- **`Cmd/Ctrl + 1` zoom-to-fit** — fits all non-deleted strokes in the viewport with a margin.
+- **Stroke clipping** — render loop skips strokes whose AABB doesn't intersect the visible viewport. Per-stroke AABB cached in a `WeakMap` (lazy compute, invalidated on `move` op).
+- **Right-click menu reorganized** with section labels (COLOR / BRUSH / TOOL / VIEW). Sections become contextual: Draw shows COLOR + BRUSH; Eraser shows ERASER; future tools own theirs (M1.6 plumbing).
+- **Pen hover preview** — small semi-transparent dot at cursor showing the active brush's effective shape and color. Disappears the instant you start a stroke.
+- **`Fit to view` in the right-click menu** under VIEW.
+- Drawing tool's user-facing label changed `Pen` → `Draw` to disambiguate from the Pen brush preset (internal `ToolId 'pen'` unchanged).
+
 ### Added (M1.4 — refactor pass before M1; closed)
 
 - **Tool abstraction.** New `Tool` interface (`apps/web/src/tools/types.ts`) with `onPointerDown` / `onPointerMove` / `onPointerUp` / optional `cleanup`. `pointer.ts` becomes a pure event router that dispatches to whichever tool is active. `PenTool` (`tools/pen.ts`) is the only implementation today; eraser / lasso / laser / text plug in at M1+ without touching `pointer.ts`. See ADR 0005.
