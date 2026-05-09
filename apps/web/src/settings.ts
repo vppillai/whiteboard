@@ -1,5 +1,5 @@
 /**
- * App-level settings: brush color, recent colors, grid configuration.
+ * App-level settings: active brush, brush color, grid configuration.
  *
  * Single source of truth, persisted to localStorage. Subscribers are notified
  * synchronously on change so the renderer can mark itself dirty.
@@ -8,6 +8,8 @@
  * theme's `--ink` CSS variable at render time (so theme switches reflow
  * existing strokes); any other value is treated as a literal CSS color.
  */
+
+import { type BrushId, isValidBrushId } from './brushes'
 
 export type GridType = 'dots' | 'lines' | 'ruled' | 'none'
 
@@ -19,11 +21,13 @@ export interface GridConfig {
 
 interface PersistedShape {
   color?: string
+  brush?: string
   grid?: { type?: GridType; spacing?: number }
 }
 
 interface State {
   color: string
+  brush: BrushId
   grid: GridConfig
 }
 
@@ -33,6 +37,7 @@ const VALID_SPACINGS: readonly number[] = [16, 24, 32, 48]
 
 const DEFAULTS: State = {
   color: 'ink',
+  brush: 'pen',
   grid: { type: 'dots', spacing: 24 },
 }
 
@@ -46,6 +51,10 @@ function load(): State {
     const parsed = JSON.parse(raw) as PersistedShape
     return {
       color: typeof parsed.color === 'string' ? parsed.color : DEFAULTS.color,
+      brush:
+        typeof parsed.brush === 'string' && isValidBrushId(parsed.brush)
+          ? parsed.brush
+          : DEFAULTS.brush,
       grid: {
         type:
           parsed.grid?.type && VALID_GRID_TYPES.includes(parsed.grid.type)
@@ -63,7 +72,7 @@ function load(): State {
 }
 
 function clone(s: State): State {
-  return { color: s.color, grid: { ...s.grid } }
+  return { color: s.color, brush: s.brush, grid: { ...s.grid } }
 }
 
 function persist(): void {
@@ -89,6 +98,17 @@ export function getColor(): string {
 export function setColor(color: string): void {
   if (state.color === color) return
   state.color = color
+  persist()
+  emit()
+}
+
+export function getBrushId(): BrushId {
+  return state.brush
+}
+
+export function setBrushId(brush: BrushId): void {
+  if (state.brush === brush) return
+  state.brush = brush
   persist()
   emit()
 }

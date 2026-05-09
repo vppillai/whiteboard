@@ -13,6 +13,7 @@ const SHORTCUTS = [
   'right-click        tool menu (pen-friendly)',
   'C                  color picker (at pointer)',
   'O                  options (grid type, spacing)',
+  '1 – 5              brush preset (pen / marker / pencil / hi / brush)',
   '',
   '⌘/Ctrl + Z         undo',
   '⌘/Ctrl + Shift + Z redo   (also ⌘/Ctrl + Y)',

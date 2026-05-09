@@ -11,7 +11,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | —  | Repo + dev / deploy environment                                          | ✅     |
 | M0 | Drawing core: latency, pan/zoom, theme, local persistence, undo/redo     | ✅ *(closed 2026-05-09; tagged `m0-drawing-core`)* |
 | M1.5 | Popover primitive · color picker · options menu · configurable grid    | ⬜     |
-| M1.4 | Refactor pass: tool abstraction, op-based undo, soft-delete, decompose main.ts | 🟦 *(code complete; feel-test pending)* |
+| M1.4 | Refactor pass: tool abstraction, op-based undo, soft-delete, decompose main.ts | ✅ *(closed 2026-05-09; tagged `m1.4-refactor`)* |
 | M1 | Eraser, lasso, additional brush presets                                  | ⬜     |
 | M1.7 | Settings side panel + sync-ready schema (brush presets, fonts, swatches) | ⬜  |
 | M2 | Toolbar UI, keyboard shortcuts, export                                   | ⬜     |

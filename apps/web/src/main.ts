@@ -23,6 +23,7 @@
 
 import './style.css'
 import type { BrushConfig, Sample, Stroke } from '@whiteboard/shared'
+import { BRUSH_IDS, BRUSH_PRESETS } from './brushes'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
 import { createClearFlow } from './clearflow'
 import { openColorPicker } from './colorpicker'
@@ -38,7 +39,13 @@ import { createHelpPill } from './pill'
 import { attachPointer } from './pointer'
 import { dismissAllPopovers, getActiveTag } from './popover'
 import { applyCamera, clearLayer, drawStrokePath, setupCanvas } from './render'
-import { getColor, getSettings, onChange as onSettingsChange } from './settings'
+import {
+  getBrushId,
+  getColor,
+  getSettings,
+  onChange as onSettingsChange,
+  setBrushId,
+} from './settings'
 import { clearAllStrokes, loadAllStrokes, saveStroke } from './storage'
 import { effectiveOpacity, getStrokePath } from './stroke'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
@@ -46,28 +53,9 @@ import { openToolMenu } from './toolmenu'
 import { type Tool, createPenTool } from './tools'
 import { clearView, loadView, makeViewSaver } from './viewstate'
 
-// Default brush shape. Color is supplied at stroke-start time from the settings
-// store so the color picker can change it dynamically.
-//
-// Pressure handling notes:
-//   - `thinning` controls width range; higher = more pressure-sensitive width.
-//   - `pressureGamma` < 1 boosts low-pressure response; > 1 squashes it.
-//   - `opacity` here is the *baseline*; it gets multiplied by a per-stroke
-//     pressure factor in stroke.ts so harder-pressed strokes appear darker.
-const PEN_BRUSH_BASE: Omit<BrushConfig, 'color'> = {
-  size: 3.5,
-  thinning: 0.6,
-  smoothing: 0.72,
-  streamline: 0.4,
-  taperStart: 0,
-  taperEnd: 0,
-  capStart: true,
-  capEnd: true,
-  pressureGamma: 1.3,
-  opacity: 0.94,
-}
-
-const makeBrush = (): BrushConfig => ({ ...PEN_BRUSH_BASE, color: getColor() })
+// Compose a runtime BrushConfig from the active brush preset (shape) and the
+// active color (settings). Called once per stroke at pointerdown.
+const makeBrush = (): BrushConfig => ({ ...BRUSH_PRESETS[getBrushId()], color: getColor() })
 
 const ZOOM_WHEEL_FACTOR = 1.0015 // per pixel of deltaY when zooming
 
@@ -366,6 +354,10 @@ async function main(): Promise<void> {
       else openOptionsMenu(lastPointer)
     },
     toggleHelp: help.toggle,
+    selectBrush: (index1Based) => {
+      const id = BRUSH_IDS[index1Based - 1]
+      if (id) setBrushId(id)
+    },
     cancel: () => {
       let handled = false
       if (clearFlow.cancel()) handled = true

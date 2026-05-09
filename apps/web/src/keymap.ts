@@ -25,6 +25,9 @@ export interface KeyHandlers {
   toggleOptions: () => void
   toggleHelp: () => void
 
+  /** Brush preset by 1-based index (1 → pen … 5 → brush). */
+  selectBrush: (index1Based: number) => void
+
   /**
    * Esc handler. Return `true` if anything was actually cancelled — the
    * dispatcher then calls preventDefault. False / void means "Esc was a
@@ -86,6 +89,11 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       }
       if (k === 'o') {
         preventAndCall(e, handlers.toggleOptions)
+        return
+      }
+      // Brush presets: 1..5 select the corresponding brush.
+      if (e.key >= '1' && e.key <= '5') {
+        handlers.selectBrush(Number(e.key))
         return
       }
     }
