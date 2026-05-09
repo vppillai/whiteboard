@@ -50,6 +50,12 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 - **Color picker** (`C` to open at pointer; `C` again to dismiss). 5×2 swatch grid: theme `ink` token plus nine curated accent colors that read on both light and dark backgrounds. Selection sets the brush color and dismisses unless pinned. Inline "recent colors" row updates on selection, persists across reloads (max 6).
 - **Options menu** (`O` to open at pointer; `O` again to dismiss). Grid type selector (dots / lines / ruled / none) and spacing pills (16 / 24 / 32 / 48 px). Defaults to pinned because options are usually adjusted iteratively.
 - **Configurable grid lines now visible**. Lines and ruled grids use a separate `--grid-line` CSS token (more visible alpha) than the dot grid's `--grid-dot`. Per-pixel alpha for spread-out lines must be higher than for pixel-sized dots to read at the same overall weight; M1.5's first cut shared the value and lines were nearly invisible.
+
+### Changed (M0+ feel polish)
+
+- **Pen-pressure response strengthened**. `thinning` 0.45 → 0.6 (wider line-width range between light and heavy pressure), `pressureGamma` 1.7 → 1.3 (more responsive at low pressure). New: stroke opacity scales with the stroke's average pressure (0.65× to 1.0× of the base brush opacity), so light strokes appear faded and heavy strokes saturated. Per-segment shade *within* a stroke (Procreate-style) requires a different render approach (variable-width line segments instead of a filled outline) — deferred to M2 with an ADR.
+- **Metrics HUD hidden by default.** Press `M` to show. Most of the time the user just wants to draw; the metrics surface only when something's worth measuring.
+- **Theme indicator removed** from the bottom-left pill. Theme cycling is silent now (the visible color change is its own indicator). Pill simplified to "? for help"; help overlay gained a clickable link to the GitHub repo at the bottom.
 - **Configurable grid renderer** (`grid.ts`). Square-line and ruled (horizontal-only) grids in addition to the existing dot grid; reads from the settings store. None disables the grid entirely.
 - **Settings module** (`settings.ts`). Single source of truth for current brush color, recent colors, and grid configuration. Persists to localStorage. Subscribers notified synchronously on change so the renderer can mark itself dirty.
 - Help overlay updated; `Esc` now closes any open popover (and still cancels a pending clear-confirm).

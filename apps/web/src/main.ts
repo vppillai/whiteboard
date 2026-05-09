@@ -34,21 +34,27 @@ import { dismissAllPopovers, getActiveTag } from './popover'
 import { applyCamera, clearLayer, drawStrokePath, setupCanvas } from './render'
 import { getColor, getSettings, onChange as onSettingsChange } from './settings'
 import { clearAllStrokes, deleteStroke, loadAllStrokes, saveStroke } from './storage'
-import { getStrokePath } from './stroke'
-import { cycleMode, getEffective, getMode, initTheme, resolveInkColor } from './theme'
+import { effectiveOpacity, getStrokePath } from './stroke'
+import { cycleMode, initTheme, resolveInkColor } from './theme'
 
 // Default brush shape. Color is supplied at stroke-start time from the settings
 // store so the color picker can change it dynamically.
+//
+// Pressure handling notes:
+//   - `thinning` controls width range; higher = more pressure-sensitive width.
+//   - `pressureGamma` < 1 boosts low-pressure response; > 1 squashes it.
+//   - `opacity` here is the *baseline*; it gets multiplied by a per-stroke
+//     pressure factor in stroke.ts so harder-pressed strokes appear darker.
 const PEN_BRUSH_BASE: Omit<BrushConfig, 'color'> = {
   size: 3.5,
-  thinning: 0.45,
+  thinning: 0.6,
   smoothing: 0.72,
   streamline: 0.4,
   taperStart: 0,
   taperEnd: 0,
   capStart: true,
   capEnd: true,
-  pressureGamma: 1.7,
+  pressureGamma: 1.3,
   opacity: 0.94,
 }
 
@@ -69,10 +75,11 @@ async function main(): Promise<void> {
   const hud = createHud()
   document.body.appendChild(hud.el)
   bindHudToggle(hud)
-  hud.setVisible(true)
+  // HUD defaults to hidden — `M` toggles it on. Most of the time the user just
+  // wants to draw; the metrics surface only when something's worth measuring.
+  hud.setVisible(false)
 
-  const pill = createPill()
-  document.body.appendChild(pill.el)
+  document.body.appendChild(createHelpPill())
 
   const help = createHelp()
   document.body.appendChild(help.el)
@@ -118,7 +125,7 @@ async function main(): Promise<void> {
         target.live,
         path,
         resolveInkColor(liveStroke.brush.color),
-        liveStroke.brush.opacity ?? 1,
+        effectiveOpacity(liveStroke),
       )
     }
   }
@@ -261,9 +268,7 @@ async function main(): Promise<void> {
   // Theme change: re-render committed strokes (color / grid follow theme).
   document.documentElement.addEventListener('themechange', () => {
     committedDirty = true
-    pill.update()
   })
-  pill.update()
 
   // Settings change: grid type / spacing / color affects what's rendered.
   onSettingsChange(() => {
@@ -393,7 +398,6 @@ async function main(): Promise<void> {
     }
     if (e.key === 't' && !meta && !e.altKey && !e.repeat) {
       cycleMode()
-      pill.update()
       return
     }
     if (e.key === 'c' && !meta && !e.altKey && !e.repeat) {
@@ -431,7 +435,7 @@ async function main(): Promise<void> {
             target.committed,
             path,
             resolveInkColor(s.brush.color),
-            s.brush.opacity ?? 1,
+            effectiveOpacity(s),
           )
         }
       }
@@ -457,21 +461,11 @@ async function main(): Promise<void> {
   }
 }
 
-interface Pill {
-  el: HTMLElement
-  update: () => void
-}
-
-function createPill(): Pill {
+function createHelpPill(): HTMLElement {
   const el = document.createElement('div')
   el.id = 'whiteboard-pill'
-  const update = () => {
-    const mode = getMode()
-    const effective = getEffective()
-    const themeStr = mode === 'system' ? `theme: system (${effective})` : `theme: ${mode}`
-    el.textContent = `${themeStr}  ·  ? for help`
-  }
-  return { el, update }
+  el.textContent = '? for help'
+  return el
 }
 
 interface Help {
@@ -483,7 +477,10 @@ function createHelp(): Help {
   const el = document.createElement('div')
   el.id = 'whiteboard-help'
   el.style.display = 'none'
-  el.textContent = [
+
+  const shortcuts = document.createElement('pre')
+  shortcuts.className = 'whiteboard-help-shortcuts'
+  shortcuts.textContent = [
     'C                  color picker (at pointer)',
     'O                  options (grid type, spacing)',
     '',
@@ -504,6 +501,19 @@ function createHelp(): Help {
     'middle-mouse drag  pan',
     'Esc                close popover / cancel',
   ].join('\n')
+  el.appendChild(shortcuts)
+
+  const footer = document.createElement('div')
+  footer.className = 'whiteboard-help-footer'
+  const link = document.createElement('a')
+  link.href = 'https://github.com/vppillai/whiteboard'
+  link.target = '_blank'
+  link.rel = 'noopener noreferrer'
+  link.className = 'whiteboard-help-link'
+  link.textContent = 'github.com/vppillai/whiteboard ↗'
+  footer.appendChild(link)
+  el.appendChild(footer)
+
   const toggle = () => {
     el.style.display = el.style.display === 'none' ? 'block' : 'none'
   }
@@ -551,7 +561,7 @@ async function runPerfMode(
       target.committed,
       finalPath,
       resolveInkColor(synth.brush.color),
-      synth.brush.opacity ?? 1,
+      effectiveOpacity(synth),
     )
   }
   clearLayer(target.live)

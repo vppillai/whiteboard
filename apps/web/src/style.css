@@ -172,16 +172,41 @@ body {
   padding: 10px 14px;
   background: var(--hud-bg);
   color: var(--hud-fg);
-  font: 11px / 1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
   border: 1px solid var(--hud-border);
   border-radius: 8px;
   pointer-events: none;
   z-index: 1000;
-  white-space: pre;
   letter-spacing: 0.01em;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
+  opacity: 0.92;
+}
+
+#whiteboard-help .whiteboard-help-shortcuts {
+  margin: 0;
+  font: 11px / 1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre;
+}
+
+#whiteboard-help .whiteboard-help-footer {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hud-border);
+}
+
+#whiteboard-help .whiteboard-help-link {
+  pointer-events: auto;
+  color: var(--banner-fg);
+  text-decoration: none;
+  font: 10px / 1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.04em;
   opacity: 0.85;
+  transition: opacity 0.12s;
+}
+
+#whiteboard-help .whiteboard-help-link:hover {
+  opacity: 1;
+  text-decoration: underline;
 }
 
 #whiteboard-toast {

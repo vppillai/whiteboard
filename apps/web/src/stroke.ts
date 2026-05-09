@@ -1,10 +1,21 @@
 /**
  * Stroke geometry: turn a Stroke (samples + brush config) into a Path2D
  * suitable for canvas filling. Wraps perfect-freehand.
+ *
+ * Also exposes `effectiveOpacity(stroke)` — the opacity at which the stroke
+ * should render, derived from the brush's base opacity and the stroke's
+ * average pressure. Light-pressure strokes appear faded; heavy-pressure
+ * strokes appear saturated. The variation is *between* strokes, not within
+ * (per-segment alpha would require switching from a filled polygon to a
+ * variable-width line renderer; deferred to a future ADR).
  */
 
 import type { Sample, Stroke } from '@whiteboard/shared'
 import { getStroke } from 'perfect-freehand'
+
+/** Multiplier range applied to brush opacity. min = light pressure, max = heavy. */
+const SHADE_MIN = 0.65
+const SHADE_MAX = 1.0
 
 const sampleToPoint = (s: Sample): [number, number, number] => [s.x, s.y, s.p]
 
@@ -37,6 +48,19 @@ export function getStrokePath(
   })
 
   return outline.length === 0 ? null : outlineToPath2D(outline)
+}
+
+/**
+ * Effective opacity for a stroke, factoring in its average pressure. Returns
+ * `brush.opacity` if no samples; otherwise scales by SHADE_MIN..SHADE_MAX.
+ */
+export function effectiveOpacity(stroke: Stroke): number {
+  const base = stroke.brush.opacity ?? 1
+  if (stroke.samples.length === 0) return base
+  let sum = 0
+  for (const s of stroke.samples) sum += s.p
+  const avgP = sum / stroke.samples.length
+  return base * (SHADE_MIN + (SHADE_MAX - SHADE_MIN) * avgP)
 }
 
 function outlineToPath2D(outline: number[][]): Path2D {
