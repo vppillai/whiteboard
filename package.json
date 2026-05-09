@@ -1,0 +1,36 @@
+{
+  "name": "whiteboard",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Low-latency browser whiteboard tuned for Wacom Intuos.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vppillai/whiteboard.git"
+  },
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "bun run --filter '*' dev",
+    "dev:web": "bun run --filter @whiteboard/web dev",
+    "dev:server": "bun run --filter @whiteboard/server dev",
+    "dev:docker": "docker compose -f docker-compose.dev.yml up",
+    "build": "bun run --filter '*' build",
+    "typecheck": "bun run --filter '*' typecheck",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "install-hooks": "bash scripts/install-hooks.sh"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  }
+}

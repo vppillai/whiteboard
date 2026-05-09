@@ -1,0 +1,39 @@
+# Dependencies — installed inside the image
+node_modules
+**/node_modules
+
+# Build artifacts
+**/dist
+**/build
+**/.bun
+**/*.tsbuildinfo
+
+# Local env
+.env
+.env.local
+.env.*.local
+
+# Persistent data — lives in a Docker volume
+data
+**/*.sqlite*
+**/*.db
+
+# VCS / editor
+.git
+.gitignore
+.gitattributes
+.editorconfig
+.vscode
+.idea
+.DS_Store
+
+# Docs (kept on host; not needed in image)
+docs
+*.md
+!apps/**/README.md
+
+# CI
+.github
+
+# Scripts not needed at runtime
+scripts

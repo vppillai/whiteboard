@@ -1,0 +1,42 @@
+# Whiteboard — production compose.
+#
+# Usage:
+#   cp .env.example .env  # then edit OWNER_TOKEN and PUBLIC_ORIGIN
+#   ./deploy.sh           # validates .env, builds and starts
+#
+# Or directly:
+#   docker compose up -d --build
+
+services:
+  whiteboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_PATH: ${BASE_PATH:-/}
+    image: whiteboard:local
+    container_name: whiteboard
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8787}:8787"
+    environment:
+      PORT: 8787
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8787}
+      OWNER_TOKEN: ${OWNER_TOKEN:?OWNER_TOKEN is required — see .env.example}
+      DATA_DIR: /data
+      BASE_PATH: ${BASE_PATH:-/}
+      MAX_ROOMS: ${MAX_ROOMS:-500}
+      MAX_BOARD_BLOB_MB: ${MAX_BOARD_BLOB_MB:-50}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - whiteboard-data:/data
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:8787/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  whiteboard-data:
+    name: whiteboard-data

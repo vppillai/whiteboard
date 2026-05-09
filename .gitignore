@@ -1,0 +1,42 @@
+# Bun / Node
+node_modules/
+.bun/
+*.tsbuildinfo
+
+# Build output
+dist/
+build/
+*.local
+
+# Env (never commit)
+.env
+.env.local
+.env.*.local
+
+# Persistent data (lives in a docker volume in prod)
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.log
+.cache/
+
+# CI / test artifacts
+coverage/
+playwright-report/
+test-results/
+
+# Misc
+.docker-compose.override.yml
+
+# Claude Code local cache
+.claude/

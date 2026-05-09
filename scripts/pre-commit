@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Pre-commit hook: lint and format-check staged files via Biome.
+#
+# To bypass in an emergency: git commit --no-verify
+# (avoid that — fix the issue and commit again)
+
+set -euo pipefail
+
+# Find Bun (host install or PATH).
+if [ -x "$HOME/.bun/bin/bun" ]; then
+  export PATH="$HOME/.bun/bin:$PATH"
+fi
+
+if ! command -v bun >/dev/null 2>&1; then
+  echo "pre-commit: bun not found on PATH; skipping lint check." >&2
+  echo "pre-commit: install with: curl -fsSL https://bun.sh/install | bash" >&2
+  exit 0
+fi
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR \
+  | grep -E '\.(ts|tsx|js|jsx|mjs|cjs|json|css|html)$' \
+  | grep -v -E '^(node_modules|dist|build|apps/web/dist)/' \
+  || true)
+
+if [ -z "$staged" ]; then
+  exit 0
+fi
+
+echo "pre-commit: linting staged files..."
+echo "$staged" | xargs bunx biome check --error-on-warnings
