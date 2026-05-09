@@ -362,6 +362,37 @@ body {
   font-style: italic;
 }
 
+/* ---- Tool menu ------------------------------------------------------- */
+
+.whiteboard-tools {
+  padding: 6px;
+  min-width: 200px;
+}
+
+.whiteboard-tool-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--banner-fg);
+  padding: 8px 12px;
+  font: 12px / 1.4 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.12s;
+}
+
+.whiteboard-tool-item:hover {
+  background: var(--pill-bg);
+}
+
+.whiteboard-tool-sep {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--hud-border);
+}
+
 /* ---- Options menu ---------------------------------------------------- */
 
 .whiteboard-options {

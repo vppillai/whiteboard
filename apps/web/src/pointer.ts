@@ -66,6 +66,12 @@ export function attachPointer(target: HTMLElement, opts: AttachOptions): () => v
 
   const onDown = (e: PointerEvent) => {
     if (e.pointerType !== 'pen' && e.pointerType !== 'mouse' && e.pointerType !== 'touch') return
+    // Only the primary button starts a stroke. Middle (1) and right (2) are
+    // owned by pan / context-menu handlers above this in main.ts. Without
+    // this guard, right-click fires onDown, captures the pointer, and starts
+    // a stroke that doesn't end normally because the browser's contextmenu
+    // event hijacks pointerup focus.
+    if (e.button !== 0) return
     if (opts.shouldSkip?.(e)) return
 
     target.setPointerCapture(e.pointerId)

@@ -36,6 +36,7 @@ import { getColor, getSettings, onChange as onSettingsChange } from './settings'
 import { clearAllStrokes, deleteStroke, loadAllStrokes, saveStroke } from './storage'
 import { effectiveOpacity, getStrokePath } from './stroke'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
+import { openToolMenu } from './toolmenu'
 
 // Default brush shape. Color is supplied at stroke-start time from the settings
 // store so the color picker can change it dynamically.
@@ -198,6 +199,26 @@ async function main(): Promise<void> {
   // Suppress the browser's middle-click auto-scroll cursor on Windows/Linux.
   root.addEventListener('auxclick', (e) => {
     if (e.button === 1) e.preventDefault()
+  })
+
+  // Right-click → tool menu. Suppress the native contextmenu so our own UI
+  // takes its place. Works with the pen too if the user maps a barrel button
+  // to right-click in their tablet driver — that's the path to fully pen-only
+  // operation, no keyboard or mouse needed.
+  root.addEventListener('contextmenu', (e) => e.preventDefault())
+  root.addEventListener('pointerdown', (e) => {
+    if (e.button !== 2) return
+    e.preventDefault()
+    if (getActiveTag() === 'tools') {
+      dismissAllPopovers()
+      return
+    }
+    openToolMenu({
+      at: { x: e.clientX, y: e.clientY },
+      onUndo: undo,
+      onRedo: redo,
+      onClear: requestClear,
+    })
   })
 
   const detachPointer = attachPointer(root, {
@@ -481,6 +502,7 @@ function createHelp(): Help {
   const shortcuts = document.createElement('pre')
   shortcuts.className = 'whiteboard-help-shortcuts'
   shortcuts.textContent = [
+    'right-click        tool menu (pen-friendly)',
     'C                  color picker (at pointer)',
     'O                  options (grid type, spacing)',
     '',
