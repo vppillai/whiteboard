@@ -24,6 +24,7 @@
 import './style.css'
 import type { BrushConfig, Sample, Stroke } from '@whiteboard/shared'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
+import { createClearFlow } from './clearflow'
 import { openColorPicker } from './colorpicker'
 import { drawGrid } from './grid'
 import { createHelpOverlay } from './helpoverlay'
@@ -40,6 +41,7 @@ import { clearAllStrokes, deleteStroke, loadAllStrokes, saveStroke } from './sto
 import { effectiveOpacity, getStrokePath } from './stroke'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { openToolMenu } from './toolmenu'
+import { clearView, loadView, makeViewSaver } from './viewstate'
 
 // Default brush shape. Color is supplied at stroke-start time from the settings
 // store so the color picker can change it dynamically.
@@ -74,6 +76,17 @@ async function main(): Promise<void> {
 
   const target = setupCanvas(root)
   const camera = makeCamera()
+
+  // Restore last-saved camera position. Per-device, so no sync; reset on
+  // clear-board. The board is infinite — there is no canonical "origin" the
+  // user thinks of as home, just wherever they left off.
+  const persistedView = loadView()
+  if (persistedView) {
+    camera.x = persistedView.x
+    camera.y = persistedView.y
+    camera.scale = persistedView.scale
+  }
+  const viewSaver = makeViewSaver(camera)
 
   const metrics = new MetricsCollector()
   const hud = createHud()
@@ -149,13 +162,14 @@ async function main(): Promise<void> {
   const params = new URLSearchParams(location.search)
   const usePrediction = params.has('predict')
 
-  const pan = attachPan({
-    root,
-    camera,
-    onCameraChange: () => {
-      committedDirty = true
-    },
-  })
+  // Single hook every camera-mutating action calls into. Marks the committed
+  // layer dirty for the next RAF and queues a debounced save of view state.
+  const onCameraChange = (): void => {
+    committedDirty = true
+    viewSaver.queueSave()
+  }
+
+  const pan = attachPan({ root, camera, onCameraChange })
 
   // Right-click → tool menu. Suppress the native contextmenu so our own UI
   // takes its place. Works with the pen too if the user maps a barrel button
@@ -181,7 +195,7 @@ async function main(): Promise<void> {
         at: { x: e.clientX, y: e.clientY },
         onUndo: undo,
         onRedo: redo,
-        onClear: requestClear,
+        onClear: clearFlow.request,
       })
     },
     { capture: true },
@@ -236,16 +250,15 @@ async function main(): Promise<void> {
     'wheel',
     (e) => {
       e.preventDefault()
-      const rect = root.getBoundingClientRect()
-      const fx = e.clientX - rect.left
-      const fy = e.clientY - rect.top
+      const fx = e.clientX - canvasRect.left
+      const fy = e.clientY - canvasRect.top
       if (e.ctrlKey || e.metaKey) {
         const factor = ZOOM_WHEEL_FACTOR ** -e.deltaY
         zoomAt(camera, fx, fy, factor)
       } else {
         panByScreen(camera, -e.deltaX, -e.deltaY)
       }
-      committedDirty = true
+      onCameraChange()
     },
     { passive: false },
   )
@@ -260,73 +273,23 @@ async function main(): Promise<void> {
     committedDirty = true
   })
 
-  // Clear-board confirmation: a transient toast at the top of the screen with
-  // explicit Cancel / Clear buttons. The keyboard path (⌘/Ctrl+Shift+K twice
-  // within the window, or Esc to cancel) still works, but the pen-only path —
-  // tap "Clear board…" in the right-click menu, then tap Clear in the toast —
-  // doesn't require a keyboard at all.
-  const CLEAR_CONFIRM_MS = 4000
-  const toast = document.createElement('div')
-  toast.id = 'whiteboard-toast'
-  toast.style.display = 'none'
-  document.body.appendChild(toast)
-
-  let clearTimer: ReturnType<typeof setTimeout> | null = null
-
-  const performClear = (): void => {
-    strokes.length = 0
-    redoStack.length = 0
-    committedDirty = true
-    void clearAllStrokes().catch((err) => {
-      console.warn('whiteboard/web: clear failed:', err)
-    })
-  }
-
-  const cancelClearConfirm = (): void => {
-    if (clearTimer) {
-      clearTimeout(clearTimer)
-      clearTimer = null
-    }
-    toast.replaceChildren()
-    toast.style.display = 'none'
-  }
-
-  const showClearToast = (): void => {
-    toast.replaceChildren()
-    toast.style.display = 'flex'
-
-    const msg = document.createElement('span')
-    msg.className = 'whiteboard-toast-message'
-    msg.textContent = 'Clear the whole board?'
-
-    const cancelBtn = document.createElement('button')
-    cancelBtn.type = 'button'
-    cancelBtn.className = 'whiteboard-toast-button whiteboard-toast-cancel'
-    cancelBtn.textContent = 'Cancel'
-    cancelBtn.addEventListener('click', cancelClearConfirm)
-
-    const confirmBtn = document.createElement('button')
-    confirmBtn.type = 'button'
-    confirmBtn.className = 'whiteboard-toast-button whiteboard-toast-confirm'
-    confirmBtn.textContent = 'Clear'
-    confirmBtn.addEventListener('click', () => {
-      cancelClearConfirm()
-      performClear()
-    })
-
-    toast.append(msg, cancelBtn, confirmBtn)
-  }
-
-  const requestClear = (): void => {
-    if (clearTimer) {
-      // Second press of the keyboard shortcut — short-circuit to confirm.
-      cancelClearConfirm()
-      performClear()
-      return
-    }
-    showClearToast()
-    clearTimer = setTimeout(cancelClearConfirm, CLEAR_CONFIRM_MS)
-  }
+  const clearFlow = createClearFlow({
+    onPerformClear: () => {
+      strokes.length = 0
+      redoStack.length = 0
+      // Reset to the canonical origin on clear — gives the user a known
+      // starting point, since the infinite-canvas "wherever you left off"
+      // semantic is no longer meaningful with no strokes.
+      camera.x = 0
+      camera.y = 0
+      camera.scale = 1
+      committedDirty = true
+      clearView()
+      void clearAllStrokes().catch((err) => {
+        console.warn('whiteboard/web: clear failed:', err)
+      })
+    },
+  })
 
   const undo = (): void => {
     const stroke = strokes.pop()
@@ -370,36 +333,29 @@ async function main(): Promise<void> {
     if (meta && e.key === '0') {
       e.preventDefault()
       resetZoom(camera)
-      committedDirty = true
+      onCameraChange()
       return
     }
     if (meta && (e.key === '=' || e.key === '+')) {
       e.preventDefault()
-      const cx = target.width / 2
-      const cy = target.height / 2
-      zoomAt(camera, cx, cy, 1.2)
-      committedDirty = true
+      zoomAt(camera, target.width / 2, target.height / 2, 1.2)
+      onCameraChange()
       return
     }
     if (meta && e.key === '-') {
       e.preventDefault()
-      const cx = target.width / 2
-      const cy = target.height / 2
-      zoomAt(camera, cx, cy, 1 / 1.2)
-      committedDirty = true
+      zoomAt(camera, target.width / 2, target.height / 2, 1 / 1.2)
+      onCameraChange()
       return
     }
     if (meta && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
       e.preventDefault()
-      requestClear()
+      clearFlow.request()
       return
     }
     if (e.key === 'Escape') {
       let handled = false
-      if (clearTimer) {
-        cancelClearConfirm()
-        handled = true
-      }
+      if (clearFlow.cancel()) handled = true
       if (dismissAllPopovers()) handled = true
       if (handled) e.preventDefault()
       return
