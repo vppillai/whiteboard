@@ -29,7 +29,7 @@
 import { BRUSH_IDS, BRUSH_LABELS, type BrushId } from './brushes'
 import { openOptionsMenu } from './optionsmenu'
 import { type Popover, showPopover } from './popover'
-import { getColor, setColor } from './settings'
+import { type EraserSize, getColor, setColor } from './settings'
 import type { ToolId } from './tools'
 
 const PALETTE: readonly string[] = [
@@ -63,12 +63,20 @@ export interface ToolMenuOptions {
   at: { x: number; y: number }
   getActiveToolId: () => ToolId
   getActiveBrushId: () => BrushId
+  getEraserSize: () => EraserSize
   onSelectTool: (id: ToolId) => void
   onSelectBrush: (id: BrushId) => void
+  onSelectEraserSize: (size: EraserSize) => void
   onResetZoom: () => void
   onZoomToFit: () => void
   onClear: () => void
 }
+
+const ERASER_SIZE_PILLS: readonly { id: EraserSize; label: string }[] = [
+  { id: 'small', label: 'Small' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'large', label: 'Large' },
+]
 
 export function openToolMenu(opts: ToolMenuOptions): Popover {
   const root = document.createElement('div')
@@ -77,40 +85,73 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
   const popoverRef: { current?: Popover } = {}
   const dismiss = (): void => popoverRef.current?.dismiss()
 
-  // ---- COLOR ---------------------------------------------------------
-  root.appendChild(sectionLabel('Color'))
-  const palette = document.createElement('div')
-  palette.className = 'whiteboard-tools-palette'
-  for (const c of PALETTE) {
-    palette.appendChild(
-      swatch(c, () => {
-        setColor(c)
-        dismiss()
-      }),
-    )
-  }
-  root.appendChild(palette)
+  // The contextual sections (COLOR + BRUSH for Draw, ERASER SIZE for Eraser,
+  // etc.) come first so the user's eye lands on the most relevant controls.
+  // The TOOL row is below them — switching tools rebuilds the menu next time.
+  const activeToolId = opts.getActiveToolId()
+  const renderContextualForDraw = (): void => {
+    root.appendChild(sectionLabel('Color'))
+    const palette = document.createElement('div')
+    palette.className = 'whiteboard-tools-palette'
+    for (const c of PALETTE) {
+      palette.appendChild(
+        swatch(c, () => {
+          setColor(c)
+          dismiss()
+        }),
+      )
+    }
+    root.appendChild(palette)
 
-  // ---- BRUSH ---------------------------------------------------------
-  root.appendChild(separator())
-  root.appendChild(sectionLabel('Brush'))
-  const brushRow = document.createElement('div')
-  brushRow.className = 'whiteboard-tools-row'
-  const activeBrush = opts.getActiveBrushId()
-  for (const id of BRUSH_IDS) {
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = 'whiteboard-tool-pill'
-    if (id === activeBrush) btn.classList.add('active')
-    btn.textContent = id === 'highlighter' ? 'Hi' : BRUSH_LABELS[id]
-    btn.title = BRUSH_LABELS[id]
-    btn.addEventListener('click', () => {
-      opts.onSelectBrush(id)
-      dismiss()
-    })
-    brushRow.appendChild(btn)
+    root.appendChild(separator())
+    root.appendChild(sectionLabel('Brush'))
+    const brushRow = document.createElement('div')
+    brushRow.className = 'whiteboard-tools-row'
+    const activeBrush = opts.getActiveBrushId()
+    for (const id of BRUSH_IDS) {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'whiteboard-tool-pill'
+      if (id === activeBrush) btn.classList.add('active')
+      btn.textContent = id === 'highlighter' ? 'Hi' : BRUSH_LABELS[id]
+      btn.title = BRUSH_LABELS[id]
+      btn.addEventListener('click', () => {
+        opts.onSelectBrush(id)
+        dismiss()
+      })
+      brushRow.appendChild(btn)
+    }
+    root.appendChild(brushRow)
   }
-  root.appendChild(brushRow)
+
+  const renderContextualForEraser = (): void => {
+    root.appendChild(sectionLabel('Eraser size'))
+    const row = document.createElement('div')
+    row.className = 'whiteboard-tools-row'
+    const activeSize = opts.getEraserSize()
+    for (const { id, label } of ERASER_SIZE_PILLS) {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'whiteboard-tool-pill'
+      if (id === activeSize) btn.classList.add('active')
+      btn.textContent = label
+      btn.title = `${label} eraser`
+      btn.addEventListener('click', () => {
+        opts.onSelectEraserSize(id)
+        dismiss()
+      })
+      row.appendChild(btn)
+    }
+    root.appendChild(row)
+  }
+
+  if (activeToolId === 'pen') {
+    renderContextualForDraw()
+  } else if (activeToolId === 'eraser') {
+    renderContextualForEraser()
+  }
+  // Other tools (lasso / laser / text) get their own contextual sections as
+  // they land. Until then, only the TOOL row is visible.
 
   // ---- TOOL ---------------------------------------------------------
   root.appendChild(separator())

@@ -38,8 +38,9 @@ export interface EraserToolCallbacks {
 
 export interface EraserToolOptions {
   callbacks: EraserToolCallbacks
-  /** Eraser hit radius in board-space pixels. */
-  radius: number
+  /** Eraser hit radius in board-space pixels. Read on every event so a
+   *  size change in settings applies immediately. */
+  getRadius: () => number
 }
 
 export function createEraserTool(opts: EraserToolOptions): Tool {
@@ -52,7 +53,7 @@ export function createEraserTool(opts: EraserToolOptions): Tool {
     for (const stroke of opts.callbacks.getStrokes()) {
       if (stroke.deleted) continue
       if (swept.has(stroke.id)) continue
-      if (strokeNearPoint(stroke, px, py, opts.radius)) {
+      if (strokeNearPoint(stroke, px, py, opts.getRadius())) {
         swept.add(stroke.id)
       }
     }
@@ -64,7 +65,7 @@ export function createEraserTool(opts: EraserToolOptions): Tool {
     for (let i = strokes.length - 1; i >= 0; i--) {
       const stroke = strokes[i]
       if (!stroke || stroke.deleted || swept.has(stroke.id)) continue
-      if (strokeNearPoint(stroke, px, py, opts.radius)) {
+      if (strokeNearPoint(stroke, px, py, opts.getRadius())) {
         swept.add(stroke.id)
         return
       }
@@ -88,7 +89,7 @@ export function createEraserTool(opts: EraserToolOptions): Tool {
       if (mode === 'wipe') {
         sweepHit(x, y)
       }
-      opts.callbacks.onCursorMove(x, y, opts.radius, mode)
+      opts.callbacks.onCursorMove(x, y, opts.getRadius(), mode)
     },
     onPointerMove(e, ctx) {
       if (!active) {
@@ -96,7 +97,7 @@ export function createEraserTool(opts: EraserToolOptions): Tool {
         // mode here is the *prospective* mode (what would happen if they
         // pressed now) so it reflects current Shift state.
         const { x, y } = ctx.toBoard(e.clientX, e.clientY)
-        opts.callbacks.onCursorMove(x, y, opts.radius, e.shiftKey ? 'object' : 'wipe')
+        opts.callbacks.onCursorMove(x, y, opts.getRadius(), e.shiftKey ? 'object' : 'wipe')
         return
       }
       if (mode === 'wipe') {
@@ -109,7 +110,7 @@ export function createEraserTool(opts: EraserToolOptions): Tool {
       }
       // Object mode: don't accumulate during move; only commit at pointerup.
       const last = ctx.toBoard(e.clientX, e.clientY)
-      opts.callbacks.onCursorMove(last.x, last.y, opts.radius, mode)
+      opts.callbacks.onCursorMove(last.x, last.y, opts.getRadius(), mode)
     },
     onPointerUp(e, ctx) {
       if (!active) return

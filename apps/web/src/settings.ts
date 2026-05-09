@@ -12,6 +12,18 @@
 import { type BrushId, isValidBrushId } from './brushes'
 
 export type GridType = 'dots' | 'lines' | 'ruled' | 'none'
+export type EraserSize = 'small' | 'medium' | 'large'
+
+/** Eraser hit radii (board-space pixels) keyed on user-facing size label. */
+export const ERASER_RADII: Readonly<Record<EraserSize, number>> = {
+  small: 6,
+  medium: 12,
+  large: 24,
+}
+
+const ERASER_SIZES: readonly EraserSize[] = ['small', 'medium', 'large']
+const isValidEraserSize = (s: string): s is EraserSize =>
+  (ERASER_SIZES as readonly string[]).includes(s)
 
 export interface GridConfig {
   type: GridType
@@ -22,12 +34,14 @@ export interface GridConfig {
 interface PersistedShape {
   color?: string
   brush?: string
+  eraserSize?: string
   grid?: { type?: GridType; spacing?: number }
 }
 
 interface State {
   color: string
   brush: BrushId
+  eraserSize: EraserSize
   grid: GridConfig
 }
 
@@ -38,6 +52,7 @@ const VALID_SPACINGS: readonly number[] = [16, 24, 32, 48]
 const DEFAULTS: State = {
   color: 'ink',
   brush: 'pen',
+  eraserSize: 'medium',
   grid: { type: 'dots', spacing: 24 },
 }
 
@@ -55,6 +70,10 @@ function load(): State {
         typeof parsed.brush === 'string' && isValidBrushId(parsed.brush)
           ? parsed.brush
           : DEFAULTS.brush,
+      eraserSize:
+        typeof parsed.eraserSize === 'string' && isValidEraserSize(parsed.eraserSize)
+          ? parsed.eraserSize
+          : DEFAULTS.eraserSize,
       grid: {
         type:
           parsed.grid?.type && VALID_GRID_TYPES.includes(parsed.grid.type)
@@ -72,7 +91,7 @@ function load(): State {
 }
 
 function clone(s: State): State {
-  return { color: s.color, brush: s.brush, grid: { ...s.grid } }
+  return { color: s.color, brush: s.brush, eraserSize: s.eraserSize, grid: { ...s.grid } }
 }
 
 function persist(): void {
@@ -109,6 +128,17 @@ export function getBrushId(): BrushId {
 export function setBrushId(brush: BrushId): void {
   if (state.brush === brush) return
   state.brush = brush
+  persist()
+  emit()
+}
+
+export function getEraserSize(): EraserSize {
+  return state.eraserSize
+}
+
+export function setEraserSize(size: EraserSize): void {
+  if (state.eraserSize === size) return
+  state.eraserSize = size
   persist()
   emit()
 }

@@ -40,11 +40,14 @@ import { attachPointer } from './pointer'
 import { dismissAllPopovers, getActiveTag } from './popover'
 import { applyCamera, clearLayer, drawStrokePath, setupCanvas } from './render'
 import {
+  ERASER_RADII,
   getBrushId,
   getColor,
+  getEraserSize,
   getSettings,
   onChange as onSettingsChange,
   setBrushId,
+  setEraserSize,
 } from './settings'
 import { clearAllStrokes, loadAllStrokes, saveStroke } from './storage'
 import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
@@ -213,8 +216,10 @@ async function main(): Promise<void> {
         at: { x: e.clientX, y: e.clientY },
         getActiveToolId,
         getActiveBrushId: getBrushId,
+        getEraserSize,
         onSelectTool: setTool,
         onSelectBrush: setBrushId,
+        onSelectEraserSize: setEraserSize,
         onResetZoom: () => {
           resetZoom(camera)
           onCameraChange()
@@ -291,7 +296,7 @@ async function main(): Promise<void> {
   }
 
   const eraserTool = createEraserTool({
-    radius: 12,
+    getRadius: () => ERASER_RADII[getEraserSize()],
     callbacks: {
       getStrokes: () => strokes,
       onErase: (ids) => {
