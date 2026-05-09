@@ -1,0 +1,62 @@
+/**
+ * Help overlay (toggled with `?`). Bottom-right corner; pointer-events:none
+ * on the wrapper so it doesn't intercept drawing, but the GitHub repo link
+ * opts back in via pointer-events:auto so it remains clickable.
+ */
+
+export interface HelpOverlay {
+  el: HTMLElement
+  toggle: () => void
+}
+
+const SHORTCUTS = [
+  'right-click        tool menu (pen-friendly)',
+  'C                  color picker (at pointer)',
+  'O                  options (grid type, spacing)',
+  '',
+  '⌘/Ctrl + Z         undo',
+  '⌘/Ctrl + Shift + Z redo   (also ⌘/Ctrl + Y)',
+  '⌘/Ctrl + Shift + K clear board (confirm twice)',
+  '',
+  'M                  toggle metrics',
+  'T                  cycle theme',
+  '?                  toggle this help',
+  '',
+  '⌘/Ctrl + 0         reset zoom',
+  '⌘/Ctrl + +/-       zoom in/out',
+  'wheel / 2-finger   pan',
+  '⌘/Ctrl + wheel     zoom',
+  'pinch              zoom',
+  'space + drag       pan (any device)',
+  'middle-mouse drag  pan',
+  'Esc                close popover / cancel',
+].join('\n')
+
+const REPO_URL = 'https://github.com/vppillai/whiteboard'
+
+export function createHelpOverlay(): HelpOverlay {
+  const el = document.createElement('div')
+  el.id = 'whiteboard-help'
+  el.style.display = 'none'
+
+  const shortcuts = document.createElement('pre')
+  shortcuts.className = 'whiteboard-help-shortcuts'
+  shortcuts.textContent = SHORTCUTS
+  el.appendChild(shortcuts)
+
+  const footer = document.createElement('div')
+  footer.className = 'whiteboard-help-footer'
+  const link = document.createElement('a')
+  link.href = REPO_URL
+  link.target = '_blank'
+  link.rel = 'noopener noreferrer'
+  link.className = 'whiteboard-help-link'
+  link.textContent = 'github.com/vppillai/whiteboard ↗'
+  footer.appendChild(link)
+  el.appendChild(footer)
+
+  const toggle = (): void => {
+    el.style.display = el.style.display === 'none' ? 'block' : 'none'
+  }
+  return { el, toggle }
+}

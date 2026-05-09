@@ -26,9 +26,12 @@ import type { BrushConfig, Sample, Stroke } from '@whiteboard/shared'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
 import { openColorPicker } from './colorpicker'
 import { drawGrid } from './grid'
+import { createHelpOverlay } from './helpoverlay'
 import { MetricsCollector, bindHudToggle, createHud } from './metrics'
 import { openOptionsMenu } from './optionsmenu'
+import { attachPan } from './pan'
 import { runPerftest } from './perftest'
+import { createHelpPill } from './pill'
 import { attachPointer } from './pointer'
 import { dismissAllPopovers, getActiveTag } from './popover'
 import { applyCamera, clearLayer, drawStrokePath, setupCanvas } from './render'
@@ -82,7 +85,7 @@ async function main(): Promise<void> {
 
   document.body.appendChild(createHelpPill())
 
-  const help = createHelp()
+  const help = createHelpOverlay()
   document.body.appendChild(help.el)
 
   // Render state
@@ -146,71 +149,12 @@ async function main(): Promise<void> {
   const params = new URLSearchParams(location.search)
   const usePrediction = params.has('predict')
 
-  // ---- Pan: spacebar+drag (universal) and middle-mouse-button drag.
-  //
-  // Wacom users typically map a pen barrel-button to middle-click via the
-  // tablet's driver — that lets them pan without leaving the pen. Trackpad
-  // two-finger swipe already pans via the wheel handler below.
-  let spaceHeld = false
-  let panState: {
-    pointerId: number
-    startClientX: number
-    startClientY: number
-    startCameraX: number
-    startCameraY: number
-  } | null = null
-
-  const isPanIntent = (e: PointerEvent): boolean => spaceHeld || e.button === 1
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === ' ' && !e.repeat) {
-      spaceHeld = true
-      if (!panState) root.dataset.input = 'pan'
-    }
-  })
-  document.addEventListener('keyup', (e) => {
-    if (e.key === ' ') {
-      spaceHeld = false
-      if (!panState) delete root.dataset.input
-    }
-  })
-
-  root.addEventListener('pointerdown', (e) => {
-    if (!isPanIntent(e)) return
-    e.preventDefault()
-    root.setPointerCapture(e.pointerId)
-    root.dataset.input = 'panning'
-    panState = {
-      pointerId: e.pointerId,
-      startClientX: e.clientX,
-      startClientY: e.clientY,
-      startCameraX: camera.x,
-      startCameraY: camera.y,
-    }
-  })
-
-  root.addEventListener('pointermove', (e) => {
-    if (!panState || e.pointerId !== panState.pointerId) return
-    const dx = e.clientX - panState.startClientX
-    const dy = e.clientY - panState.startClientY
-    camera.x = panState.startCameraX - dx / camera.scale
-    camera.y = panState.startCameraY - dy / camera.scale
-    committedDirty = true
-  })
-
-  const endPan = (e: PointerEvent): void => {
-    if (!panState || e.pointerId !== panState.pointerId) return
-    if (root.hasPointerCapture(e.pointerId)) root.releasePointerCapture(e.pointerId)
-    panState = null
-    if (spaceHeld) root.dataset.input = 'pan'
-    else delete root.dataset.input
-  }
-  root.addEventListener('pointerup', endPan)
-  root.addEventListener('pointercancel', endPan)
-
-  // Suppress the browser's middle-click auto-scroll cursor on Windows/Linux.
-  root.addEventListener('auxclick', (e) => {
-    if (e.button === 1) e.preventDefault()
+  const pan = attachPan({
+    root,
+    camera,
+    onCameraChange: () => {
+      committedDirty = true
+    },
   })
 
   // Right-click → tool menu. Suppress the native contextmenu so our own UI
@@ -247,7 +191,7 @@ async function main(): Promise<void> {
     getBrush: makeBrush,
     toBoard,
     usePrediction,
-    shouldSkip: isPanIntent,
+    shouldSkip: pan.isPanIntent,
     callbacks: {
       onStrokeStart(stroke) {
         liveStroke = stroke
@@ -523,66 +467,6 @@ async function main(): Promise<void> {
       committedDirty = true
     })
   }
-}
-
-function createHelpPill(): HTMLElement {
-  const el = document.createElement('div')
-  el.id = 'whiteboard-pill'
-  el.textContent = '? for help'
-  return el
-}
-
-interface Help {
-  el: HTMLElement
-  toggle: () => void
-}
-
-function createHelp(): Help {
-  const el = document.createElement('div')
-  el.id = 'whiteboard-help'
-  el.style.display = 'none'
-
-  const shortcuts = document.createElement('pre')
-  shortcuts.className = 'whiteboard-help-shortcuts'
-  shortcuts.textContent = [
-    'right-click        tool menu (pen-friendly)',
-    'C                  color picker (at pointer)',
-    'O                  options (grid type, spacing)',
-    '',
-    '⌘/Ctrl + Z         undo',
-    '⌘/Ctrl + Shift + Z redo   (also ⌘/Ctrl + Y)',
-    '⌘/Ctrl + Shift + K clear board (confirm twice)',
-    '',
-    'M                  toggle metrics',
-    'T                  cycle theme',
-    '?                  toggle this help',
-    '',
-    '⌘/Ctrl + 0         reset zoom',
-    '⌘/Ctrl + +/-       zoom in/out',
-    'wheel / 2-finger   pan',
-    '⌘/Ctrl + wheel     zoom',
-    'pinch              zoom',
-    'space + drag       pan (any device)',
-    'middle-mouse drag  pan',
-    'Esc                close popover / cancel',
-  ].join('\n')
-  el.appendChild(shortcuts)
-
-  const footer = document.createElement('div')
-  footer.className = 'whiteboard-help-footer'
-  const link = document.createElement('a')
-  link.href = 'https://github.com/vppillai/whiteboard'
-  link.target = '_blank'
-  link.rel = 'noopener noreferrer'
-  link.className = 'whiteboard-help-link'
-  link.textContent = 'github.com/vppillai/whiteboard ↗'
-  footer.appendChild(link)
-  el.appendChild(footer)
-
-  const toggle = () => {
-    el.style.display = el.style.display === 'none' ? 'block' : 'none'
-  }
-  return { el, toggle }
 }
 
 async function runPerfMode(
