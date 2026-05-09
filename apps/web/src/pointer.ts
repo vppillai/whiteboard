@@ -1,142 +1,65 @@
 /**
- * Pointer pipeline. Owns the in-flight stroke and emits lifecycle callbacks.
+ * Pointer-event router. Pure mechanism — owns pointer capture, button
+ * filtering, and the should-skip predicate; dispatches every accepted event
+ * to whichever `Tool` is currently active. The tool owns all interaction
+ * logic (see `tools/types.ts` and ADR 0005).
  *
- * Key behaviors:
- *   - getCoalescedEvents(): consume every Wacom sample between frames
- *     (Intuos sends 200 Hz; a 60 Hz display drops ~70% of samples without this).
- *   - getPredictedEvents(): visual lookahead, drawn on the live layer but
- *     never committed to the stroke.
- *   - setPointerCapture: keep events flowing even if the cursor briefly
- *     leaves the target during a stroke.
+ * Events are filtered before dispatch:
  *
- * The caller provides `toBoard(clientX, clientY)` so this module is camera-
- * agnostic — it sees board-space coordinates only.
+ *   - Only `pen` / `mouse` / `touch` pointer types reach the tool.
+ *   - Only "purely primary" pointerdowns start interactions:
+ *     `button === 0 && buttons === 1`. This keeps right-click and middle-
+ *     click from the tool, AND keeps Wacom barrel-button-as-right-click
+ *     scenarios (which can fire `button=0, buttons=3`) from accidentally
+ *     starting a pen stroke.
+ *   - `shouldSkip` lets the caller veto an event entirely (e.g. when pan
+ *     is active because spacebar is held).
  */
 
-import type { BrushConfig, Sample, Stroke } from '@whiteboard/shared'
+import type { Tool, ToolContext } from './tools/types'
 
-export interface PointerCallbacks {
-  onStrokeStart: (stroke: Stroke) => void
+export interface PointerOptions {
+  /** Returns the active tool. Read per event so tool switches apply on the
+   *  next interaction without re-attaching the pipeline. */
+  getActiveTool: () => Tool
+  /** Cross-cutting capabilities passed to the tool (toBoard, getBrush, etc.). */
+  context: ToolContext
   /**
-   * Called once per pointermove event. `predicted` is replaced each event;
-   * do not retain references across calls.
+   * Return true to skip the event entirely. Used by the pan handler so its
+   * pointerdown short-circuits drawing.
    */
-  onStrokeUpdate: (stroke: Stroke, predicted: Sample[]) => void
-  onStrokeCommit: (stroke: Stroke) => void
-}
-
-export interface AttachOptions {
-  getBrush: () => BrushConfig
-  toBoard: (clientX: number, clientY: number) => { x: number; y: number }
-  /** Return true to skip drawing on this pointerdown (e.g. caller is panning). */
   shouldSkip?: (e: PointerEvent) => boolean
-  /**
-   * Whether to feed predicted events into the live render. Useful on screen
-   * tablets where pen tip and ink coincide; on indirect input (Intuos non-
-   * screen) prediction artifacts are visible because the predicted ink leads
-   * the cursor — leave this off unless you've A/B-tested it on the device.
-   */
-  usePrediction?: boolean
-  callbacks: PointerCallbacks
 }
 
-interface SampleSource {
-  clientX: number
-  clientY: number
-  pressure: number
-  tiltX?: number
-  tiltY?: number
-  timeStamp: number
-}
-
-export function attachPointer(target: HTMLElement, opts: AttachOptions): () => void {
-  let active: Stroke | null = null
-
-  const sample = (e: SampleSource, brush: BrushConfig): Sample => {
-    const { x, y } = opts.toBoard(e.clientX, e.clientY)
-    return {
-      x,
-      y,
-      p: applyGamma(e.pressure, brush.pressureGamma),
-      tx: e.tiltX,
-      ty: e.tiltY,
-      t: e.timeStamp,
-    }
-  }
-
+export function attachPointer(target: HTMLElement, opts: PointerOptions): () => void {
   const onDown = (e: PointerEvent) => {
     if (e.pointerType !== 'pen' && e.pointerType !== 'mouse' && e.pointerType !== 'touch') return
-    // Only the primary button (and *only* the primary button) starts a stroke.
-    // - `button !== 0` rules out events whose transition is middle / right.
-    // - `buttons !== 1` additionally rules out cases where a Wacom pen barrel
-    //   button is held during contact: some drivers fire `button=0,
-    //   buttons=3` (primary + secondary), which slipped past a button-only
-    //   check and produced a single-sample dot stroke on right-click.
     if (e.button !== 0 || e.buttons !== 1) return
     if (opts.shouldSkip?.(e)) return
 
     target.setPointerCapture(e.pointerId)
     e.preventDefault()
-
-    const brush = opts.getBrush()
-    active = {
-      id: makeId(),
-      brush,
-      samples: [sample(e, brush)],
-      startedAt: e.timeStamp,
-    }
-    opts.callbacks.onStrokeStart(active)
+    opts.getActiveTool().onPointerDown(e, opts.context)
   }
 
   const onMove = (e: PointerEvent) => {
-    if (!active) return
-    const brush = active.brush
-
-    const coalesced = e.getCoalescedEvents()
-    if (coalesced.length === 0) {
-      active.samples.push(sample(e, brush))
-    } else {
-      for (const ce of coalesced) active.samples.push(sample(ce, brush))
-    }
-
-    const predicted = opts.usePrediction
-      ? e.getPredictedEvents().map((pe) => sample(pe, brush))
-      : []
-    opts.callbacks.onStrokeUpdate(active, predicted)
+    opts.getActiveTool().onPointerMove(e, opts.context)
   }
 
   const onUp = (e: PointerEvent) => {
-    if (!active) return
     if (target.hasPointerCapture(e.pointerId)) target.releasePointerCapture(e.pointerId)
-    opts.callbacks.onStrokeCommit(active)
-    active = null
-  }
-
-  const onCancel = (e: PointerEvent) => {
-    if (!active) return
-    if (target.hasPointerCapture(e.pointerId)) target.releasePointerCapture(e.pointerId)
-    active = null
+    opts.getActiveTool().onPointerUp(e, opts.context)
   }
 
   target.addEventListener('pointerdown', onDown)
   target.addEventListener('pointermove', onMove)
   target.addEventListener('pointerup', onUp)
-  target.addEventListener('pointercancel', onCancel)
+  target.addEventListener('pointercancel', onUp)
 
   return () => {
     target.removeEventListener('pointerdown', onDown)
     target.removeEventListener('pointermove', onMove)
     target.removeEventListener('pointerup', onUp)
-    target.removeEventListener('pointercancel', onCancel)
+    target.removeEventListener('pointercancel', onUp)
   }
-}
-
-function applyGamma(p: number, gamma: number): number {
-  if (p <= 0 || gamma === 1) return p
-  return p ** gamma
-}
-
-function makeId(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
-  return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
 }

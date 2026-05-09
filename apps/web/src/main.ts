@@ -42,6 +42,7 @@ import { clearAllStrokes, deleteStroke, loadAllStrokes, saveStroke } from './sto
 import { effectiveOpacity, getStrokePath } from './stroke'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { openToolMenu } from './toolmenu'
+import { type Tool, createPenTool } from './tools'
 import { clearView, loadView, makeViewSaver } from './viewstate'
 
 // Default brush shape. Color is supplied at stroke-start time from the settings
@@ -204,11 +205,8 @@ async function main(): Promise<void> {
     { capture: true },
   )
 
-  const detachPointer = attachPointer(root, {
-    getBrush: makeBrush,
-    toBoard,
+  const penTool = createPenTool({
     usePrediction,
-    shouldSkip: pan.isPanIntent,
     callbacks: {
       onStrokeStart(stroke) {
         liveStroke = stroke
@@ -232,6 +230,19 @@ async function main(): Promise<void> {
         })
       },
     },
+  })
+
+  // Active-tool state. Single tool today; M1's eraser / lasso land alongside
+  // pen and the user switches between them via the side panel (M1.7) or the
+  // tool menu. M1.4 just gets the abstraction in place — boxed in a ref so
+  // tool switching is a single field write that future code can perform
+  // without rewiring the pointer pipeline.
+  const tool: { current: Tool } = { current: penTool }
+
+  const detachPointer = attachPointer(root, {
+    getActiveTool: () => tool.current,
+    context: { toBoard, getBrush: makeBrush },
+    shouldSkip: pan.isPanIntent,
   })
 
   // Metrics + last-pointer tracking: a single pointermove listener on the
