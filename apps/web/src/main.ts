@@ -47,11 +47,12 @@ import {
   setBrushId,
 } from './settings'
 import { clearAllStrokes, loadAllStrokes, saveStroke } from './storage'
-import { effectiveOpacity, getStrokePath } from './stroke'
+import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { openToolMenu } from './toolmenu'
 import { type Tool, type ToolId, createEraserTool, createPenTool } from './tools'
 import { clearView, loadView, makeViewSaver } from './viewstate'
+import { fitToContent } from './zoomfit'
 
 // Compose a runtime BrushConfig from the active brush preset (shape) and the
 // active color (settings). Called once per stroke at pointerdown.
@@ -384,6 +385,11 @@ async function main(): Promise<void> {
       zoomAt(camera, target.width / 2, target.height / 2, 1 / 1.2)
       onCameraChange()
     },
+    zoomToFit: () => {
+      if (fitToContent(camera, strokes, { width: target.width, height: target.height })) {
+        onCameraChange()
+      }
+    },
     clear: clearFlow.request,
     toggleTheme: cycleMode,
     toggleColor: () => {
@@ -420,8 +426,19 @@ async function main(): Promise<void> {
       clearLayer(target.committed)
       drawGrid(target.committed, camera, target.width, target.height, getSettings().grid)
       applyCamera(target.committed, camera, target.dpr)
+
+      // Viewport in board coordinates — strokes whose AABB doesn't intersect
+      // this rectangle are skipped. Pure perf win as boards grow.
+      const viewBBox = {
+        minX: camera.x,
+        minY: camera.y,
+        maxX: camera.x + target.width / camera.scale,
+        maxY: camera.y + target.height / camera.scale,
+      }
+
       for (const s of strokes) {
         if (s.deleted) continue
+        if (!bboxesIntersect(getStrokeBBox(s), viewBBox)) continue
         const path = getStrokePath(s, [], true)
         if (path) {
           drawStrokePath(

@@ -17,6 +17,7 @@ export interface KeyHandlers {
   zoomReset: () => void
   zoomIn: () => void
   zoomOut: () => void
+  zoomToFit: () => void
   clear: () => void
 
   // Single-letter
@@ -59,6 +60,10 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       }
       if (!shift && e.key === '0') {
         preventAndCall(e, handlers.zoomReset)
+        return
+      }
+      if (!shift && e.key === '1') {
+        preventAndCall(e, handlers.zoomToFit)
         return
       }
       if (!shift && (e.key === '=' || e.key === '+')) {

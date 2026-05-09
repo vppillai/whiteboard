@@ -19,6 +19,55 @@ import { getStroke } from 'perfect-freehand'
 const SHADE_MIN = 0.78
 const SHADE_MAX = 1.0
 
+export interface BBox {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+}
+
+/**
+ * Cached AABB per stroke. Lazy: computed on first `getStrokeBBox` call,
+ * invalidated explicitly when a `move` op translates the stroke.
+ *
+ * WeakMap keying lets the cache evaporate when a stroke leaves the in-
+ * memory array (e.g. after future GC of soft-deleted strokes).
+ */
+const bboxCache = new WeakMap<Stroke, BBox>()
+
+export function getStrokeBBox(stroke: Stroke): BBox {
+  let bbox = bboxCache.get(stroke)
+  if (!bbox) {
+    bbox = computeStrokeBBox(stroke)
+    bboxCache.set(stroke, bbox)
+  }
+  return bbox
+}
+
+export function invalidateStrokeBBox(stroke: Stroke): void {
+  bboxCache.delete(stroke)
+}
+
+export function bboxesIntersect(a: BBox, b: BBox): boolean {
+  return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY
+}
+
+function computeStrokeBBox(stroke: Stroke): BBox {
+  let minX = Number.POSITIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  for (const s of stroke.samples) {
+    if (s.x < minX) minX = s.x
+    if (s.y < minY) minY = s.y
+    if (s.x > maxX) maxX = s.x
+    if (s.y > maxY) maxY = s.y
+  }
+  // Pad by brush size + max taper to encompass perfect-freehand outline.
+  const pad = stroke.brush.size + Math.max(stroke.brush.taperStart, stroke.brush.taperEnd) + 2
+  return { minX: minX - pad, minY: minY - pad, maxX: maxX + pad, maxY: maxY + pad }
+}
+
 const sampleToPoint = (s: Sample): [number, number, number] => [s.x, s.y, s.p]
 
 /**

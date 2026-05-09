@@ -77,6 +77,21 @@ export function createPenTool(opts: PenToolOptions): Tool {
     onPointerMove(e, ctx) {
       if (!active) return
       const brush = active.brush
+
+      // Shift-constrained mode: stroke is a straight line from the start
+      // sample to wherever the cursor is now. Holding Shift mid-stroke "snaps"
+      // the in-flight stroke to a straight line; releasing Shift returns to
+      // freeform from the current position, building on whatever samples are
+      // already present.
+      if (e.shiftKey) {
+        const first = active.samples[0]
+        if (first) {
+          active.samples = [first, sample(e, brush, ctx)]
+          opts.callbacks.onStrokeUpdate(active, [])
+        }
+        return
+      }
+
       const coalesced = e.getCoalescedEvents()
       if (coalesced.length === 0) {
         active.samples.push(sample(e, brush, ctx))

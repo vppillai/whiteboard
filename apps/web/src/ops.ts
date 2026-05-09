@@ -19,6 +19,7 @@
  */
 
 import type { Stroke } from '@whiteboard/shared'
+import { invalidateStrokeBBox } from './stroke'
 
 export type Op =
   | { kind: 'create'; strokeId: string }
@@ -83,6 +84,7 @@ function translateStrokes(ctx: OpContext, ids: readonly string[], dx: number, dy
       sample.x += dx
       sample.y += dy
     }
+    invalidateStrokeBBox(stroke)
     ctx.saveStroke(stroke)
   }
 }
