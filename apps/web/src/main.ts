@@ -30,6 +30,7 @@ import { drawGrid } from './grid'
 import { createHelpOverlay } from './helpoverlay'
 import { attachKeymap } from './keymap'
 import { MetricsCollector, bindHudToggle, createHud } from './metrics'
+import { type Op, type OpContext, applyOp, unapplyOp } from './ops'
 import { openOptionsMenu } from './optionsmenu'
 import { attachPan } from './pan'
 import { runPerftest } from './perftest'
@@ -38,7 +39,7 @@ import { attachPointer } from './pointer'
 import { dismissAllPopovers, getActiveTag } from './popover'
 import { applyCamera, clearLayer, drawStrokePath, setupCanvas } from './render'
 import { getColor, getSettings, onChange as onSettingsChange } from './settings'
-import { clearAllStrokes, deleteStroke, loadAllStrokes, saveStroke } from './storage'
+import { clearAllStrokes, loadAllStrokes, saveStroke } from './storage'
 import { effectiveOpacity, getStrokePath } from './stroke'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { openToolMenu } from './toolmenu'
@@ -105,11 +106,12 @@ async function main(): Promise<void> {
 
   // Render state
   const strokes: Stroke[] = []
-  // LIFO of strokes that were undone — re-doing pops from the top. Cleared
-  // whenever a new stroke is committed (any new action invalidates redo).
-  // Not persisted: redo history dies on reload, which matches every other
-  // drawing tool.
-  const redoStack: Stroke[] = []
+  // Operation-based undo / redo. Each new committed action pushes an Op to
+  // undoStack and clears redoStack. Undo pops from undoStack, unapplies,
+  // pushes to redoStack. Redo is the inverse. Not persisted: redo history
+  // dies on reload, which matches every other drawing tool.
+  const undoStack: Op[] = []
+  const redoStack: Op[] = []
   let liveStroke: Stroke | null = null
   let livePredicted: Sample[] = []
   let committedDirty = true
@@ -219,6 +221,7 @@ async function main(): Promise<void> {
       },
       onStrokeCommit(stroke) {
         strokes.push(stroke)
+        undoStack.push({ kind: 'create', strokeId: stroke.id })
         redoStack.length = 0
         liveStroke = null
         livePredicted = []
@@ -289,7 +292,11 @@ async function main(): Promise<void> {
 
   const clearFlow = createClearFlow({
     onPerformClear: () => {
+      // Clear is a destructive boundary by design — undo / redo stacks are
+      // reset along with the in-memory strokes and the IDB store. This is
+      // the one operation that's *not* an Op (see ops.ts).
       strokes.length = 0
+      undoStack.length = 0
       redoStack.length = 0
       // Reset to the canonical origin on clear — gives the user a known
       // starting point, since the infinite-canvas "wherever you left off"
@@ -305,24 +312,32 @@ async function main(): Promise<void> {
     },
   })
 
+  // Operation-based undo / redo. Apply / unapply are uniform across stroke
+  // creation, future eraser deletes, and future lasso moves — see ops.ts.
+  const opCtx: OpContext = {
+    strokes,
+    saveStroke: (s) => {
+      void saveStroke(s).catch((err) => {
+        console.warn('whiteboard/web: failed to persist stroke:', err)
+      })
+    },
+    markDirty: () => {
+      committedDirty = true
+    },
+  }
+
   const undo = (): void => {
-    const stroke = strokes.pop()
-    if (!stroke) return
-    redoStack.push(stroke)
-    committedDirty = true
-    void deleteStroke(stroke.id).catch((err) => {
-      console.warn('whiteboard/web: failed to remove stroke on undo:', err)
-    })
+    const op = undoStack.pop()
+    if (!op) return
+    unapplyOp(op, opCtx)
+    redoStack.push(op)
   }
 
   const redo = (): void => {
-    const stroke = redoStack.pop()
-    if (!stroke) return
-    strokes.push(stroke)
-    committedDirty = true
-    void saveStroke(stroke).catch((err) => {
-      console.warn('whiteboard/web: failed to re-persist stroke on redo:', err)
-    })
+    const op = redoStack.pop()
+    if (!op) return
+    applyOp(op, opCtx)
+    undoStack.push(op)
   }
 
   attachKeymap({
@@ -371,6 +386,7 @@ async function main(): Promise<void> {
       drawGrid(target.committed, camera, target.width, target.height, getSettings().grid)
       applyCamera(target.committed, camera, target.dpr)
       for (const s of strokes) {
+        if (s.deleted) continue
         const path = getStrokePath(s, [], true)
         if (path) {
           drawStrokePath(

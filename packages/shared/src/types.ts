@@ -48,4 +48,12 @@ export interface Stroke {
   samples: Sample[]
   /** performance.now() at pointerdown. */
   startedAt: number
+  /**
+   * Soft-delete flag. The renderer filters strokes with `deleted === true`;
+   * undo of a stroke creation flips this to `true`; redo flips it back to
+   * `false`. The stroke is never removed from the in-memory array or from
+   * IndexedDB, which keeps undo / redo cheap and CRDT-friendly when M3
+   * sync lands.
+   */
+  deleted?: boolean
 }
