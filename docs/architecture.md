@@ -40,29 +40,34 @@ There are no other services. No queue, no Redis, no separate database, no separa
 
 Vanilla TypeScript SPA built with Vite. Renders to `<canvas>` directly — no React, no Solid, no UI framework on the drawing surface. The toolbar UI uses a small reactive store; framework choice (vanilla vs Solid) is finalized at M2.
 
-Key submodules (planned):
+Key submodules:
 
-| Module          | Responsibility                                           |
-|-----------------|----------------------------------------------------------|
-| `pointer/`      | Pointer pipeline; coalesced + predicted event handling.  |
-| `stroke/`       | Stroke geometry via `perfect-freehand`; pressure curve.  |
-| `render/`       | Two-canvas render loop; pan / zoom; HUD.                 |
-| `tools/`        | Brush, eraser, lasso, pan tool implementations.          |
-| `ui/`           | Floating toolbar, palette, settings, shortcut help.      |
-| `sync/`         | Y.Doc binding; ws transport; presence.                   |
-| `storage/`      | IndexedDB persistence via `y-indexeddb`.                 |
-| `export/`       | PNG / SVG / PDF serialization.                           |
-| `ai/`           | (v2) shape recognition, HTR, math — `transformers.js`.   |
+| Module          | Status   | Responsibility                                           |
+|-----------------|----------|----------------------------------------------------------|
+| `pointer.ts`    | M0 ✅    | Pointer pipeline; coalesced + predicted event handling.  |
+| `stroke.ts`     | M0 ✅    | Stroke geometry via `perfect-freehand`; pressure curve.  |
+| `render.ts`     | M0 ✅    | Two-canvas render loop with camera transform.            |
+| `camera.ts`     | M0 ✅    | Pan / zoom state; screen ↔ board coordinate math.        |
+| `grid.ts`       | M0 ✅    | Subtle dot grid in screen space.                         |
+| `theme.ts`      | M0 ✅    | Light / dark / system themes; theme-aware "ink" color.   |
+| `metrics.ts`    | M0 ✅    | Live FPS / events / samples / event→frame HUD.           |
+| `perftest.ts`   | M0 ✅    | Synthetic stroke harness; reports JS-side latency.       |
+| `storage.ts`    | M0 ✅    | Local persistence via IndexedDB.                         |
+| `tools/`        | M1 ⬜    | Brush, eraser, lasso, pan tool implementations.          |
+| `ui/`           | M2 ⬜    | Floating toolbar, palette, settings, shortcut help.      |
+| `sync/`         | M3 ⬜    | Y.Doc binding; WebSocket transport; presence.            |
+| `export/`       | M2 ⬜    | PNG / SVG / PDF serialization.                           |
+| `ai/`           | v2 ⬜    | Shape recognition, HTR, math — `transformers.js`.        |
 
 ### 2.2 Server (`apps/server`)
 
 Single Bun process. Responsibilities:
 
-1. Serve static files from `apps/web/dist`.
-2. Handle WebSocket upgrades for `/yjs/<room-id>`; forward Y.js updates between peers in the same room.
-3. Snapshot each room's Y.Doc to SQLite on idle / disconnect.
-4. Validate `OWNER_TOKEN` for admin actions (rename, delete, export-all).
-5. Expose `/health` for the container healthcheck.
+1. **M0 ✅** Serve static files from `apps/web/dist` with SPA fallback to `index.html`. Hashed assets get `Cache-Control: immutable`.
+2. **M0 ✅** Expose `/health` for the container healthcheck.
+3. **M3 ⬜** Handle WebSocket upgrades for `/yjs/<room-id>`; forward Y.js updates between peers in the same room.
+4. **M3 ⬜** Snapshot each room's Y.Doc to SQLite on idle / disconnect.
+5. **M3 ⬜** Validate `OWNER_TOKEN` for admin actions (rename, delete, export-all).
 
 The server holds Y.Docs in-memory only as long as a room has active peers. Cold rooms are evicted and rehydrated from SQLite on the next connect.
 
@@ -75,6 +80,14 @@ Types and protocol shared between web and server. Includes:
 - Constants: limits, format versions.
 
 ### 2.4 Persistence
+
+#### Client (M0 ✅)
+
+`apps/web/src/storage.ts` wraps IndexedDB. One database (`whiteboard-local`), one object store (`strokes`), keyed on stroke id. Strokes are written individually on `pointerup` so a power-loss event at most loses the in-flight stroke. Reads on app boot hydrate the committed canvas.
+
+This is intentionally a thin wrapper, not a CRDT-aware persistence layer — that swaps in at M3 (`y-indexeddb`).
+
+#### Server (M3 ⬜)
 
 SQLite via `bun:sqlite`. Schema (planned):
 
@@ -153,21 +166,28 @@ There is no horizontal-scale story. A single container is the unit; if you need 
 
 This section reflects what is *actually in the code right now*. It is updated at each milestone close.
 
-| Component              | Status         | Notes                                              |
-|------------------------|----------------|----------------------------------------------------|
-| Workspace layout       | ✅ Complete    | Bun workspaces; web / server / shared.             |
-| Build pipeline         | ✅ Complete    | Vite (web) + Bun direct (server). `bun run build`. |
-| Lint / format          | ✅ Complete    | Biome.                                             |
-| Docker (production)    | ✅ Complete    | Multi-stage Dockerfile + compose; healthcheck.     |
-| Docker (dev)           | ✅ Complete    | Bind-mount + watch dev compose.                    |
-| CI                     | ✅ Complete    | GitHub Actions: lint + typecheck on push / PR.     |
-| Pre-commit hooks       | ✅ Complete    | Biome check on staged files.                       |
-| Static file serving    | ❌ Not started | Server is a placeholder. Lands at M3 / M4.         |
-| Drawing core           | ❌ Not started | M0.                                                |
-| Brushes / tools        | ❌ Not started | M1 / M2.                                           |
-| Toolbar / shortcuts    | ❌ Not started | M2.                                                |
-| Local persistence      | ❌ Not started | M2.                                                |
-| Live collaboration     | ❌ Not started | M3.                                                |
-| Room URLs / auth       | ❌ Not started | M3.                                                |
-| Export                 | ❌ Not started | M2.                                                |
-| AI features            | ❌ Not started | v2 (M5–M7).                                        |
+| Component                         | Status         | Notes                                                    |
+|-----------------------------------|----------------|----------------------------------------------------------|
+| Workspace layout                  | ✅ Complete    | Bun workspaces; web / server / shared.                   |
+| Build pipeline                    | ✅ Complete    | Vite (web) + Bun direct (server). `bun run build`.       |
+| Lint / format                     | ✅ Complete    | Biome.                                                   |
+| Docker (production)               | ✅ Complete    | Multi-stage Dockerfile + compose; healthcheck.           |
+| Docker (dev)                      | ✅ Complete    | Bind-mount + watch dev compose.                          |
+| CI                                | ✅ Complete    | GitHub Actions: lint + typecheck + Docker smoke.         |
+| Pre-commit hooks                  | ✅ Complete    | Biome check on staged files.                             |
+| **Drawing core (M0)**             | ✅ In code     | `pointer.ts` + `stroke.ts` + `render.ts`; coalesced + predicted; perfect-freehand math. **Latency validation on Wacom Intuos pending user test.** |
+| Pen brush preset                  | ✅ Complete    | Single "Fine pen" preset; γ=2 pressure curve.            |
+| Pan / zoom (infinite canvas)      | ✅ Complete    | Wheel-pan, Cmd/Ctrl+wheel/pinch zoom; Cmd+0 reset.       |
+| Light / dark / system theme       | ✅ Complete    | CSS variables; "ink" token re-resolves on theme change.  |
+| Local persistence (M0+)           | ✅ Complete    | IndexedDB; auto-save on stroke commit; hydrate on load.  |
+| Static file serving               | ✅ Complete    | Server serves built SPA with SPA fallback + immutable cache for `/assets/*`. |
+| Metrics HUD + perftest            | ✅ Complete    | `M` to toggle; `?perftest=1` runs synthetic harness.     |
+| Brushes (marker / pencil / etc.)  | ❌ Not started | M1.                                                      |
+| Eraser, lasso, undo/redo          | ❌ Not started | M1.                                                      |
+| Floating toolbar / palette        | ❌ Not started | M2.                                                      |
+| Pressure curve UI                 | ❌ Not started | M2.                                                      |
+| Export PNG / SVG / PDF            | ❌ Not started | M2.                                                      |
+| Live collaboration                | ❌ Not started | M3.                                                      |
+| Room URLs / owner token           | ❌ Not started | M3.                                                      |
+| Server-side SQLite snapshots      | ❌ Not started | M3.                                                      |
+| AI features                       | ❌ Not started | v2 (M5–M7).                                              |

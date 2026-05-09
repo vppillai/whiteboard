@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@whiteboard/shared": "workspace:*"
+    "@whiteboard/shared": "workspace:*",
+    "perfect-freehand": "^1.2.3"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

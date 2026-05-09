@@ -10,7 +10,9 @@ Low-latency, browser-based whiteboard tuned for Wacom Intuos and other indirect-
 
 ## Status
 
-Pre-alpha. Repository scaffold and product spec only — the drawing core (milestone M0) has not been implemented yet. See [docs/milestones.md](docs/milestones.md) for the milestone plan.
+Early alpha. **Milestone M0 — drawing core — is in code**: drawing with `perfect-freehand`, infinite-canvas pan / zoom, light / dark / system themes, local persistence via IndexedDB, and a metrics HUD. Latency validation on a Wacom Intuos is the remaining M0 gate. Brushes beyond the default pen, eraser, lasso, undo/redo, multi-user collaboration, and exports are upcoming milestones.
+
+See [docs/milestones.md](docs/milestones.md) for the full plan and current state.
 
 ## Why this exists
 
@@ -23,15 +25,26 @@ Browser whiteboards built on tldraw or excalidraw work but feel imprecise on a s
 
 This project rebuilds the input and render pipeline from scratch around those constraints. See [SPEC.md](SPEC.md) for the full design.
 
-## Features (planned)
+## Features
 
-- Sub-33 ms pen-to-photon latency target on a Wacom Intuos.
-- 5 brush presets (pen, marker, pencil, highlighter, brush) with per-brush pressure curves.
-- Floating, dockable toolbar with comprehensive keyboard shortcuts.
-- Stroke-hit eraser, lasso select, pan / zoom on infinite canvas.
-- Live multi-user collaboration via shareable room URLs (CRDT, offline-capable).
-- PNG / SVG / PDF export.
-- **v2 (post-v1):** AI assists for rough-shape → clean primitive, handwriting → text, math → LaTeX. All in-browser via WebGPU; no telemetry, no cloud.
+**Today (M0 in code; pending Intuos latency validation):**
+
+- Drawing with `perfect-freehand` stroke geometry, γ=2 pressure curve preset.
+- Infinite canvas; wheel to pan, Cmd/Ctrl+wheel or trackpad pinch to zoom around the cursor.
+- Light / dark / system themes (`T` to cycle); brush "ink" color follows the theme.
+- Local persistence: pick up where you left off after reload — no account required.
+- Sub-33 ms pen-to-photon latency target on a Wacom Intuos (validate via `?perftest=1` and a real-pen test).
+- Live metrics HUD (`M`): FPS, events / s, coalesced samples / event, event → frame.
+- Help overlay (`?`).
+
+**Coming up:**
+
+- 5 brush presets (pen, marker, pencil, highlighter, brush) with per-brush pressure curves — M1.
+- Stroke-hit eraser, lasso select, undo / redo — M1.
+- Floating toolbar with comprehensive keyboard shortcuts — M2.
+- PNG / SVG / PDF export — M2.
+- Live multi-user collaboration via shareable room URLs (CRDT, offline-capable) — M3.
+- **v2:** in-browser AI for rough-shape → clean primitive, handwriting → text, math → LaTeX. WebGPU only; no telemetry, no cloud.
 
 ## Quick start
 

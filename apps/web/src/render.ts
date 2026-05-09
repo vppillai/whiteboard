@@ -1,0 +1,90 @@
+/**
+ * Two-layer canvas: a "committed" layer that holds finalized strokes and is
+ * redrawn on commit / camera change, and a "live" layer cleared and redrawn
+ * every frame for the in-flight stroke.
+ *
+ * Both layers are sized in device pixels with a base CSS-pixel transform.
+ * The camera transform is layered on top via applyCamera(); render output is
+ * in board space.
+ */
+
+import type { Camera } from './camera'
+
+export interface CanvasLayer {
+  el: HTMLCanvasElement
+  ctx: CanvasRenderingContext2D
+}
+
+export interface RenderTarget {
+  committed: CanvasLayer
+  live: CanvasLayer
+  /** CSS pixels. */
+  width: number
+  height: number
+  dpr: number
+}
+
+export function setupCanvas(parent: HTMLElement): RenderTarget {
+  const committed = makeLayer()
+  const live = makeLayer()
+  parent.append(committed.el, live.el)
+
+  const target: RenderTarget = {
+    committed,
+    live,
+    width: 0,
+    height: 0,
+    dpr: window.devicePixelRatio || 1,
+  }
+
+  const resize = () => {
+    const rect = parent.getBoundingClientRect()
+    target.width = rect.width
+    target.height = rect.height
+    target.dpr = window.devicePixelRatio || 1
+
+    for (const layer of [committed, live]) {
+      layer.el.width = Math.max(1, Math.floor(target.width * target.dpr))
+      layer.el.height = Math.max(1, Math.floor(target.height * target.dpr))
+      layer.el.style.width = `${target.width}px`
+      layer.el.style.height = `${target.height}px`
+      // Reset to identity; callers apply camera transform per draw pass.
+      layer.ctx.setTransform(target.dpr, 0, 0, target.dpr, 0, 0)
+    }
+  }
+
+  resize()
+  window.addEventListener('resize', resize)
+
+  return target
+}
+
+function makeLayer(): CanvasLayer {
+  const el = document.createElement('canvas')
+  const ctx = el.getContext('2d', { desynchronized: true, alpha: true })
+  if (!ctx) throw new Error('2D canvas context unavailable')
+  return { el, ctx }
+}
+
+/**
+ * Set the layer's transform to: device-pixel scaling × camera. After this,
+ * draws should be in board space (CSS pixels at scale 1).
+ */
+export function applyCamera(layer: CanvasLayer, camera: Camera, dpr: number): void {
+  const a = camera.scale * dpr
+  layer.ctx.setTransform(a, 0, 0, a, -camera.x * a, -camera.y * a)
+}
+
+/** Clears the entire canvas regardless of current transform. */
+export function clearLayer(layer: CanvasLayer): void {
+  const { ctx, el } = layer
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, el.width, el.height)
+  ctx.restore()
+}
+
+export function drawStrokePath(layer: CanvasLayer, path: Path2D, color: string): void {
+  layer.ctx.fillStyle = color
+  layer.ctx.fill(path)
+}

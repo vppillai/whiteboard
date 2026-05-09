@@ -1,0 +1,174 @@
+/* Theme tokens. The light values are the default; dark overrides via [data-theme='dark']. */
+:root {
+  --bg-page: #fafafa;
+  --bg-canvas: #ffffff;
+  --fg-text: #1a1a1a;
+  --fg-muted: #6b7280;
+  --ink: #1a1a1a;
+  --grid-dot: rgba(0, 0, 0, 0.07);
+  --hud-bg: rgba(20, 24, 30, 0.85);
+  --hud-fg: #e6f0fa;
+  --hud-border: rgba(255, 255, 255, 0.06);
+  --banner-bg: rgba(20, 24, 30, 0.92);
+  --banner-fg: #e8eef5;
+  --banner-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  --pill-bg: rgba(20, 24, 30, 0.04);
+  --pill-fg: #6b7280;
+}
+
+[data-theme="dark"] {
+  --bg-page: #0a0c10;
+  --bg-canvas: #0e1115;
+  --fg-text: #e8eef5;
+  --fg-muted: #8a93a3;
+  --ink: #e8eef5;
+  --grid-dot: rgba(255, 255, 255, 0.06);
+  --hud-bg: rgba(20, 24, 30, 0.92);
+  --hud-fg: #cfeeff;
+  --hud-border: rgba(255, 255, 255, 0.06);
+  --banner-bg: rgba(20, 24, 30, 0.94);
+  --banner-fg: #e8eef5;
+  --banner-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --pill-bg: rgba(255, 255, 255, 0.04);
+  --pill-fg: #8a93a3;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg-page: #0a0c10;
+    --bg-canvas: #0e1115;
+    --fg-text: #e8eef5;
+    --fg-muted: #8a93a3;
+    --ink: #e8eef5;
+    --grid-dot: rgba(255, 255, 255, 0.06);
+    --hud-bg: rgba(20, 24, 30, 0.92);
+    --hud-fg: #cfeeff;
+    --hud-border: rgba(255, 255, 255, 0.06);
+    --banner-bg: rgba(20, 24, 30, 0.94);
+    --banner-fg: #e8eef5;
+    --banner-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    --pill-bg: rgba(255, 255, 255, 0.04);
+    --pill-fg: #8a93a3;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-page);
+  font: 14px / 1.4 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  color: var(--fg-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-canvas);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  overscroll-behavior: none;
+}
+
+#app canvas {
+  display: block;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#app[data-input="pan"] {
+  cursor: grab;
+}
+
+#app[data-input="panning"] {
+  cursor: grabbing;
+}
+
+#whiteboard-hud {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  padding: 10px 14px;
+  background: var(--hud-bg);
+  color: var(--hud-fg);
+  font: 11px / 1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 1000;
+  min-width: 184px;
+  white-space: pre;
+  letter-spacing: 0.01em;
+  backdrop-filter: blur(8px) saturate(1.2);
+  -webkit-backdrop-filter: blur(8px) saturate(1.2);
+}
+
+#whiteboard-pill {
+  position: fixed;
+  bottom: 12px;
+  left: 12px;
+  padding: 6px 10px;
+  background: var(--pill-bg);
+  color: var(--pill-fg);
+  font: 11px / 1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 999;
+  letter-spacing: 0.02em;
+}
+
+#whiteboard-banner {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--banner-bg);
+  color: var(--banner-fg);
+  padding: 20px 24px;
+  border-radius: 12px;
+  font: 13px / 1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  z-index: 2000;
+  pointer-events: none;
+  box-shadow: var(--banner-shadow);
+  max-width: 560px;
+  border: 1px solid var(--hud-border);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+#whiteboard-banner pre {
+  margin: 0;
+  font: 12px / 1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+#whiteboard-help {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  padding: 10px 14px;
+  background: var(--hud-bg);
+  color: var(--hud-fg);
+  font: 11px / 1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 1000;
+  white-space: pre;
+  letter-spacing: 0.01em;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0.85;
+}

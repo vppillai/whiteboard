@@ -6,18 +6,18 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 
 ## Current state
 
-| M  | Title                                  | Status |
-|----|----------------------------------------|--------|
-| —  | Repo + dev / deploy environment        | ✅     |
-| M0 | Drawing skeleton — latency validation  | ⬜     |
-| M1 | Stroke engine + tools                  | ⬜     |
-| M2 | UI, persistence, export                | ⬜     |
-| M3 | Server, sync, room URLs                | ⬜     |
-| M4 | Production deployment polish           | ⬜     |
-| **v1 ship** |                               | **—**  |
-| M5 | AI: shape recognition                  | ⬜     |
-| M6 | AI: handwriting → text                 | ⬜     |
-| M7 | AI: math / LaTeX                       | ⬜     |
+| M  | Title                                                                    | Status |
+|----|--------------------------------------------------------------------------|--------|
+| —  | Repo + dev / deploy environment                                          | ✅     |
+| M0 | Drawing core: latency, pan/zoom, theme, local persistence                | 🟦 *(code complete, Intuos latency validation pending)* |
+| M1 | Brushes + eraser + lasso + undo/redo                                     | ⬜     |
+| M2 | Toolbar UI, keyboard shortcuts, export                                   | ⬜     |
+| M3 | Server, sync, room URLs                                                  | ⬜     |
+| M4 | Production deployment polish                                             | ⬜     |
+| **v1 ship** |                                                                 | **—**  |
+| M5 | AI: shape recognition                                                    | ⬜     |
+| M6 | AI: handwriting → text                                                   | ⬜     |
+| M7 | AI: math / LaTeX                                                         | ⬜     |
 
 ---
 
@@ -36,50 +36,56 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 - ADRs 0001–0003.
 - MIT license, README, CONTRIBUTING, CHANGELOG.
 
-### M0 — Drawing skeleton ⬜
+### M0 — Drawing core 🟦
 
-**Scope.** Smallest possible drawing surface that proves the latency budget is achievable. Single brush, no UI chrome, no persistence.
+> **Scope expanded** from the original "latency-only skeleton". User feedback during build pulled forward the things that make the tool genuinely usable from day one: theme support, infinite-canvas pan/zoom, and local persistence. Pan/zoom moved here from M1; persistence moved here from M2. The latency-validation gate is unchanged.
 
-**Build.**
+**Build (in code).**
 
-- `<canvas>` with `pointerdown` / `pointermove` / `pointerup` handlers.
+- `<canvas>` (committed + live layers) with `pointerdown` / `pointermove` / `pointerup` handlers.
 - `getCoalescedEvents()` consuming all Wacom samples between frames.
 - `getPredictedEvents()` for visual lookahead on the live layer.
-- `perfect-freehand` for stroke geometry.
-- A `?perftest=1` mode that runs a synthetic-stroke harness and reports pen-to-photon latency.
+- `perfect-freehand` for stroke geometry; γ=2 pressure curve preset.
+- Camera (pan + zoom). Wheel pans; Cmd/Ctrl+wheel or pinch zooms around the cursor.
+- Theme: light / dark / system. Brush color stored as `'ink'` token, re-resolved on theme change.
+- Local persistence via IndexedDB; auto-save on commit; hydrate on load.
+- Subtle dot grid; sleek minimal HUD; help overlay; theme pill.
+- `?perftest=1` synthetic stroke harness reporting JS-side input-to-render latency.
+- Server now serves the built SPA with SPA fallback + cache-immutable hashed assets.
 
 **Exit criteria.**
 
-- Pen-down → first ink visible: ≤ 16 ms (1 frame), measured.
-- Pen-to-photon during drag with prediction: ≤ 33 ms, measured.
-- No dropped Wacom samples at 200 Hz on a 60 Hz display.
-- `docs/architecture.md` § 6 updated to reflect what's built.
-- `CHANGELOG.md` entry under `[Unreleased]`.
-- ADR added if the latency work surfaced an architectural choice (e.g. OffscreenCanvas decision).
+- [x] Code complete, lint + typecheck clean, web build < 25 KB raw / < 9 KB gz.
+- [x] Production Docker stack builds and serves the SPA end-to-end.
+- [x] `docs/architecture.md` § 6 updated.
+- [x] `CHANGELOG.md` entry under `[Unreleased]`.
+- [ ] **Pen-down → first ink visible: ≤ 16 ms (1 frame).** Validate on Wacom Intuos with `?perftest=1` and a real-pen test.
+- [ ] **Pen-to-photon during drag with prediction: ≤ 33 ms.** Validate on Intuos.
+- [ ] **No dropped Wacom samples at 200 Hz on a 60 Hz display.** HUD `samples / event` should average > 1 during fast strokes.
+- [ ] ADR added if the latency work surfaces an architectural choice.
 
-### M1 — Stroke engine + tools ⬜
+### M1 — Brushes + eraser + lasso + undo/redo ⬜
 
-**Scope.** All five brush presets, eraser (stroke-hit), lasso select, pan, zoom, undo / redo. Pressure curve configurable. Two-canvas committed / live split.
+**Scope (revised).** Adds the remaining brush presets, eraser, lasso select, undo/redo. Pan/zoom and persistence already shipped at M0+.
 
 **Exit criteria.**
 
-- All brushes render correctly with their tabled parameters.
+- All five brushes render correctly with their tabled parameters.
 - Stroke-hit eraser deletes (soft) within hit radius.
 - Lasso selects strokes; selected strokes can be deleted, moved.
 - Undo / redo across stroke create, delete, move.
 - 1000-stroke board pans / zooms at 60 fps on the M0 reference machine.
 - Architecture doc updated; CHANGELOG entry; per-tool docs as needed.
 
-### M2 — UI, persistence, export ⬜
+### M2 — Toolbar UI, keyboard shortcuts, export ⬜
 
-**Scope.** Floating toolbar, keyboard shortcuts, palette, brush presets, IndexedDB local persistence, PNG / SVG / PDF export, settings UI (pressure curve, hide-toolbar mode).
+**Scope (revised).** Floating toolbar, palette, brush presets, settings UI (pressure curve, hide-toolbar mode), PNG / SVG / PDF export. Local persistence already shipped at M0+; if needed, refine here.
 
 **Exit criteria.**
 
 - Toolbar dockable to any edge, draggable.
 - All keyboard shortcuts in [SPEC § 4.3](../SPEC.md#43-keyboard-shortcuts) work.
 - Pressure curve UI saves per-brush; survives reload.
-- Local board cache via IndexedDB; reload restores last state.
 - Export PNG / SVG / PDF produces visually correct output (manual visual diff acceptable for v1).
 - `docs/architecture.md` updated; CHANGELOG entry.
 
