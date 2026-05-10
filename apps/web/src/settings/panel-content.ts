@@ -1,0 +1,434 @@
+/**
+ * M1.7 settings panel content. Renders the 7 sections per spec § 6.1
+ * into the side panel's body. Each section is a self-contained renderer
+ * that subscribes to settings.onChange where it needs live updates.
+ */
+
+import { BRUSH_IDS, BRUSH_LABELS, type BrushId } from '../brushes'
+import {
+  VALID_GRID_TYPE_VALUES,
+  VALID_SPACING_VALUES,
+  clearPreset,
+  getCustomSwatches,
+  getEffectiveBrushConfig,
+  getGrid,
+  onChange,
+  removeCustomSwatch,
+  setGridSpacing,
+  setGridType,
+  setPresetField,
+} from '../settings'
+import { createSwatchAdd } from '../swatchadd'
+import { type ThemeMode, getMode as getThemeMode, setMode as setThemeMode } from '../theme'
+
+export interface PanelContentOptions {
+  /** Called when the user clicks "Reset to defaults" — typically wires
+   *  to a resetflow.request() in main.ts. */
+  onResetClick: () => void
+}
+
+interface Section {
+  el: HTMLElement
+  update?(): void
+}
+
+export function createPanelContent(opts: PanelContentOptions): {
+  el: HTMLElement
+  cleanup: () => void
+} {
+  const root = document.createElement('div')
+  root.className = 'whiteboard-settings-panel'
+
+  const sections: Section[] = [
+    renderBrushPresetsSection(),
+    renderCustomSwatchesSection(),
+    renderFontsSection(),
+    renderGridSection(),
+    renderThemeSection(),
+    renderAdvancedSection(),
+    renderResetFooter(opts.onResetClick),
+  ]
+  for (const s of sections) root.appendChild(s.el)
+
+  const unsubscribe = onChange(() => {
+    for (const s of sections) s.update?.()
+  })
+
+  return {
+    el: root,
+    cleanup: unsubscribe,
+  }
+}
+
+function sectionLabel(text: string): HTMLElement {
+  const el = document.createElement('div')
+  el.className = 'whiteboard-settings-section-label'
+  el.textContent = text
+  return el
+}
+
+function renderBrushPresetsSection(): Section {
+  const el = document.createElement('section')
+  el.appendChild(sectionLabel('Brush presets'))
+  const cards: Array<{ update: () => void }> = []
+  for (const id of BRUSH_IDS) {
+    cards.push(renderBrushCard(id, el))
+  }
+  return {
+    el,
+    update: () => {
+      for (const c of cards) c.update()
+    },
+  }
+}
+
+function renderBrushCard(brushId: BrushId, parent: HTMLElement): { update: () => void } {
+  const card = document.createElement('div')
+  card.className = 'whiteboard-settings-brush-card'
+  parent.appendChild(card)
+
+  const head = document.createElement('div')
+  head.className = 'whiteboard-settings-brush-head'
+  head.textContent = BRUSH_LABELS[brushId]
+  card.appendChild(head)
+
+  const sliders = {
+    size: makeSlider('Size', 1, 24, 0.5, brushId, 'size'),
+    opacity: makeSlider('Opacity', 0, 1, 0.02, brushId, 'opacity'),
+    pressureGamma: makeSlider('Pressure γ', 0.5, 3.0, 0.1, brushId, 'pressureGamma'),
+  }
+  card.append(sliders.size.el, sliders.opacity.el, sliders.pressureGamma.el)
+
+  const resetLink = document.createElement('button')
+  resetLink.type = 'button'
+  resetLink.className = 'whiteboard-settings-reset-link'
+  resetLink.textContent = 'Reset this preset'
+  resetLink.addEventListener('click', () => clearPreset(brushId))
+  card.appendChild(resetLink)
+
+  return {
+    update: () => {
+      sliders.size.update()
+      sliders.opacity.update()
+      sliders.pressureGamma.update()
+    },
+  }
+}
+
+type NumericPresetField =
+  | 'size'
+  | 'opacity'
+  | 'pressureGamma'
+  | 'thinning'
+  | 'smoothing'
+  | 'streamline'
+  | 'taperStart'
+  | 'taperEnd'
+
+function makeSlider(
+  label: string,
+  min: number,
+  max: number,
+  step: number,
+  brushId: BrushId,
+  field: NumericPresetField,
+): { el: HTMLElement; update: () => void } {
+  const wrap = document.createElement('div')
+  wrap.className = 'whiteboard-settings-slider'
+
+  const lbl = document.createElement('label')
+  lbl.className = 'whiteboard-settings-slider-label'
+  lbl.textContent = label
+
+  const range = document.createElement('input')
+  range.type = 'range'
+  range.min = String(min)
+  range.max = String(max)
+  range.step = String(step)
+
+  const valueOut = document.createElement('span')
+  valueOut.className = 'whiteboard-settings-slider-value'
+
+  const sync = () => {
+    const cfg = getEffectiveBrushConfig(brushId, 'ink')
+    const v = (cfg as unknown as Record<string, unknown>)[field] as number
+    range.value = String(v)
+    valueOut.textContent = step >= 1 ? String(v) : v.toFixed(2)
+  }
+  sync()
+
+  range.addEventListener('input', () => {
+    setPresetField(brushId, field, Number(range.value))
+  })
+
+  wrap.append(lbl, range, valueOut)
+  return { el: wrap, update: sync }
+}
+
+function renderCustomSwatchesSection(): Section {
+  const el = document.createElement('section')
+  el.appendChild(sectionLabel('Custom swatches'))
+
+  const list = document.createElement('div')
+  list.className = 'whiteboard-settings-custom-list'
+  el.appendChild(list)
+
+  const empty = document.createElement('div')
+  empty.className = 'whiteboard-settings-custom-empty'
+  empty.textContent = 'Add a custom color to use across the board.'
+  el.appendChild(empty)
+
+  const addContainer = document.createElement('div')
+  addContainer.className = 'whiteboard-settings-add-swatch-container'
+  el.appendChild(addContainer)
+
+  const addBtn = document.createElement('button')
+  addBtn.type = 'button'
+  addBtn.className = 'whiteboard-settings-add-swatch-btn'
+  addBtn.textContent = '+ Add custom color'
+  addContainer.appendChild(addBtn)
+
+  let addUI: HTMLElement | null = null
+
+  addBtn.addEventListener('click', () => {
+    if (addUI) return
+    addUI = createSwatchAdd({
+      onAdded: () => {
+        addUI?.remove()
+        addUI = null
+      },
+      onCancel: () => {
+        addUI?.remove()
+        addUI = null
+      },
+    })
+    addContainer.appendChild(addUI)
+  })
+
+  const update = () => {
+    list.replaceChildren()
+    const swatches = getCustomSwatches()
+    if (swatches.length === 0) {
+      empty.style.display = ''
+      return
+    }
+    empty.style.display = 'none'
+    for (const hex of swatches) {
+      const row = document.createElement('div')
+      row.className = 'whiteboard-settings-custom-row'
+
+      const preview = document.createElement('span')
+      preview.className = 'whiteboard-settings-custom-preview'
+      preview.style.background = hex
+
+      const hexLabel = document.createElement('span')
+      hexLabel.className = 'whiteboard-settings-custom-hex'
+      hexLabel.textContent = hex.toUpperCase()
+
+      const del = document.createElement('button')
+      del.type = 'button'
+      del.className = 'whiteboard-settings-custom-delete'
+      del.setAttribute('aria-label', `Delete ${hex}`)
+      del.textContent = '×'
+      del.addEventListener('click', () => removeCustomSwatch(hex))
+
+      row.append(preview, hexLabel, del)
+      list.appendChild(row)
+    }
+  }
+
+  update()
+  return { el, update }
+}
+
+function renderFontsSection(): Section {
+  const el = document.createElement('section')
+  el.appendChild(sectionLabel('Fonts'))
+  const note = document.createElement('p')
+  note.className = 'whiteboard-settings-note'
+  note.textContent = 'Reserved for the Text tool (M2+).'
+  el.appendChild(note)
+  return { el }
+}
+
+function renderGridSection(): Section {
+  const el = document.createElement('section')
+  el.appendChild(sectionLabel('Grid'))
+
+  const typeLbl = document.createElement('div')
+  typeLbl.className = 'whiteboard-settings-sub-label'
+  typeLbl.textContent = 'Type'
+  el.appendChild(typeLbl)
+
+  const typeRow = document.createElement('div')
+  typeRow.className = 'whiteboard-settings-pill-row'
+  el.appendChild(typeRow)
+  for (const t of VALID_GRID_TYPE_VALUES) {
+    const p = makePill(t.charAt(0).toUpperCase() + t.slice(1), () => setGridType(t))
+    p.dataset.value = t
+    typeRow.appendChild(p)
+  }
+
+  const spLbl = document.createElement('div')
+  spLbl.className = 'whiteboard-settings-sub-label'
+  spLbl.textContent = 'Spacing'
+  el.appendChild(spLbl)
+
+  const spRow = document.createElement('div')
+  spRow.className = 'whiteboard-settings-pill-row'
+  el.appendChild(spRow)
+  for (const s of VALID_SPACING_VALUES) {
+    const p = makePill(String(s), () => setGridSpacing(s))
+    p.dataset.value = String(s)
+    spRow.appendChild(p)
+  }
+
+  const update = () => {
+    const cur = getGrid()
+    for (const p of typeRow.querySelectorAll<HTMLElement>('.whiteboard-settings-pill')) {
+      p.classList.toggle('active', p.dataset.value === cur.type)
+    }
+    for (const p of spRow.querySelectorAll<HTMLElement>('.whiteboard-settings-pill')) {
+      p.classList.toggle('active', p.dataset.value === String(cur.spacing))
+    }
+  }
+
+  update()
+  return { el, update }
+}
+
+function renderThemeSection(): Section {
+  const el = document.createElement('section')
+  el.appendChild(sectionLabel('Theme'))
+
+  const row = document.createElement('div')
+  row.className = 'whiteboard-settings-pill-row'
+  el.appendChild(row)
+
+  const modes: ThemeMode[] = ['light', 'dark', 'system']
+  for (const m of modes) {
+    const pill = makePill(m.charAt(0).toUpperCase() + m.slice(1), () => setThemeMode(m))
+    pill.dataset.value = m
+    row.appendChild(pill)
+  }
+
+  const update = () => {
+    const cur = getThemeMode()
+    for (const p of row.querySelectorAll<HTMLElement>('.whiteboard-settings-pill')) {
+      p.classList.toggle('active', p.dataset.value === cur)
+    }
+  }
+
+  update()
+  document.documentElement.addEventListener('themechange', update)
+
+  return { el, update }
+}
+
+function renderAdvancedSection(): Section {
+  const el = document.createElement('section')
+  const header = document.createElement('button')
+  header.type = 'button'
+  header.className = 'whiteboard-settings-advanced-toggle'
+  header.textContent = '▶ Show advanced'
+  el.appendChild(header)
+
+  const body = document.createElement('div')
+  body.className = 'whiteboard-settings-advanced-body'
+  body.style.display = 'none'
+  el.appendChild(body)
+
+  let expanded = false
+  let cardUpdaters: Array<() => void> = []
+
+  header.addEventListener('click', () => {
+    expanded = !expanded
+    header.textContent = expanded ? '▼ Hide advanced' : '▶ Show advanced'
+    body.style.display = expanded ? '' : 'none'
+    if (expanded && cardUpdaters.length === 0) {
+      cardUpdaters = renderAdvancedCards(body)
+    }
+  })
+
+  return {
+    el,
+    update: () => {
+      for (const u of cardUpdaters) u()
+    },
+  }
+}
+
+function renderAdvancedCards(parent: HTMLElement): Array<() => void> {
+  const updaters: Array<() => void> = []
+  for (const id of BRUSH_IDS) {
+    const card = document.createElement('div')
+    card.className = 'whiteboard-settings-brush-card'
+    parent.appendChild(card)
+
+    const head = document.createElement('div')
+    head.className = 'whiteboard-settings-brush-head'
+    head.textContent = BRUSH_LABELS[id]
+    card.appendChild(head)
+
+    const fields: Array<{
+      field: NumericPresetField
+      label: string
+      min: number
+      max: number
+      step: number
+    }> = [
+      { field: 'thinning', label: 'Thinning', min: 0, max: 1, step: 0.05 },
+      { field: 'smoothing', label: 'Smoothing', min: 0, max: 1, step: 0.05 },
+      { field: 'streamline', label: 'Streamline', min: 0, max: 1, step: 0.05 },
+      { field: 'taperStart', label: 'Taper start', min: 0, max: 30, step: 1 },
+      { field: 'taperEnd', label: 'Taper end', min: 0, max: 30, step: 1 },
+    ]
+    for (const f of fields) {
+      const s = makeSlider(f.label, f.min, f.max, f.step, id, f.field)
+      card.appendChild(s.el)
+      updaters.push(s.update)
+    }
+
+    for (const cap of ['capStart', 'capEnd'] as const) {
+      const wrap = document.createElement('label')
+      wrap.className = 'whiteboard-settings-checkbox'
+      const cb = document.createElement('input')
+      cb.type = 'checkbox'
+      const lbl = document.createElement('span')
+      lbl.textContent = cap === 'capStart' ? 'Cap start' : 'Cap end'
+      const sync = () => {
+        const cfg = getEffectiveBrushConfig(id, 'ink')
+        cb.checked = !!(cfg as unknown as Record<string, unknown>)[cap]
+      }
+      sync()
+      cb.addEventListener('change', () => {
+        setPresetField(id, cap, cb.checked)
+      })
+      wrap.append(cb, lbl)
+      card.appendChild(wrap)
+      updaters.push(sync)
+    }
+  }
+  return updaters
+}
+
+function renderResetFooter(onResetClick: () => void): Section {
+  const el = document.createElement('section')
+  el.className = 'whiteboard-settings-footer'
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'whiteboard-settings-reset-btn'
+  btn.textContent = 'Reset to defaults'
+  btn.addEventListener('click', onResetClick)
+  el.appendChild(btn)
+  return { el }
+}
+
+function makePill(label: string, onClick: () => void): HTMLButtonElement {
+  const p = document.createElement('button')
+  p.type = 'button'
+  p.className = 'whiteboard-settings-pill'
+  p.textContent = label
+  p.addEventListener('click', onClick)
+  return p
+}
