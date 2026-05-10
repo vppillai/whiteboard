@@ -534,10 +534,14 @@ async function main(): Promise<void> {
         maxY: camera.y + target.height / camera.scale,
       }
 
-      // ----- Pass 1: stroke outlines on the offscreen strokes layer -----
-      // ADR 0009: strokes go to a dedicated offscreen so we can apply
-      // destination-out for eraser stamps without subtracting from the
-      // grid (which lives on the committed layer).
+      // ----- Pass 1: per-stroke draw + per-stroke destination-out -----
+      // ADR 0009: strokes go to a dedicated offscreen so destination-out
+      // for eraser stamps doesn't subtract from the grid. Each stroke's
+      // stamps must be applied *immediately after that stroke is drawn*
+      // and *before the next stroke is drawn*; otherwise a global
+      // destination-out at the end would also subtract pixels of any
+      // later stroke that crosses the same position, making erased
+      // regions permanent dead zones.
       clearLayer(target.strokes)
       applyCamera(target.strokes, camera, target.dpr)
 
@@ -546,6 +550,12 @@ async function main(): Promise<void> {
       const dragState = tool.current === lassoTool ? lassoTool.getDragState() : null
       const draggingIds = dragState?.ids
 
+      // Pending stamps are read through the EraserTool's `getPendingStamps`
+      // extension (in-flight wipe sweep not yet committed); skipped if a
+      // different tool is active.
+      const pendingStamps = tool.current === eraserTool ? eraserTool.getPendingStamps() : null
+      const sCtx = target.strokes.ctx
+
       for (const s of strokes) {
         if (s.deleted) continue
         if (draggingIds?.has(s.id)) continue
@@ -553,25 +563,14 @@ async function main(): Promise<void> {
         const path = getStrokePath(s, [], true)
         if (!path) continue
         drawStrokePath(target.strokes, path, resolveInkColor(s.brush.color), effectiveOpacity(s))
-      }
 
-      // ----- Pass 2: destination-out for eraser stamps -----
-      // Both the committed `erasedStamps` (set by applied `eraseStamps`
-      // ops) and the active tool's pending stamps (in-flight wipe sweep
-      // not yet committed) are applied here. Pending stamps are read
-      // through the EraserTool's `getPendingStamps` extension; if no other
-      // tool is active, the lookup is skipped.
-      const pendingStamps = tool.current === eraserTool ? eraserTool.getPendingStamps() : null
-      const sCtx = target.strokes.ctx
-      sCtx.save()
-      sCtx.globalCompositeOperation = 'destination-out'
-      sCtx.fillStyle = '#000' // destination-out only cares about source alpha
-      for (const s of strokes) {
-        if (s.deleted) continue
-        if (draggingIds?.has(s.id)) continue
         const committedStamps = s.erasedStamps
         const pendingForStroke = pendingStamps?.get(s.id)
-        if (!committedStamps && !pendingForStroke) continue
+        if (!committedStamps?.length && !pendingForStroke?.length) continue
+
+        sCtx.save()
+        sCtx.globalCompositeOperation = 'destination-out'
+        sCtx.fillStyle = '#000' // destination-out only cares about source alpha
         if (committedStamps) {
           for (const st of committedStamps) {
             sCtx.beginPath()
@@ -586,8 +585,8 @@ async function main(): Promise<void> {
             sCtx.fill()
           }
         }
+        sCtx.restore()
       }
-      sCtx.restore()
 
       // ----- Pass 3: committed layer (grid + composited strokes) -----
       clearLayer(target.committed)
