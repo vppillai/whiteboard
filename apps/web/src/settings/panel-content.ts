@@ -30,6 +30,7 @@ export interface PanelContentOptions {
 interface Section {
   el: HTMLElement
   update?(): void
+  dispose?(): void
 }
 
 export function createPanelContent(opts: PanelContentOptions): {
@@ -56,7 +57,10 @@ export function createPanelContent(opts: PanelContentOptions): {
 
   return {
     el: root,
-    cleanup: unsubscribe,
+    cleanup: () => {
+      unsubscribe()
+      for (const s of sections) s.dispose?.()
+    },
   }
 }
 
@@ -322,7 +326,11 @@ function renderThemeSection(): Section {
   update()
   document.documentElement.addEventListener('themechange', update)
 
-  return { el, update }
+  return {
+    el,
+    update,
+    dispose: () => document.documentElement.removeEventListener('themechange', update),
+  }
 }
 
 function renderAdvancedSection(): Section {
