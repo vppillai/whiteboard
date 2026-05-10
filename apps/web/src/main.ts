@@ -54,6 +54,7 @@ import { applyCamera, clearLayer, drawStrokePath, setupCanvas } from './render'
 import {
   getBrushId,
   getColor,
+  getEffectiveBrushConfig,
   getSettings,
   onChange as onSettingsChange,
   setBrushId,
@@ -279,7 +280,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------
   const toolCtx: ToolContext = {
     toBoard,
-    getBrush: makeBrush,
+    getBrush: () => getEffectiveBrushConfig(getBrushId(), getColor()),
     liveLayer: target.live,
     camera,
     dpr: target.dpr,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { migrate } from './settings'
+import { getEffectiveBrushConfig, migrate } from './settings'
 
 describe('settings: migrate', () => {
   test('v0 with all fields migrates to v1 preserving values', () => {
@@ -117,5 +117,19 @@ describe('settings: migrate edge cases', () => {
     })
     expect(v1.recentColors).toHaveLength(6)
     expect(v1.recentColors[0]).toBe('#111111')
+  })
+})
+
+describe('settings: getEffectiveBrushConfig', () => {
+  test('empty override returns SPEC default with color', () => {
+    const cfg = getEffectiveBrushConfig('pen', '#ef4444')
+    expect(cfg.size).toBe(3.5) // pen SPEC default
+    expect(cfg.opacity).toBe(0.94)
+    expect(cfg.pressureGamma).toBe(1.3)
+    expect(cfg.color).toBe('#ef4444')
+  })
+
+  test('does not throw when no override is set', () => {
+    expect(() => getEffectiveBrushConfig('marker', 'ink')).not.toThrow()
   })
 })

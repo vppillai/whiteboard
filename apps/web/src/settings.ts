@@ -10,7 +10,7 @@
  */
 
 import type { BrushConfig } from '@whiteboard/shared'
-import { type BrushId, isValidBrushId } from './brushes'
+import { BRUSH_PRESETS, type BrushId, isValidBrushId } from './brushes'
 
 export type GridType = 'dots' | 'lines' | 'ruled' | 'none'
 export type EraserSize = 'small' | 'medium' | 'large'
@@ -186,6 +186,12 @@ function persist(): void {
 
 function emit(): void {
   for (const fn of listeners) fn()
+}
+
+export function getEffectiveBrushConfig(brushId: BrushId, color: string): BrushConfig {
+  const def = BRUSH_PRESETS[brushId]
+  const override = state.presets[brushId] ?? {}
+  return { ...def, ...override, color }
 }
 
 export function getSettings(): Readonly<State> {
