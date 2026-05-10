@@ -51,7 +51,7 @@ import { runPerftest } from './perftest'
 import { createHelpPill } from './pill'
 import { attachPointer } from './pointer'
 import { dismissAllPopovers, getActiveTag } from './popover'
-import { applyCamera, clearLayer, drawStrokePath, setupCanvas } from './render'
+import { applyCamera, clearLayer, drawStrokeOntoLayer, drawStrokePath, setupCanvas } from './render'
 import { createResetFlow } from './resetflow'
 import {
   getBrushId,
@@ -602,7 +602,6 @@ async function main(): Promise<void> {
       // extension (in-flight wipe sweep not yet committed); skipped if a
       // different tool is active.
       const pendingStamps = tool.current === eraserTool ? eraserTool.getPendingStamps() : null
-      const sCtx = target.strokes.ctx
 
       for (const s of strokes) {
         if (s.deleted) continue
@@ -610,30 +609,14 @@ async function main(): Promise<void> {
         if (!bboxesIntersect(getStrokeBBox(s), viewBBox)) continue
         const path = getStrokePath(s, [], true)
         if (!path) continue
-        drawStrokePath(target.strokes, path, resolveInkColor(s.brush.color), effectiveOpacity(s))
-
-        const committedStamps = s.erasedStamps
-        const pendingForStroke = pendingStamps?.get(s.id)
-        if (!committedStamps?.length && !pendingForStroke?.length) continue
-
-        sCtx.save()
-        sCtx.globalCompositeOperation = 'destination-out'
-        sCtx.fillStyle = '#000' // destination-out only cares about source alpha
-        if (committedStamps) {
-          for (const st of committedStamps) {
-            sCtx.beginPath()
-            sCtx.arc(st.x, st.y, st.r, 0, Math.PI * 2)
-            sCtx.fill()
-          }
-        }
-        if (pendingForStroke) {
-          for (const st of pendingForStroke) {
-            sCtx.beginPath()
-            sCtx.arc(st.x, st.y, st.r, 0, Math.PI * 2)
-            sCtx.fill()
-          }
-        }
-        sCtx.restore()
+        drawStrokeOntoLayer(
+          target.strokes,
+          path,
+          resolveInkColor(s.brush.color),
+          effectiveOpacity(s),
+          s.erasedStamps,
+          pendingStamps?.get(s.id),
+        )
       }
 
       // ----- Pass 3: committed layer (grid + composited strokes) -----
