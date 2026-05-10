@@ -610,3 +610,34 @@ body {
   opacity: 0.4;
   cursor: not-allowed;
 }
+.whiteboard-color-swatch-custom {
+  border: 1.5px solid var(--text-muted, rgba(0, 0, 0, 0.25));
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.6);
+}
+.whiteboard-color-swatch-add {
+  border: 1.5px dashed var(--text-muted, rgba(0, 0, 0, 0.3));
+  background: transparent;
+  color: var(--text-muted, rgba(0, 0, 0, 0.5));
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.whiteboard-color-swatch-recent {
+  width: 18px;
+  height: 18px;
+}
+.whiteboard-color-recent-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.whiteboard-color-section-label {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted, rgba(0, 0, 0, 0.4));
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
