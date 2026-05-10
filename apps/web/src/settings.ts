@@ -9,6 +9,7 @@
  * existing strokes); any other value is treated as a literal CSS color.
  */
 
+import type { BrushConfig } from '@whiteboard/shared'
 import { type BrushId, isValidBrushId } from './brushes'
 
 export type GridType = 'dots' | 'lines' | 'ruled' | 'none'
@@ -32,92 +33,155 @@ export interface GridConfig {
   spacing: number
 }
 
-interface PersistedShape {
-  color?: string
-  brush?: string
-  eraserSize?: string
-  grid?: { type?: GridType; spacing?: number }
-  // eraserMode is intentionally NOT persisted — see load() / persist().
-}
-
-interface State {
+export interface SettingsV1 {
+  schemaVersion: 1
   color: string
   brush: BrushId
   eraserSize: EraserSize
-  eraserMode: EraserMode
   grid: GridConfig
+  presets: Partial<Record<BrushId, Partial<Omit<BrushConfig, 'color'>>>>
+  customSwatches: string[]
+  recentColors: string[]
+  fonts: string[]
+  syncedAt?: number
+  remoteId?: string
+}
+
+interface State extends SettingsV1 {
+  // session-only (not persisted)
+  eraserMode: EraserMode
 }
 
 const STORAGE_KEY = 'whiteboard:settings'
 const VALID_GRID_TYPES: readonly GridType[] = ['dots', 'lines', 'ruled', 'none']
 const VALID_SPACINGS: readonly number[] = [16, 24, 32, 48]
+const RECENT_COLORS_CAP = 6
 
 const DEFAULTS: State = {
+  schemaVersion: 1,
   color: 'ink',
   brush: 'pen',
   eraserSize: 'medium',
   eraserMode: 'wipe',
   grid: { type: 'dots', spacing: 24 },
+  presets: {},
+  customSwatches: [],
+  recentColors: [],
+  fonts: [],
+}
+
+function isValidGridType(s: unknown): s is GridType {
+  return typeof s === 'string' && (VALID_GRID_TYPES as readonly string[]).includes(s)
+}
+
+function isValidSpacing(n: unknown): n is number {
+  return typeof n === 'number' && VALID_SPACINGS.includes(n)
+}
+
+function isValidHex(s: unknown): s is string {
+  return typeof s === 'string' && /^#[0-9a-fA-F]{6}$/.test(s)
+}
+
+function isV1(parsed: unknown): parsed is SettingsV1 {
+  return (
+    typeof parsed === 'object' &&
+    parsed !== null &&
+    (parsed as { schemaVersion?: unknown }).schemaVersion === 1
+  )
+}
+
+/** Migrate any input to a well-formed SettingsV1. Mechanical fill — never
+ *  strips or transforms v0 data. Idempotent on v1 input. */
+export function migrate(input: unknown): SettingsV1 {
+  if (input === null || typeof input !== 'object') return cloneSettings(DEFAULTS)
+  const v = input as Record<string, unknown>
+
+  const grid = (v.grid && typeof v.grid === 'object' ? v.grid : {}) as Record<string, unknown>
+  const presets = (v.presets && typeof v.presets === 'object' ? v.presets : {}) as Record<
+    string,
+    unknown
+  >
+
+  return {
+    schemaVersion: 1,
+    color: typeof v.color === 'string' ? v.color : DEFAULTS.color,
+    brush: typeof v.brush === 'string' && isValidBrushId(v.brush) ? v.brush : DEFAULTS.brush,
+    eraserSize:
+      typeof v.eraserSize === 'string' && isValidEraserSize(v.eraserSize)
+        ? v.eraserSize
+        : DEFAULTS.eraserSize,
+    grid: {
+      type: isValidGridType(grid.type) ? grid.type : DEFAULTS.grid.type,
+      spacing: isValidSpacing(grid.spacing) ? grid.spacing : DEFAULTS.grid.spacing,
+    },
+    presets: validatePresets(presets),
+    customSwatches: Array.isArray(v.customSwatches) ? v.customSwatches.filter(isValidHex) : [],
+    recentColors: Array.isArray(v.recentColors)
+      ? v.recentColors.filter(isValidHex).slice(0, RECENT_COLORS_CAP)
+      : [],
+    fonts: Array.isArray(v.fonts) ? v.fonts.filter((f) => typeof f === 'string') : [],
+    syncedAt: typeof v.syncedAt === 'number' ? v.syncedAt : undefined,
+    remoteId: typeof v.remoteId === 'string' ? v.remoteId : undefined,
+  }
+}
+
+function validatePresets(raw: Record<string, unknown>): SettingsV1['presets'] {
+  const out: SettingsV1['presets'] = {}
+  for (const [key, val] of Object.entries(raw)) {
+    if (!isValidBrushId(key)) continue
+    if (!val || typeof val !== 'object') continue
+    out[key] = val as Partial<Omit<BrushConfig, 'color'>>
+  }
+  return out
+}
+
+function cloneSettings(s: State): State {
+  return JSON.parse(JSON.stringify(s)) as State
 }
 
 const state: State = load()
 const listeners = new Set<() => void>()
 
 function load(): State {
+  let raw: string | null
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return clone(DEFAULTS)
-    const parsed = JSON.parse(raw) as PersistedShape
-    return {
-      color: typeof parsed.color === 'string' ? parsed.color : DEFAULTS.color,
-      brush:
-        typeof parsed.brush === 'string' && isValidBrushId(parsed.brush)
-          ? parsed.brush
-          : DEFAULTS.brush,
-      eraserSize:
-        typeof parsed.eraserSize === 'string' && isValidEraserSize(parsed.eraserSize)
-          ? parsed.eraserSize
-          : DEFAULTS.eraserSize,
-      // eraserMode is intentionally session-scoped — Item is a niche surgical
-      // mode; persisting it across sessions traps users in Item mode after
-      // they've forgotten they selected the pill. Shift gives momentary Item
-      // mid-gesture; the menu pill gives session-scoped Item. Reload resets.
-      eraserMode: DEFAULTS.eraserMode,
-      grid: {
-        type:
-          parsed.grid?.type && VALID_GRID_TYPES.includes(parsed.grid.type)
-            ? parsed.grid.type
-            : DEFAULTS.grid.type,
-        spacing:
-          typeof parsed.grid?.spacing === 'number' && VALID_SPACINGS.includes(parsed.grid.spacing)
-            ? parsed.grid.spacing
-            : DEFAULTS.grid.spacing,
-      },
-    }
+    raw = localStorage.getItem(STORAGE_KEY)
   } catch {
-    return clone(DEFAULTS)
+    return cloneSettings(DEFAULTS)
   }
+  if (!raw) return cloneSettings(DEFAULTS)
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return cloneSettings(DEFAULTS)
+  }
+
+  const settings = migrate(parsed)
+
+  // If we just migrated from v0, write back v1 so subsequent loads are clean.
+  if (!isV1(parsed)) persistSettings(settings)
+
+  // eraserMode is intentionally session-scoped — Item is a niche surgical
+  // mode; persisting it across sessions traps users in Item mode after
+  // they've forgotten they selected the pill. Shift gives momentary Item
+  // mid-gesture; the menu pill gives session-scoped Item. Reload resets.
+  return { ...settings, eraserMode: DEFAULTS.eraserMode }
 }
 
-function clone(s: State): State {
-  return {
-    color: s.color,
-    brush: s.brush,
-    eraserSize: s.eraserSize,
-    eraserMode: s.eraserMode,
-    grid: { ...s.grid },
+function persistSettings(s: SettingsV1): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
+  } catch (err) {
+    console.warn('whiteboard/settings: failed to persist:', err)
   }
 }
 
 function persist(): void {
-  try {
-    // eraserMode is intentionally excluded — see load().
-    const { color, brush, eraserSize, grid } = state
-    const payload: PersistedShape = { color, brush, eraserSize, grid }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
-  } catch (err) {
-    console.warn('whiteboard/settings: failed to persist:', err)
-  }
+  // strip session-only field
+  const { eraserMode: _ignore, ...persisted } = state
+  persistSettings(persisted)
 }
 
 function emit(): void {
