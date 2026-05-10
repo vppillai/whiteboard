@@ -334,6 +334,14 @@ export function setBrushId(brush: BrushId): void {
   emit()
 }
 
+/** Toggle predicted-events on/off. M2. URL `?predict=1` overrides this. */
+export function setPredictedEvents(value: boolean): void {
+  if (state.predictedEvents === value) return
+  state.predictedEvents = value
+  persist()
+  emit()
+}
+
 export function getEraserSize(): EraserSize {
   return state.eraserSize
 }

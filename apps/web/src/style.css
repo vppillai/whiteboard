@@ -946,3 +946,93 @@ body.distraction-free .whiteboard-popover {
 .df-exit-toast.visible {
   opacity: 1;
 }
+
+/* Pressure curve thumbnail button in Brush preset card head (M2). */
+.whiteboard-settings-brush-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.whiteboard-settings-curve-thumb-btn {
+  background: transparent;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+}
+.whiteboard-settings-curve-thumb-btn:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+}
+.whiteboard-settings-curve-thumb-btn:has(.curve-thumbnail.has-override) {
+  border-color: var(--accent, #3b82f6);
+}
+.whiteboard-settings-curve-slot {
+  margin-top: 8px;
+}
+
+/* Curve editor (mounted into the slot) styling (M2). */
+.curve-editor {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.curve-graph {
+  background: var(--surface, rgba(0, 0, 0, 0.02));
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  border-radius: 4px;
+}
+.curve-test-pad {
+  background: var(--surface, rgba(0, 0, 0, 0.02));
+  border: 1px dashed var(--border, rgba(0, 0, 0, 0.16));
+  border-radius: 4px;
+  cursor: crosshair;
+}
+.curve-reset {
+  background: transparent;
+  border: none;
+  color: var(--accent, #3b82f6);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 4px 0;
+  margin-top: 8px;
+  display: block;
+}
+
+/* Predicted-events toggle row in Advanced section (M2). */
+.whiteboard-settings-pe-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--surface, rgba(0, 0, 0, 0.02));
+  border-radius: 8px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+}
+.whiteboard-settings-pe-label {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+.whiteboard-settings-pe-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+.whiteboard-settings-pe-help {
+  font-size: 11px;
+  color: var(--ink-muted, oklch(from var(--ink) calc(l * 0.65) c h));
+  line-height: 1.4;
+}
+.whiteboard-settings-pe-input {
+  width: 18px;
+  height: 18px;
+  margin-left: 12px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
