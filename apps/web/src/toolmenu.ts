@@ -32,6 +32,7 @@ const TOOLS: readonly ToolDef[] = [
   { id: 'pen', label: 'Draw', enabled: true },
   { id: 'eraser', label: 'Eraser', enabled: true },
   { id: 'lasso', label: 'Lasso', enabled: true },
+  { id: 'eyedropper', label: 'Pick', enabled: true },
   { id: 'laser', label: 'Laser', enabled: false },
   { id: 'text', label: 'Text', enabled: false },
 ]
@@ -48,6 +49,9 @@ export interface ToolMenuOptions {
   /** Toggle the settings side panel — wired by main.ts to the same flow as
    *  the Cmd/Ctrl+, shortcut and the toolpill gear. */
   togglePanel: () => void
+  /** Trigger an export by format. Wired by main.ts to `exportBoard(format)`.
+   *  M2 — symmetric with the Cmd/Ctrl+E popover. */
+  onExport: (format: 'png' | 'svg' | 'pdf') => void
 }
 
 export function openToolMenu(opts: ToolMenuOptions): Popover {
@@ -118,6 +122,23 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
     }),
   )
   root.appendChild(viewRow)
+
+  // EXPORT section — global, sibling to TOOL / VIEW. M2 § 6.7.6.
+  root.appendChild(separator())
+  root.appendChild(sectionLabel('Export'))
+  const exportRow = pillRow()
+  for (const fmt of ['png', 'svg', 'pdf'] as const) {
+    exportRow.appendChild(
+      pill({
+        label: fmt.toUpperCase(),
+        onClick: () => {
+          dismiss()
+          opts.onExport(fmt)
+        },
+      }),
+    )
+  }
+  root.appendChild(exportRow)
 
   // Settings — pen-friendly entry point matching the toolpill gear and the
   // Cmd/Ctrl+, shortcut. Above CLEAR so the destructive row stays anchored

@@ -41,6 +41,7 @@ import { createClearFlow } from './clearflow'
 import { CURATED_COLORS, cyclePaletteIndex, openColorPicker } from './colorpicker'
 import { exitDistractionFree, isDistractionFree, toggleDistractionFree } from './distractionfree'
 import { attachEraserHold } from './eraserhold'
+import { exportBoard } from './export'
 import { openExportPopover } from './exportpopover'
 import { drawGrid } from './grid'
 import { createHelpOverlay } from './helpoverlay'
@@ -430,6 +431,9 @@ async function main(): Promise<void> {
         },
         onClear: clearFlow.request,
         togglePanel,
+        onExport: (format) => {
+          void exportBoard(format, { getStrokes: () => strokes })
+        },
       })
     },
     { capture: true },
