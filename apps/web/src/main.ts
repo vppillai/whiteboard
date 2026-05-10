@@ -335,13 +335,21 @@ async function main(): Promise<void> {
     shouldSkip: pan.isPanIntent,
   })
 
-  // Metrics + last-pointer (for popover anchoring on keyboard shortcuts).
+  // Last-pointer (for popover anchoring on keyboard shortcuts). Metrics
+  // count is 1 per event here — pen / eraser tools already call
+  // `e.getCoalescedEvents()` to extract samples; a second call in this
+  // listener was paying for the same array allocation twice per pointermove
+  // and showing up as GC pressure during sustained drawing. The HUD's
+  // samples/event metric loses fidelity (always reads 1); events/sec is
+  // unaffected. If samples/event accuracy matters again, thread a
+  // `noteSampleCount` callback through ToolContext (matches the
+  // `markCommittedDirty` pattern) so tools report from where they already
+  // hold the coalesced array.
   let lastPointer = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
   root.addEventListener('pointermove', (e) => {
     if (!(e instanceof PointerEvent)) return
     lastPointer = { x: e.clientX, y: e.clientY }
-    const coalesced = (e.getCoalescedEvents?.() ?? []).length || 1
-    metrics.notePointerEvent(coalesced)
+    metrics.notePointerEvent(1)
   })
 
   // ---------------------------------------------------------------------
