@@ -27,7 +27,19 @@ const ERASER_SIZES: readonly EraserSize[] = ['small', 'medium', 'large']
 const isValidEraserSize = (s: string): s is EraserSize =>
   (ERASER_SIZES as readonly string[]).includes(s)
 
-type PresetField = keyof Omit<BrushConfig, 'color'>
+export type PresetField =
+  | 'size'
+  | 'thinning'
+  | 'smoothing'
+  | 'streamline'
+  | 'taperStart'
+  | 'taperEnd'
+  | 'capStart'
+  | 'capEnd'
+  | 'pressureGamma'
+  | 'opacity'
+  | 'pressureCurve' // NEW (M2)
+
 const VALID_PRESET_FIELDS: readonly PresetField[] = [
   'size',
   'opacity',
@@ -39,6 +51,7 @@ const VALID_PRESET_FIELDS: readonly PresetField[] = [
   'capStart',
   'capEnd',
   'pressureGamma',
+  'pressureCurve',
 ]
 const isValidPresetField = (k: string): k is PresetField =>
   (VALID_PRESET_FIELDS as readonly string[]).includes(k)
@@ -59,6 +72,7 @@ export interface SettingsV1 {
   customSwatches: string[]
   recentColors: string[]
   fonts: string[]
+  predictedEvents: boolean // NEW (M2)
   syncedAt?: number
   remoteId?: string
 }
@@ -87,6 +101,7 @@ function defaultV1(): SettingsV1 {
     customSwatches: [],
     recentColors: [],
     fonts: [],
+    predictedEvents: false, // NEW (M2; ADR 0004)
   }
 }
 
@@ -143,6 +158,7 @@ export function migrate(input: unknown): SettingsV1 {
       ? v.recentColors.filter(isValidHex).slice(0, RECENT_COLORS_CAP)
       : [],
     fonts: Array.isArray(v.fonts) ? v.fonts.filter((f) => typeof f === 'string') : [],
+    predictedEvents: typeof v.predictedEvents === 'boolean' ? v.predictedEvents : false,
     syncedAt: typeof v.syncedAt === 'number' ? v.syncedAt : undefined,
     remoteId: typeof v.remoteId === 'string' ? v.remoteId : undefined,
   }
@@ -185,6 +201,19 @@ function validateOnePreset(raw: Record<string, unknown>): Partial<Omit<BrushConf
   for (const k of ['capStart', 'capEnd'] as const) {
     const v = raw[k]
     if (typeof v === 'boolean') out[k] = v
+  }
+  if (raw.pressureCurve && typeof raw.pressureCurve === 'object') {
+    const pc = raw.pressureCurve as Record<string, unknown>
+    if (
+      Array.isArray(pc.mid) &&
+      pc.mid.length === 2 &&
+      typeof pc.mid[0] === 'number' &&
+      Number.isFinite(pc.mid[0]) &&
+      typeof pc.mid[1] === 'number' &&
+      Number.isFinite(pc.mid[1])
+    ) {
+      out.pressureCurve = { mid: [pc.mid[0], pc.mid[1]] as [number, number] }
+    }
   }
   return out
 }
@@ -364,6 +393,17 @@ export function setPresetField<K extends PresetField>(
 export function clearPreset(brushId: BrushId): void {
   if (state.presets[brushId] === undefined) return
   delete state.presets[brushId]
+  persist()
+  emit()
+}
+
+export function clearPresetCurve(brushId: BrushId): void {
+  const cur = state.presets[brushId]
+  if (!cur || cur.pressureCurve === undefined) return
+  cur.pressureCurve = undefined
+  if (Object.keys(cur).length === 0) {
+    delete state.presets[brushId]
+  }
   persist()
   emit()
 }

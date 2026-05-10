@@ -8,7 +8,14 @@ import {
   removeCustomSwatch,
 } from './settings'
 import { getEffectiveBrushConfig, migrate } from './settings'
-import { clearPreset, resetAll, setBrushId, setColor, setPresetField } from './settings'
+import {
+  clearPreset,
+  clearPresetCurve,
+  resetAll,
+  setBrushId,
+  setColor,
+  setPresetField,
+} from './settings'
 
 beforeEach(__resetForTesting)
 
@@ -289,6 +296,109 @@ describe('settings: setPresetField / clearPreset', () => {
 
   test('clearPreset on a brush with no override is a no-op', () => {
     expect(() => clearPreset('marker')).not.toThrow()
+  })
+})
+
+describe('settings: predictedEvents (M2)', () => {
+  test('migrate v1-shape missing predictedEvents fills false', () => {
+    const v1Missing = {
+      schemaVersion: 1,
+      color: '#ef4444',
+      brush: 'pen',
+      eraserSize: 'medium',
+      grid: { type: 'dots', spacing: 24 },
+      presets: {},
+      customSwatches: [],
+      recentColors: [],
+      fonts: [],
+    }
+    const out = migrate(v1Missing)
+    expect(out.predictedEvents).toBe(false)
+  })
+
+  test('migrate type-mismatched predictedEvents (number) falls back to false', () => {
+    const v1Bad = {
+      schemaVersion: 1,
+      color: '#ef4444',
+      brush: 'pen',
+      eraserSize: 'medium',
+      grid: { type: 'dots', spacing: 24 },
+      presets: {},
+      customSwatches: [],
+      recentColors: [],
+      fonts: [],
+      predictedEvents: 42,
+    }
+    const out = migrate(v1Bad)
+    expect(out.predictedEvents).toBe(false)
+  })
+
+  test('migrate well-formed predictedEvents preserved', () => {
+    const v1Ok = {
+      schemaVersion: 1,
+      color: '#ef4444',
+      brush: 'pen',
+      eraserSize: 'medium',
+      grid: { type: 'dots', spacing: 24 },
+      presets: {},
+      customSwatches: [],
+      recentColors: [],
+      fonts: [],
+      predictedEvents: true,
+    }
+    const out = migrate(v1Ok)
+    expect(out.predictedEvents).toBe(true)
+  })
+
+  test('defaultV1() has predictedEvents = false', () => {
+    const out = migrate(null)
+    expect(out.predictedEvents).toBe(false)
+  })
+})
+
+describe('settings: pressureCurve preset (M2)', () => {
+  test('setPresetField accepts pressureCurve and persists', () => {
+    __resetForTesting()
+    setPresetField('pen', 'pressureCurve', { mid: [0.7, 0.3] })
+    const eff = getEffectiveBrushConfig('pen', '#000000')
+    expect(eff.pressureCurve).toEqual({ mid: [0.7, 0.3] })
+  })
+
+  test('clearPresetCurve removes only pressureCurve', () => {
+    __resetForTesting()
+    setPresetField('pen', 'pressureCurve', { mid: [0.7, 0.3] })
+    setPresetField('pen', 'size', 5)
+    clearPresetCurve('pen')
+    const eff = getEffectiveBrushConfig('pen', '#000000')
+    expect(eff.pressureCurve).toBeUndefined()
+    expect(eff.size).toBe(5)
+  })
+
+  test('clearPresetCurve on last field GCs the preset entry', () => {
+    __resetForTesting()
+    setPresetField('pen', 'pressureCurve', { mid: [0.7, 0.3] })
+    clearPresetCurve('pen')
+    setPresetField('pen', 'size', 7)
+    const eff = getEffectiveBrushConfig('pen', '#000000')
+    expect(eff.pressureCurve).toBeUndefined()
+    expect(eff.size).toBe(7)
+  })
+
+  test('validateOnePreset rejects malformed pressureCurve', () => {
+    const v1 = migrate({
+      schemaVersion: 1,
+      color: '#ef4444',
+      brush: 'pen',
+      eraserSize: 'medium',
+      grid: { type: 'dots', spacing: 24 },
+      presets: { pen: { pressureCurve: { mid: 'banana' } } },
+      customSwatches: [],
+      recentColors: [],
+      fonts: [],
+      predictedEvents: false,
+    })
+    // malformed mid (string not [number,number]) → pressureCurve dropped
+    expect(v1.presets.pen?.pressureCurve).toBeUndefined()
   })
 })
 
