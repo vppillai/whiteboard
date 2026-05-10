@@ -513,6 +513,13 @@ async function main(): Promise<void> {
       let handled = false
       if (clearFlow.cancel()) handled = true
       if (dismissAllPopovers()) handled = true
+      // Esc in lasso mode falls back to the pen tool. The lasso's `cleanup`
+      // hook (called from `setTool`) clears any in-progress polygon and
+      // selection state, so switching is a clean reset.
+      if (tool.current === lassoTool) {
+        setTool('pen')
+        handled = true
+      }
       return handled
     },
   })
