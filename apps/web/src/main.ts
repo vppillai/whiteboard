@@ -41,6 +41,7 @@ import { createClearFlow } from './clearflow'
 import { CURATED_COLORS, cyclePaletteIndex, openColorPicker } from './colorpicker'
 import { exitDistractionFree, isDistractionFree, toggleDistractionFree } from './distractionfree'
 import { attachEraserHold } from './eraserhold'
+import { openExportPopover } from './exportpopover'
 import { drawGrid } from './grid'
 import { createHelpOverlay } from './helpoverlay'
 import { attachKeymap } from './keymap'
@@ -604,6 +605,14 @@ async function main(): Promise<void> {
         if (next) setColor(next)
       },
       selectEyedropperTool: () => setTool('eyedropper'),
+      openExport: () => {
+        if (getActiveTag() === 'export') dismissAllPopovers()
+        else
+          openExportPopover({
+            anchor: lastPointer,
+            getStrokes: () => strokes,
+          })
+      },
     }),
   )
 

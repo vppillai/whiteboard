@@ -67,6 +67,10 @@ export interface KeyHandlers {
 
   /** Activate the color eyedropper tool. Bound to `I`. M2. */
   selectEyedropperTool: () => void
+
+  /** Open the export popover (PNG / SVG / PDF) at last pointer. Bound to
+   *  Cmd/Ctrl+E. M2. */
+  openExport: () => void
 }
 
 export function attachKeymap(handlers: KeyHandlers): () => void {
@@ -111,6 +115,11 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       }
       if (!shift && k === ',') {
         preventAndCall(e, handlers.togglePanel)
+        return
+      }
+      // Cmd/Ctrl+E — export popover (PNG / SVG / PDF) at cursor. M2.
+      if (!shift && k === 'e') {
+        preventAndCall(e, handlers.openExport)
         return
       }
     }
