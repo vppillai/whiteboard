@@ -45,8 +45,12 @@ export interface PenToolCallbacks {
 
 export interface PenToolOptions {
   callbacks: PenToolCallbacks
-  /** When false, `getPredictedEvents()` is ignored. */
-  usePrediction?: boolean
+  /**
+   * Called once per pointermove to decide whether to use predicted events.
+   * Read every move so toggling the `settings.predictedEvents` setting at
+   * runtime takes effect immediately. M2 — was a captured boolean before.
+   */
+  shouldUsePrediction?: () => boolean
 }
 
 interface SampleSource {
@@ -216,7 +220,7 @@ export function createPenTool(opts: PenToolOptions): Tool {
       } else {
         for (const ce of coalesced) active.samples.push(sample(ce, brush, ctx))
       }
-      predicted = opts.usePrediction
+      predicted = opts.shouldUsePrediction?.()
         ? (e.getPredictedEvents?.() ?? []).map((pe) => sample(pe, brush, ctx))
         : []
       renderAsFinal = false

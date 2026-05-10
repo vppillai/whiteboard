@@ -207,7 +207,12 @@ async function main(): Promise<void> {
   //  (committing strokes, applying ops, switching tools).
   // ---------------------------------------------------------------------
   const params = new URLSearchParams(location.search)
-  const usePrediction = params.has('predict')
+  // URL flag wins over the settings toggle (session override per ADR 0004).
+  // Evaluated once at boot — the URL doesn't change without a reload.
+  const urlPredictFlag = params.has('predict')
+  // Pen tool calls this on every pointermove so the settings panel toggle
+  // takes effect without a reload.
+  const shouldUsePrediction = (): boolean => urlPredictFlag || getSettings().predictedEvents
 
   const opCtx: OpContext = {
     strokes,
@@ -222,7 +227,7 @@ async function main(): Promise<void> {
   }
 
   const penTool = createPenTool({
-    usePrediction,
+    shouldUsePrediction,
     callbacks: {
       onStrokeCommit(stroke) {
         strokes.push(stroke)
