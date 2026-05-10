@@ -12,7 +12,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | M0 | Drawing core: latency, pan/zoom, theme, local persistence, undo/redo     | ✅ *(closed 2026-05-09; tagged `m0-drawing-core`)* |
 | M1.4 | Refactor pass: tool abstraction, op-based undo, soft-delete, decompose main.ts | ✅ *(closed 2026-05-09; tagged `m1.4-refactor`)* |
 | M1 | Tool surface refactor + eraser (pixel-mask wipe + object) + brush presets + lasso | ✅ *(closed 2026-05-09; tagged `m1-eraser-lasso`)* |
-| M1.7 | Settings side panel + sync-ready schema (brush presets, fonts, swatches) | ⬜  |
+| M1.7 | Settings side panel + sync-ready schema (brush presets, fonts, swatches) | ✅ *(closed 2026-05-09; tagged `m1.7-settings-panel`)* |
 | M2 | Toolbar UI, keyboard shortcuts, export                                   | ⬜     |
 | M3 | Server, sync, room URLs                                                  | ⬜     |
 | M4 | Production deployment polish                                             | ⬜     |
@@ -149,9 +149,26 @@ The toolbar UI is **explicitly held back to M2** so this milestone stays tight. 
 - **Feel-test gate** on the target hardware (Wacom Intuos): user signs off that the new tools feel right — including the eraser feeling like a physical eraser.
 - Architecture doc § 6 updated; CHANGELOG entry; per-tool notes as needed.
 
-### M1.7 — Settings side panel + sync-ready schema ⬜
+### M1.7 — Settings side panel + sync-ready schema ✅
 
-**Why this exists.** User wants a discoverable settings surface — a side panel with controls for brush presets (sizes, opacities), text fonts (for the Text tool when it lands), and custom user-defined color swatches beyond the curated palette. Longer-term, those settings will sync to a backend after user login lands. Designing the data model now (versioned, ID-keyed, serializable) avoids a breaking migration when sync arrives.
+> **Closed 2026-05-09.** Tagged `m1.7-settings-panel`. Perf gates verified
+> on dev hardware:
+> `?perftest=erase&n=500` mean 4.92 ms / p95 6.8 ms / max 16.1 ms (one-frame
+> outlier; 30% of 16 ms budget at p95).
+> `?perftest=scale&n=500` mean 3.83 ms / p95 6.9 ms / max 15.6 ms (43% of
+> budget at p95).
+> Slight regression on max-frame from M1's baseline (5.1 ms erase / 7 ms
+> scale) traces to the per-stroke destination-out fix that the M1.7 feel-
+> test surfaced — accepted as a correct-over-fast trade-off (the M1
+> renderer was incorrectly subtracting one stroke's eraser stamps from
+> later strokes' pixels; see commit `946e52b`).
+> Wacom Intuos feel-test signed off: drawing, eraser, draw-over-erase,
+> custom swatch add via picker + panel, brush slider live-update,
+> reset-to-defaults priming-toast flow, panel toggle via gear / right-
+> click menu / `Cmd/Ctrl+,`, theme isolation across reset, panel-closed-
+> on-reload, v0→v1 settings migration. ADR 0010 accepted.
+
+**Why this existed.** User wanted a discoverable settings surface — a side panel with controls for brush presets (sizes, opacities), text fonts (for the Text tool when it lands), and custom user-defined color swatches beyond the curated palette. Longer-term, those settings will sync to a backend after user login lands. Designing the data model now (versioned, ID-keyed, serializable) avoids a breaking migration when sync arrives.
 
 **Scope.**
 
