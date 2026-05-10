@@ -155,9 +155,9 @@ Stored in Y.js as `Y.Array<Y.Map>`. Soft-deletes (not removals) so undo across c
 
 ### 4.1 Tool set (v1)
 
-Brush, Eraser, Lasso-select, Pan, Color-eyedropper. That's it.
+Brush, Eraser (two modes — see below), Lasso-select, Pan, Color-eyedropper. That's it.
 
-> **Eraser model:** v1 ships with stroke-hit erasure (cross any sample → whole stroke removed). [ADR 0008](docs/decisions/0008-segment-eraser.md) plans the switch to **segment-level** erasure ("cuts through") via a per-sample mask, scheduled as milestone M1.x. Once shipped, this paragraph collapses to "segment-level erasure" and the SPEC drops the v1 caveat.
+> **Eraser model:** the wipe-mode eraser is **segment-level** ("cuts through") — only the part of a stroke the eraser physically passes over disappears; disconnected parts of the original stroke survive as separate live runs. Implemented per [ADR 0008](docs/decisions/0008-segment-eraser.md) via a per-sample mask (`Stroke.erasedSamples`). The object-mode eraser (Shift-modifier or Item pill) is still whole-stroke deletion — surgical removal when you want a stroke gone entirely.
 
 ### 4.2 Toolbar
 

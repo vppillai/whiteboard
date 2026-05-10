@@ -56,4 +56,17 @@ export interface Stroke {
    * sync lands.
    */
   deleted?: boolean
+  /**
+   * Cursor-disk stamps that erase pixels from this stroke at render time
+   * ([ADR 0009](docs/decisions/0009-pixel-mask-eraser.md)). Each
+   * `{ x, y, r }` is one cursor position recorded during a wipe sweep
+   * (board coords, board-pixel radius). Sparse — omitted when the stroke
+   * has not been wiped.
+   *
+   * Semantically a per-stroke pixel mask: the renderer draws the stroke
+   * outline normally and then applies `globalCompositeOperation =
+   * 'destination-out'` for each stamp, subtracting the disk's pixels
+   * from the rendered ink.
+   */
+  erasedStamps?: { x: number; y: number; r: number }[]
 }

@@ -60,11 +60,19 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 - **Clear-board confirm focuses the destructive button.** When `⌘/Ctrl+Shift+K` opens the "Clear the whole board?" toast, the **Clear** button now receives focus, so Enter activates it (native button behavior). On both confirm and cancel paths, focus is handed back to `#app` (made programmatically focusable via `tabindex="-1"`) so subsequent keystrokes don't go through a stale button. CSS suppresses the focus ring on `#app`.
 - SPEC § 4.3 keyboard table updated with `B` / `P` / `E (hold)` / `Shift+E` rows; help overlay (`?`) updated to match.
 
-### Planned (M1.x — segment-eraser)
+### Changed (M1 — wipe-eraser is pixel-mask "cuts through")
 
-- **Eraser model upgrade scheduled** as a dedicated milestone. Feel-test on Intuos surfaced that stroke-hit erasure (touch any sample → whole stroke removed) doesn't feel like a real eraser. M1.x switches to **segment-level** erasure ("cuts through") via a per-sample mask. Design captured in [ADR 0008](docs/decisions/0008-segment-eraser.md): rejected alternatives (split-stroke, pixel-erase) documented; sample-mask chosen for cache-friendliness, CRDT-friendliness, and identity preservation. Implementation lands as M1.x between M1 and M1.7. SPEC § 4.1 carries a v1 caveat until M1.x ships.
+- **Wipe-eraser is segment-level via a per-stroke pixel mask** ([ADR 0009](docs/decisions/0009-pixel-mask-eraser.md)). Each `Stroke` carries `erasedStamps?: { x, y, r }[]` — a list of cursor-disk records added during wipe sweeps. The renderer applies `globalCompositeOperation = 'destination-out'` for every stamp on a dedicated offscreen strokes canvas, then composites onto the committed canvas after the grid. The visible cursor circle and the erased pixels match 1:1 — no over-erase, no trail past the cursor, no perfect-freehand outline drift at run boundaries.
+- **New `eraseStamps` op** in `ops.ts`. Sweep records pending stamps in tool-internal state (renderer queries them via `EraserTool.getPendingStamps()` for live preview). On pointerup, the tool emits one op carrying per-stroke `{ strokeId, addedStamps }` edits; `applyOp` mutates the stroke's `erasedStamps`. `unapplyOp` removes the same stamps by exact field equality. Single Cmd+Z restores the whole sweep.
+- **Three-canvas render pipeline.** `RenderTarget` gains a `strokes` offscreen layer (NOT in DOM). Render order each frame: clear strokes → draw outlines → apply destination-out for every stamp → clear committed → draw grid → composite strokes onto committed in pixel space. Grid sits on the committed canvas, untouched by destination-out.
+- **Object-mode eraser unchanged behaviorally** (Item pill or Shift-modifier). Two callbacks: `onObjectErase(strokeIds[])` emits a `delete` op; `onWipeErase(StampEdit[])` emits an `eraseStamps` op.
+- **Storage migration is implicit** — pre-existing strokes load with `erasedStamps` undefined; renderer treats absence as "no erasure." Same on-disk shape; no schema bump.
+- **`?perftest=erase` synthetic harness** populates N strokes (`&n=`, default 500) and drives a sinusoidal sweep, reporting per-frame stamp-application + render cost. Verifies the ADR 0009 16 ms / frame budget.
+- ADR 0008 (per-sample mask) was implemented mid-milestone and shipped to feel-test; **superseded by ADR 0009** after Wacom Intuos testing surfaced that sample-based representation cannot pixel-precisely match the cursor footprint regardless of tolerance arithmetic. Both ADRs preserved as design history; ADR 0008's *Considered alternatives* explicitly justifies why ADR 0009's "per-stroke pixel mask" is distinct from the "global pixel raster" 0008 rejected.
+- **`docs/process.md`** gains a "tool changes require a feel-test scenario before code-complete" rule, captured from the four-iteration journey through this work.
+- SPEC § 4.1 describes pixel-mask as the shipped wipe behavior; milestones.md M1 row updated to 🟦.
 
-### Refactored (M1.6 — tool surface; code complete, feel-test pending)
+### Refactored (M1 — tool surface; was M1.6 sub-milestone)
 
 - **Tool interface extended** (ADR 0007 supersedes 0005's interface). Each tool now owns its cursor / stroke / hover rendering AND its right-click menu section. `ToolContext` carries `liveLayer`, `camera`, `dpr`, `resolveColor` so tools render directly to the live layer without callbacks.
 - **`renderContextualMenu(host, dismiss)`** — pen owns COLOR + BRUSH; eraser owns the 4-pill ERASER section. `toolmenu.ts` becomes a dispatcher that calls `activeTool.renderContextualMenu()`.

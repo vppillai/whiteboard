@@ -12,6 +12,14 @@ If a change adds a new module, the architecture doc gets a section. If a change 
 
 A PR that ships code without the corresponding doc updates is incomplete. The pre-commit hook does not enforce this — the reviewer does.
 
+## Tool changes: build a feel-test scenario before claiming code-complete
+
+Pointer-handler / render changes (eraser, lasso, brush tuning, anything that produces visible ink under user gesture) **must be feel-tested against an explicit scenario before the change is declared done**. The scenario can be informal — "draw a horizontal line, sweep eraser perpendicular through it, verify the cut matches the cursor disk" — but it has to be performed, not assumed.
+
+**Why this exists.** The M1 segment-eraser ate four iterations of code changes before the architecture (per-sample mask) was identified as the root problem. Each iteration patched the symptom; the underlying mismatch ("erased samples remove their full ink contribution, which is wider than what was under the cursor") was invisible from typecheck output. A 30-second feel-test on iteration 1 — drawing one line, wiping through it, looking — would have surfaced the architectural issue immediately.
+
+**How to apply.** Before reporting any tool-affecting change as ready: run the dev server, perform the most direct gesture the change is meant to support, screenshot or describe what happens. If the result diverges from intent, that's the bug — diagnose at the architecture layer, not the arithmetic.
+
 ## Milestones are review gates
 
 The work is partitioned into milestones (see [milestones.md](milestones.md)). A milestone is a unit of work with explicit exit criteria, not a date.

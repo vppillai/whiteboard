@@ -2,12 +2,18 @@
  * Stroke geometry: turn a Stroke (samples + brush config) into a Path2D
  * suitable for canvas filling. Wraps perfect-freehand.
  *
- * Also exposes `effectiveOpacity(stroke)` — the opacity at which the stroke
- * should render, derived from the brush's base opacity and the stroke's
- * average pressure. Light-pressure strokes appear faded; heavy-pressure
- * strokes appear saturated. The variation is *between* strokes, not within
- * (per-segment alpha would require switching from a filled polygon to a
- * variable-width line renderer; deferred to a future ADR).
+ * Erasure is **pixel-mask via destination-out** ([ADR 0009](../../docs/
+ * decisions/0009-pixel-mask-eraser.md)): each stroke carries a list of
+ * `erasedStamps` — cursor-disk records — that the renderer applies as
+ * destination-out fills on the offscreen strokes layer. Strokes are still
+ * rendered as one outline; they don't break into runs.
+ *
+ * `effectiveOpacity(stroke)` is the opacity at which a stroke renders,
+ * derived from the brush's base opacity and the stroke's average pressure.
+ * Light-pressure strokes appear faded; heavy-pressure strokes appear
+ * saturated. The variation is *between* strokes, not within. (Per-segment
+ * alpha would require switching from a filled polygon to a variable-width
+ * line renderer; deferred to a future ADR.)
  */
 
 import type { Sample, Stroke } from '@whiteboard/shared'
@@ -27,11 +33,12 @@ export interface BBox {
 }
 
 /**
- * Cached AABB per stroke. Lazy: computed on first `getStrokeBBox` call,
+ * Cached AABB per stroke (envelope of the rendered outline, padded for
+ * brush size + taper). Lazy: computed on first `getStrokeBBox` call,
  * invalidated explicitly when a `move` op translates the stroke.
  *
  * WeakMap keying lets the cache evaporate when a stroke leaves the in-
- * memory array (e.g. after future GC of soft-deleted strokes).
+ * memory array.
  */
 const bboxCache = new WeakMap<Stroke, BBox>()
 
@@ -52,20 +59,44 @@ export function bboxesIntersect(a: BBox, b: BBox): boolean {
   return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY
 }
 
-function computeStrokeBBox(stroke: Stroke): BBox {
-  let minX = Number.POSITIVE_INFINITY
-  let minY = Number.POSITIVE_INFINITY
-  let maxX = Number.NEGATIVE_INFINITY
-  let maxY = Number.NEGATIVE_INFINITY
-  for (const s of stroke.samples) {
-    if (s.x < minX) minX = s.x
-    if (s.y < minY) minY = s.y
-    if (s.x > maxX) maxX = s.x
-    if (s.y > maxY) maxY = s.y
+/**
+ * Append the given stamps to `stroke.erasedStamps`. Stamps are not
+ * deduplicated (callers can pass duplicates safely; `destination-out`
+ * is idempotent in pixel space). The bbox does NOT change — stamps
+ * subtract from the rendered ink, they don't enlarge the envelope.
+ */
+export function addErasedStamps(
+  stroke: Stroke,
+  stamps: ReadonlyArray<{ x: number; y: number; r: number }>,
+): void {
+  if (stamps.length === 0) return
+  if (!stroke.erasedStamps) stroke.erasedStamps = []
+  for (const s of stamps) stroke.erasedStamps.push({ x: s.x, y: s.y, r: s.r })
+}
+
+/**
+ * Remove the given stamps from `stroke.erasedStamps` (used by `unapply`
+ * of an `eraseStamps` op — undo of a wipe). Match by exact field
+ * equality. If a previous apply added duplicate stamps, only one
+ * instance is removed per matching unapply entry — symmetric.
+ */
+export function removeErasedStamps(
+  stroke: Stroke,
+  stamps: ReadonlyArray<{ x: number; y: number; r: number }>,
+): void {
+  if (stamps.length === 0 || !stroke.erasedStamps) return
+  const list = stroke.erasedStamps
+  for (const s of stamps) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const existing = list[i]
+      if (!existing) continue
+      if (existing.x === s.x && existing.y === s.y && existing.r === s.r) {
+        list.splice(i, 1)
+        break
+      }
+    }
   }
-  // Pad by brush size + max taper to encompass perfect-freehand outline.
-  const pad = stroke.brush.size + Math.max(stroke.brush.taperStart, stroke.brush.taperEnd) + 2
-  return { minX: minX - pad, minY: minY - pad, maxX: maxX + pad, maxY: maxY + pad }
+  if (list.length === 0) stroke.erasedStamps = undefined
 }
 
 const sampleToPoint = (s: Sample): [number, number, number] => [s.x, s.y, s.p]
@@ -112,6 +143,22 @@ export function effectiveOpacity(stroke: Stroke): number {
   for (const s of stroke.samples) sum += s.p
   const avgP = sum / stroke.samples.length
   return base * (SHADE_MIN + (SHADE_MAX - SHADE_MIN) * avgP)
+}
+
+function computeStrokeBBox(stroke: Stroke): BBox {
+  let minX = Number.POSITIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  for (const s of stroke.samples) {
+    if (s.x < minX) minX = s.x
+    if (s.y < minY) minY = s.y
+    if (s.x > maxX) maxX = s.x
+    if (s.y > maxY) maxY = s.y
+  }
+  // Pad by brush size + max taper to encompass perfect-freehand outline.
+  const pad = stroke.brush.size + Math.max(stroke.brush.taperStart, stroke.brush.taperEnd) + 2
+  return { minX: minX - pad, minY: minY - pad, maxX: maxX + pad, maxY: maxY + pad }
 }
 
 function outlineToPath2D(outline: number[][]): Path2D {

@@ -4,7 +4,9 @@ Date: 2026-05-09
 
 ## Status
 
-Accepted (planning). Implementation deferred to milestone M1.x. Supersedes the eraser model described in [SPEC § 4.1](../../SPEC.md#41-tool-set-v1) ("Eraser (stroke-hit erase, not pixel)") once M1.x ships.
+**Superseded by [ADR 0009](0009-pixel-mask-eraser.md).** This ADR's per-sample mask was implemented and shipped in feel-test, where it failed to produce a "rubber eraser" feel: the user reported (across four tolerance-tuning iterations) that erasure removed more than the visual cursor footprint. The root cause is **inherent to sample-based representation** — erasing a sample removes the sample's whole `brush.size`-wide ink contribution regardless of how much was under the cursor, and perfect-freehand recomputes outlines at run boundaries so visible caps shift away from the eraser. Arithmetic on the tolerance can't fix this. ADR 0009 replaces the sample-mask with a per-stroke pixel-mask (cursor-disk stamps + `globalCompositeOperation = 'destination-out'`).
+
+This document remains in the repository as the design history — the comparison of approaches in *Considered alternatives* is still useful, and ADR 0009 explicitly addresses the "pixel mask was rejected here" position.
 
 ## Context
 

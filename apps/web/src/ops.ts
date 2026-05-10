@@ -1,13 +1,15 @@
 /**
  * Operation-based undo. Replaces the per-stroke redo stack from M0 with a
  * uniform `Op` type that supports the operations M1+ needs (eraser delete,
- * lasso move) without growing the undo logic.
+ * eraser pixel-stamp, lasso move) without growing the undo logic.
  *
  * Conventions:
  *
  *   - Strokes are never removed from the in-memory array or IndexedDB;
- *     instead, `deleted: true` is set. Undo is a flag flip (cheap, CRDT-
- *     friendly when M3 sync lands).
+ *     instead, `deleted: true` is set (whole-stroke removal — object-mode
+ *     eraser, lasso-delete) or stamps are added to `erasedStamps`
+ *     (segment-mode eraser, ADR 0009). Undo flips the flag or removes the
+ *     same stamps — both cheap, both CRDT-friendly.
  *   - Operations identify strokes by id, not by reference. The strokes
  *     array is the single source of truth.
  *   - Persistence is fire-and-forget at apply / unapply time. The caller's
@@ -19,12 +21,20 @@
  */
 
 import type { Stroke } from '@whiteboard/shared'
-import { invalidateStrokeBBox } from './stroke'
+import { addErasedStamps, invalidateStrokeBBox, removeErasedStamps } from './stroke'
+
+export interface StampEdit {
+  strokeId: string
+  /** Cursor disks added to the stroke's `erasedStamps` by this op. `unapply`
+   *  removes the same `(x, y, r)` triples. */
+  addedStamps: { x: number; y: number; r: number }[]
+}
 
 export type Op =
   | { kind: 'create'; strokeId: string }
   | { kind: 'delete'; strokeIds: string[] }
   | { kind: 'move'; strokeIds: string[]; dx: number; dy: number }
+  | { kind: 'eraseStamps'; edits: StampEdit[] }
 
 export interface OpContext {
   /** All strokes (including soft-deleted ones). Mutated in place by ops. */
@@ -47,6 +57,9 @@ export function applyOp(op: Op, ctx: OpContext): void {
     case 'move':
       translateStrokes(ctx, op.strokeIds, op.dx, op.dy)
       break
+    case 'eraseStamps':
+      applyStampEdits(ctx, op.edits, true)
+      break
   }
   ctx.markDirty()
 }
@@ -62,6 +75,9 @@ export function unapplyOp(op: Op, ctx: OpContext): void {
       break
     case 'move':
       translateStrokes(ctx, op.strokeIds, -op.dx, -op.dy)
+      break
+    case 'eraseStamps':
+      applyStampEdits(ctx, op.edits, false)
       break
   }
   ctx.markDirty()
@@ -85,6 +101,16 @@ function translateStrokes(ctx: OpContext, ids: readonly string[], dx: number, dy
       sample.y += dy
     }
     invalidateStrokeBBox(stroke)
+    ctx.saveStroke(stroke)
+  }
+}
+
+function applyStampEdits(ctx: OpContext, edits: readonly StampEdit[], add: boolean): void {
+  for (const edit of edits) {
+    const stroke = ctx.strokes.find((s) => s.id === edit.strokeId)
+    if (!stroke) continue
+    if (add) addErasedStamps(stroke, edit.addedStamps)
+    else removeErasedStamps(stroke, edit.addedStamps)
     ctx.saveStroke(stroke)
   }
 }

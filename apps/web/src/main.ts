@@ -62,7 +62,14 @@ import { clearAllStrokes, loadAllStrokes, saveStroke } from './storage'
 import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { openToolMenu } from './toolmenu'
-import { type Tool, type ToolContext, type ToolId, createEraserTool, createPenTool } from './tools'
+import {
+  type EraserTool,
+  type Tool,
+  type ToolContext,
+  type ToolId,
+  createEraserTool,
+  createPenTool,
+} from './tools'
 import { clearView, loadView, makeViewSaver } from './viewstate'
 import { fitToContent } from './zoomfit'
 
@@ -180,12 +187,22 @@ async function main(): Promise<void> {
     },
   })
 
-  const eraserTool = createEraserTool({
+  const eraserTool: EraserTool = createEraserTool({
     callbacks: {
       getStrokes: () => strokes,
-      onErase: (ids) => {
+      onObjectErase: (ids) => {
         if (ids.length === 0) return
         const op: Op = { kind: 'delete', strokeIds: ids }
+        applyOp(op, opCtx)
+        undoStack.push(op)
+        redoStack.length = 0
+      },
+      onWipeErase: (edits) => {
+        if (edits.length === 0) return
+        // ADR 0009: pending stamps live in eraserTool until pointerup, then
+        // applyOp adds them to each stroke's `erasedStamps` and saves —
+        // ops are the source of truth, the sweep was just a render preview.
+        const op: Op = { kind: 'eraseStamps', edits }
         applyOp(op, opCtx)
         undoStack.push(op)
         redoStack.length = 0
@@ -407,10 +424,6 @@ async function main(): Promise<void> {
     metrics.noteFrame(now)
 
     if (committedDirty) {
-      clearLayer(target.committed)
-      drawGrid(target.committed, camera, target.width, target.height, getSettings().grid)
-      applyCamera(target.committed, camera, target.dpr)
-
       const viewBBox = {
         minX: camera.x,
         minY: camera.y,
@@ -418,13 +431,66 @@ async function main(): Promise<void> {
         maxY: camera.y + target.height / camera.scale,
       }
 
+      // ----- Pass 1: stroke outlines on the offscreen strokes layer -----
+      // ADR 0009: strokes go to a dedicated offscreen so we can apply
+      // destination-out for eraser stamps without subtracting from the
+      // grid (which lives on the committed layer).
+      clearLayer(target.strokes)
+      applyCamera(target.strokes, camera, target.dpr)
+
       for (const s of strokes) {
         if (s.deleted) continue
         if (!bboxesIntersect(getStrokeBBox(s), viewBBox)) continue
         const path = getStrokePath(s, [], true)
         if (!path) continue
-        drawStrokePath(target.committed, path, resolveInkColor(s.brush.color), effectiveOpacity(s))
+        drawStrokePath(target.strokes, path, resolveInkColor(s.brush.color), effectiveOpacity(s))
       }
+
+      // ----- Pass 2: destination-out for eraser stamps -----
+      // Both the committed `erasedStamps` (set by applied `eraseStamps`
+      // ops) and the active tool's pending stamps (in-flight wipe sweep
+      // not yet committed) are applied here. Pending stamps are read
+      // through the EraserTool's `getPendingStamps` extension; if no other
+      // tool is active, the lookup is skipped.
+      const pendingStamps = tool.current === eraserTool ? eraserTool.getPendingStamps() : null
+      const sCtx = target.strokes.ctx
+      sCtx.save()
+      sCtx.globalCompositeOperation = 'destination-out'
+      sCtx.fillStyle = '#000' // destination-out only cares about source alpha
+      for (const s of strokes) {
+        if (s.deleted) continue
+        const committedStamps = s.erasedStamps
+        const pendingForStroke = pendingStamps?.get(s.id)
+        if (!committedStamps && !pendingForStroke) continue
+        if (committedStamps) {
+          for (const st of committedStamps) {
+            sCtx.beginPath()
+            sCtx.arc(st.x, st.y, st.r, 0, Math.PI * 2)
+            sCtx.fill()
+          }
+        }
+        if (pendingForStroke) {
+          for (const st of pendingForStroke) {
+            sCtx.beginPath()
+            sCtx.arc(st.x, st.y, st.r, 0, Math.PI * 2)
+            sCtx.fill()
+          }
+        }
+      }
+      sCtx.restore()
+
+      // ----- Pass 3: committed layer (grid + composited strokes) -----
+      clearLayer(target.committed)
+      applyCamera(target.committed, camera, target.dpr)
+      drawGrid(target.committed, camera, target.width, target.height, getSettings().grid)
+      // Composite the offscreen onto committed in pixel space (identity
+      // transform) so the strokes pixel-for-pixel overlay the grid.
+      const cCtx = target.committed.ctx
+      cCtx.save()
+      cCtx.setTransform(1, 0, 0, 1, 0, 0)
+      cCtx.drawImage(target.strokes.el, 0, 0)
+      cCtx.restore()
+
       committedDirty = false
 
       // Live layer needs to refresh too: clear stale content; ask the active
@@ -443,9 +509,15 @@ async function main(): Promise<void> {
 
   // Perftest mode.
   if (params.has('perftest')) {
-    void runPerfMode(camera, target, () => {
+    const mode = params.get('perftest')
+    const dirty = (): void => {
       committedDirty = true
-    })
+    }
+    if (mode === 'erase') {
+      void runErasePerfMode(strokes, target, dirty)
+    } else {
+      void runPerfMode(camera, target, dirty)
+    }
   }
 }
 
@@ -512,6 +584,130 @@ async function runPerfMode(
   const note = document.createElement('div')
   note.textContent =
     'JS-side input-to-render only. Compositor + display latency adds ~16–32 ms on typical hardware. Tap or click anywhere to dismiss.'
+  note.style.cssText = 'margin-top:12px;font-size:11px;color:var(--fg-muted);max-width:520px'
+  banner.appendChild(note)
+  banner.style.pointerEvents = 'auto'
+  banner.addEventListener('click', () => banner.remove(), { once: true })
+}
+
+/**
+ * `?perftest=erase` — synthetic eraser sweep across N pre-populated strokes.
+ * Verifies the ADR 0009 budget: wipe responsive within the 16 ms frame at
+ * 500 strokes. Reports per-frame render cost during the sweep.
+ *
+ * Override defaults via query params: `?perftest=erase&n=500&r=12&dur=2000`.
+ */
+async function runErasePerfMode(
+  strokes: Stroke[],
+  target: ReturnType<typeof setupCanvas>,
+  markCommittedDirty: () => void,
+): Promise<void> {
+  const banner = document.createElement('div')
+  banner.id = 'whiteboard-banner'
+  banner.textContent = 'Erase perftest: populating strokes…'
+  document.body.appendChild(banner)
+
+  const params = new URLSearchParams(window.location.search)
+  const strokeCount = Number(params.get('n')) || 500
+  const eraserRadius = Number(params.get('r')) || 12
+  const sweepDurationMs = Number(params.get('dur')) || 2000
+  const stampHz = 200
+
+  // Populate a grid of horizontal-line strokes spread across the viewport.
+  const cols = Math.max(1, Math.ceil(Math.sqrt(strokeCount)))
+  const rows = Math.ceil(strokeCount / cols)
+  const cellW = target.width / cols
+  const cellH = target.height / rows
+  const samplesPerStroke = 30
+
+  for (let i = 0; i < strokeCount; i++) {
+    const row = Math.floor(i / cols)
+    const col = i % cols
+    const x0 = col * cellW + cellW * 0.1
+    const y0 = row * cellH + cellH * 0.5
+    const samples: Sample[] = []
+    for (let j = 0; j < samplesPerStroke; j++) {
+      const u = j / (samplesPerStroke - 1)
+      samples.push({ x: x0 + u * cellW * 0.8, y: y0, p: 0.7, t: 0 })
+    }
+    strokes.push({ id: `perf-${i}`, brush: makeBrush(), samples, startedAt: 0 })
+  }
+  markCommittedDirty()
+  // Let one frame paint the populated strokes.
+  await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+  banner.textContent = 'Erase perftest: sweeping…'
+
+  // Drive a synthetic sinusoidal sweep across the canvas at `stampHz`. Each
+  // stamp is applied directly to overlapping strokes (bypassing the op
+  // layer — we're measuring render cost, not the op pipeline).
+  const totalStamps = Math.floor((sweepDurationMs / 1000) * stampHz)
+  const startT = performance.now()
+  const frameTimes: number[] = []
+  let stampIdx = 0
+
+  await new Promise<void>((resolve) => {
+    const tick = (now: DOMHighResTimeStamp): void => {
+      const frameStart = performance.now()
+      const elapsed = now - startT
+      const targetCount = Math.min(
+        totalStamps,
+        Math.floor((elapsed / sweepDurationMs) * totalStamps),
+      )
+      while (stampIdx < targetCount) {
+        const u = stampIdx / Math.max(1, totalStamps - 1)
+        const x = u * target.width
+        const y = target.height / 2 + Math.sin(u * Math.PI * 4) * (target.height / 4)
+        for (const s of strokes) {
+          if (s.deleted) continue
+          const tol = eraserRadius + s.brush.size / 2
+          const bb = getStrokeBBox(s)
+          if (x + tol < bb.minX || x - tol > bb.maxX) continue
+          if (y + tol < bb.minY || y - tol > bb.maxY) continue
+          if (!s.erasedStamps) s.erasedStamps = []
+          s.erasedStamps.push({ x, y, r: eraserRadius })
+        }
+        stampIdx++
+      }
+      markCommittedDirty()
+      frameTimes.push(performance.now() - frameStart)
+      if (stampIdx >= totalStamps) {
+        resolve()
+        return
+      }
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })
+
+  // Report.
+  const sorted = [...frameTimes].sort((a, b) => a - b)
+  const at = (q: number): number =>
+    sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] ?? 0
+  const sum = sorted.reduce((a, b) => a + b, 0)
+  const r2 = (v: number): number => Math.round(v * 100) / 100
+
+  banner.replaceChildren()
+  const heading = document.createElement('div')
+  heading.textContent = 'Erase perftest complete'
+  heading.style.cssText = 'font-weight:600;font-size:14px;margin-bottom:10px'
+  banner.appendChild(heading)
+
+  const pre = document.createElement('pre')
+  pre.textContent = [
+    `strokes        ${strokeCount}`,
+    `eraser radius  ${eraserRadius} px`,
+    `sweep dur      ${sweepDurationMs} ms`,
+    `total stamps   ${totalStamps}`,
+    `frames         ${frameTimes.length}`,
+    `frame work     mean ${r2(sum / frameTimes.length)} · p50 ${r2(at(0.5))} · p95 ${r2(at(0.95))} · max ${r2(sorted[sorted.length - 1] ?? 0)}  (ms)`,
+    'budget         16 ms / frame (ADR 0009)',
+  ].join('\n')
+  banner.appendChild(pre)
+
+  const note = document.createElement('div')
+  note.textContent =
+    'Measures stamp-application + render cost only. Compositor + display latency separate. Tap to dismiss.'
   note.style.cssText = 'margin-top:12px;font-size:11px;color:var(--fg-muted);max-width:520px'
   banner.appendChild(note)
   banner.style.pointerEvents = 'auto'

@@ -1,11 +1,19 @@
 /**
- * Two-layer canvas: a "committed" layer that holds finalized strokes and is
- * redrawn on commit / camera change, and a "live" layer cleared and redrawn
- * every frame for the in-flight stroke.
+ * Three-layer canvas:
  *
- * Both layers are sized in device pixels with a base CSS-pixel transform.
- * The camera transform is layered on top via applyCamera(); render output is
- * in board space.
+ *   - **committed** — in DOM. Background grid + composited stroke pixels.
+ *     Re-rendered on commit / camera change / theme change.
+ *   - **strokes** — offscreen scratch (NOT in DOM). Strokes are drawn here,
+ *     then `globalCompositeOperation = 'destination-out'` is applied for
+ *     each stroke's `erasedStamps` (ADR 0009 pixel-mask eraser). The
+ *     resulting buffer is composited onto `committed` after the grid, so
+ *     destination-out can subtract stroke pixels without touching the grid.
+ *   - **live** — in DOM. In-flight stroke + tool cursors. Cleared and
+ *     redrawn each frame.
+ *
+ * All three layers are sized in device pixels with a base CSS-pixel
+ * transform. The camera transform is layered on top via applyCamera();
+ * render output is in board space.
  */
 
 import type { Camera } from './camera'
@@ -17,6 +25,7 @@ export interface CanvasLayer {
 
 export interface RenderTarget {
   committed: CanvasLayer
+  strokes: CanvasLayer
   live: CanvasLayer
   /** CSS pixels. */
   width: number
@@ -26,11 +35,15 @@ export interface RenderTarget {
 
 export function setupCanvas(parent: HTMLElement): RenderTarget {
   const committed = makeLayer()
+  const strokes = makeLayer()
   const live = makeLayer()
+  // Only committed and live live in the DOM. `strokes` is an offscreen
+  // scratch — never appended.
   parent.append(committed.el, live.el)
 
   const target: RenderTarget = {
     committed,
+    strokes,
     live,
     width: 0,
     height: 0,
@@ -43,7 +56,7 @@ export function setupCanvas(parent: HTMLElement): RenderTarget {
     target.height = rect.height
     target.dpr = window.devicePixelRatio || 1
 
-    for (const layer of [committed, live]) {
+    for (const layer of [committed, strokes, live]) {
       layer.el.width = Math.max(1, Math.floor(target.width * target.dpr))
       layer.el.height = Math.max(1, Math.floor(target.height * target.dpr))
       layer.el.style.width = `${target.width}px`

@@ -45,14 +45,15 @@ Key submodules:
 | Module          | Status   | Responsibility                                           |
 |-----------------|----------|----------------------------------------------------------|
 | `pointer.ts`    | M1.4 ✅  | Pure event router; dispatches to active `Tool` (ADR 0005, extended in 0007). |
-| `tools/types.ts`| M1.6 ✅  | `Tool` + `ToolContext` interfaces (cursor / menu / redraw owned by tools). |
-| `tools/pen.ts`  | M1.6 ✅  | Drawing tool — strokes, hover preview per brush, COLOR + BRUSH menu section. |
-| `tools/eraser.ts`| M1.6 ✅ | Eraser — wipe / item modes, cursor reticle, ERASER menu section. |
-| `brushes.ts`    | M1 ✅   | Five brush presets (pen / marker / pencil / highlighter / brush). |
-| `menu-ui.ts`    | M1.6 ✅  | Shared DOM helpers — sectionLabel / pill / swatch / fullItem / separator. |
-| `ops.ts`        | M1.4 ✅  | Operation-based undo (create / delete / move). ADR 0006. |
-| `stroke.ts`     | M0 ✅    | Stroke geometry via `perfect-freehand`; pressure curve.  |
-| `render.ts`     | M0 ✅    | Two-canvas render loop with camera transform.            |
+| `tools/types.ts`| M1 ✅    | `Tool` + `ToolContext` interfaces (cursor / menu / redraw owned by tools). |
+| `tools/pen.ts`  | M1 ✅    | Drawing tool — strokes, hover preview per brush, COLOR + BRUSH menu section. |
+| `tools/eraser.ts`| M1 ✅   | Eraser — pixel-mask wipe + object modes, cursor reticle, 4-pill ERASER menu, `getPendingStamps` for live preview. ADR 0009. |
+| `eraserhold.ts` | M1 ✅    | `E` key spring-loaded eraser modifier; mirror of `pan.ts` pattern. Tap `Shift+E` for sticky. |
+| `brushes.ts`    | M1 ✅    | Five brush presets (pen / marker / pencil / highlighter / brush). |
+| `menu-ui.ts`    | M1 ✅    | Shared DOM helpers — sectionLabel / pill / swatch / fullItem / separator. |
+| `ops.ts`        | M1 ✅    | Op-based undo (create / delete / move / eraseStamps). ADRs 0006 + 0009. |
+| `stroke.ts`     | M0 ✅    | Stroke geometry via `perfect-freehand`; pressure curve; `erasedStamps` helpers. |
+| `render.ts`     | M1 ✅    | Three-layer canvas: `committed` (grid + composited strokes) + `strokes` (offscreen, destination-out target) + `live` (in-flight + cursor). ADR 0009 § *Renderer*. |
 | `camera.ts`     | M0 ✅    | Pan / zoom state; screen ↔ board coordinate math.        |
 | `viewstate.ts`  | M1.5 ✅  | Per-device camera persistence (debounced localStorage).  |
 | `grid.ts`       | M1.5 ✅  | Configurable grid (dots / lines / ruled / none + spacing). |
@@ -152,21 +153,29 @@ The Y.js binary protocol is consumed unchanged. Owner-token, if present in the q
 ```ts
 type Sample = { x: number; y: number; p: number; tx?: number; ty?: number; t: number }
 
+type BrushConfig = {
+  size: number; color: string;
+  thinning: number; smoothing: number; streamline: number
+  taperStart: number; taperEnd: number; capStart: boolean; capEnd: boolean
+  pressureGamma: number; opacity?: number
+}
+
 type Stroke = {
   id: string                // ULID
-  brushId: 'pen' | 'marker' | 'pencil' | 'highlighter' | 'brush'
-  color: string             // #rrggbb or #rrggbbaa
-  size: number              // base px at zoom 1
+  brush: BrushConfig         // snapshot at pointerdown — color may be the 'ink' token
   samples: Sample[]
-  deleted?: boolean         // soft delete; CRDT-friendly undo
-  authorId: string          // ephemeral peer id
-  createdAt: number
+  startedAt: number          // performance.now() at pointerdown
+  deleted?: boolean          // whole-stroke soft-delete (lasso, object-mode eraser)
+  erasedStamps?: { x: number; y: number; r: number }[]
+                              // pixel-mask eraser (ADR 0009): cursor disks subtracted
+                              // from rendered ink at draw time. Sparse — omitted when
+                              // the stroke has not been wiped.
 }
 ```
 
-Stored in Y.js as `Y.Array<Y.Map>`. Append-only; erase and undo set `deleted: true` rather than removing.
+Stored locally as one IDB row per stroke. M3+ also represents this in Y.js as `Y.Array<Y.Map>` for sync. Both `deleted` and `erasedStamps` are append-only-friendly (a flag flip and a list extension, respectively) — CRDT-friendly when sync lands.
 
-Coordinates are in **board space** (infinite, unitless), translated to screen space at render time via the camera transform.
+Coordinates are in **board space** (infinite, unitless), translated to screen space at render time via the camera transform. `erasedStamps` are in board coords too; they re-rasterize correctly through pan / zoom / theme changes alongside the stroke they belong to.
 
 ## 5. Deployment topology
 
@@ -191,27 +200,29 @@ This section reflects what is *actually in the code right now*. It is updated at
 | Docker (dev)                      | ✅ Complete    | Bind-mount + watch dev compose.                          |
 | CI                                | ✅ Complete    | GitHub Actions: lint + typecheck + Docker smoke.         |
 | Pre-commit hooks                  | ✅ Complete    | Biome check on staged files.                             |
-| **Drawing core (M0)**             | ✅ In code     | `pointer.ts` + `stroke.ts` + `render.ts`; coalesced + predicted; perfect-freehand math. **Latency validation on Wacom Intuos pending user test.** |
+| **Drawing core (M0)**             | ✅ In code     | `pointer.ts` + `stroke.ts` + `render.ts`; coalesced + predicted; perfect-freehand math. Latency feel-tested on Wacom Intuos. |
 | Pen brush preset                  | ✅ Complete    | Single "Fine pen" preset; γ=2 pressure curve.            |
 | Pan / zoom (infinite canvas)      | ✅ Complete    | Wheel-pan, Cmd/Ctrl+wheel/pinch zoom; Cmd+0 reset.       |
 | Light / dark / system theme       | ✅ Complete    | CSS variables; "ink" token re-resolves on theme change.  |
-| Local persistence (M0+)           | ✅ Complete    | IndexedDB; auto-save on stroke commit; hydrate on load.  |
+| Local persistence (M0+)           | ✅ Complete    | IndexedDB; auto-save on stroke commit; hydrate on load. `erasedStamps` persisted alongside the stroke (no schema bump). |
 | Static file serving               | ✅ Complete    | Server serves built SPA with SPA fallback + immutable cache for `/assets/*`. |
-| Metrics HUD + perftest            | ✅ Complete    | `M` to toggle; `?perftest=1` runs synthetic harness.     |
-| Brushes (marker / pencil / etc.)  | ❌ Not started | M1.                                                      |
-| **Undo / redo**                   | ✅ Complete    | Pulled forward from M1; M1.4 rewrote as op-based (ADR 0006). |
-| **Tool abstraction**              | ✅ Complete    | M1.4 + M1.6; ADRs 0005 + 0007. Tools own cursor / stroke / menu rendering. |
+| Metrics HUD + perftest            | ✅ Complete    | `M` to toggle; `?perftest=1` (drawing latency) and `?perftest=erase` (wipe-render budget, ADR 0009). |
+| **Undo / redo**                   | ✅ Complete    | Pulled forward from M1; M1.4 rewrote as op-based (ADR 0006); M1 added `eraseStamps` op (ADR 0009). |
+| **Tool abstraction**              | ✅ Complete    | M1.4 + M1; ADRs 0005 + 0007. Tools own cursor / stroke / menu rendering. |
 | **Soft-delete strokes**           | ✅ Complete    | M1.4; `Stroke.deleted` flag, render filter, op-driven flips. |
-| **Brushes (pen / marker / pencil / highlighter / brush)** | ✅ Complete | M1; 1–5 keys + right-click menu BRUSH section. |
-| **Eraser (wipe + item modes, sizes)** | ✅ Complete | M1; `E` shortcut + 4-pill ERASER section in menu. Sizes 6/12/24 px wipe + Item single-stroke. |
+| **Brushes (pen / marker / pencil / highlighter / brush)** | ✅ Complete | M1; 1–5 keys or `P` + right-click menu BRUSH section. |
+| **Eraser (pixel-mask wipe + object)** | ✅ Complete | M1; `E` (spring-loaded), `Shift+E` (sticky), 4-pill ERASER section, sizes 6/12/24 px wipe + Item single-stroke. ADR 0009. |
 | **Stroke clipping (off-viewport cull)** | ✅ Complete | M1; AABB cache, viewport intersection check in render loop. |
 | **Shift-constrained drawing**     | ✅ Complete    | M1; pen tool snaps to straight line while Shift held. |
 | **`Cmd/Ctrl+1` zoom-to-fit**      | ✅ Complete    | M1; bounding-box of non-deleted strokes. |
 | **Brush-aware hover cursor**      | ✅ Complete    | M1; per-brush cursor shape (pen circle / marker bold / pencil light / highlighter chisel / brush halo). |
+| **Three-canvas render pipeline**  | ✅ Complete    | M1 (ADR 0009): committed (grid + composited strokes) + offscreen strokes layer (destination-out target) + live (in-flight + cursor). |
+| **Spring-loaded `E` key**         | ✅ Complete    | M1; `eraserhold.ts` mirrors `pan.ts` spacebar pattern. `Shift+E` is sticky.   |
+| **`P` = Draw + Pen preset**       | ✅ Complete    | M1; one-keystroke "go to my default drawing setup."     |
 | **Color picker** (popover at pointer) | ✅ Complete | M1.5; swatches + recent colors; pin to keep open.        |
 | **Options menu** (popover)        | ✅ Complete    | M1.5; grid type + spacing.                               |
 | **Configurable grid**             | ✅ Complete    | M1.5; dots / lines / ruled / none.                       |
-| Eraser, lasso                     | ❌ Not started | M1.                                                      |
+| Lasso (select / move / delete)    | ❌ Not started | M1 — final remaining piece.                              |
 | Floating toolbar / palette        | ❌ Not started | M2.                                                      |
 | Pressure curve UI                 | ❌ Not started | M2.                                                      |
 | Export PNG / SVG / PDF            | ❌ Not started | M2.                                                      |

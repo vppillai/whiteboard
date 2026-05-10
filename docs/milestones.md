@@ -12,9 +12,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | M0 | Drawing core: latency, pan/zoom, theme, local persistence, undo/redo     | ✅ *(closed 2026-05-09; tagged `m0-drawing-core`)* |
 | M1.5 | Popover primitive · color picker · options menu · configurable grid    | ⬜     |
 | M1.4 | Refactor pass: tool abstraction, op-based undo, soft-delete, decompose main.ts | ✅ *(closed 2026-05-09; tagged `m1.4-refactor`)* |
-| M1.6 | Tool surface refactor: tools own cursor + contextual menu              | 🟦 *(code complete; feel-test pending)* |
-| M1 | Eraser, lasso, additional brush presets                                  | ⬜     |
-| M1.x | Segment-eraser ("cuts through" instead of stroke-hit) — see [ADR 0008](decisions/0008-segment-eraser.md) | ⬜ *(planned)* |
+| M1 | Tool surface refactor + eraser (pixel-mask wipe + object) + brush presets + lasso | 🟦 *(M1.6 sub-milestone code is in M1's flow; not separately tagged)* |
 | M1.7 | Settings side panel + sync-ready schema (brush presets, fonts, swatches) | ⬜  |
 | M2 | Toolbar UI, keyboard shortcuts, export                                   | ⬜     |
 | M3 | Server, sync, room URLs                                                  | ⬜     |
@@ -113,67 +111,35 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 - ADRs 0005 and 0006 written; architecture as-built table updated; CHANGELOG entry.
 - Tagged commit `m1.4-refactor`.
 
-### M1.6 — Tool surface refactor ⬜
+### M1 — Tool surface + eraser + brush presets + lasso 🟦
 
-**Why this exists** (out of order: ships *between* M1.5 and M1's lasso work). The tool abstraction from M1.4 (ADR 0005) was deliberately thin — `onPointerDown / Move / Up` plus an optional cursor CSS string. With pen and eraser shipped, the pattern's gaps are visible: cursor rendering (~85 LOC) and contextual menu sections (~60 LOC) live in `main.ts` and `toolmenu.ts` respectively. Each new tool would replicate. Lasso is going to repeat both. Better to land the extension now so lasso slots in cleanly.
+**Originally a sub-milestone called M1.6.** The tool abstraction from M1.4 (ADR 0005) was deliberately thin; with pen and eraser shipped, the pattern's gaps were visible (~85 LOC of cursor rendering in `main.ts`, ~60 LOC of contextual menu logic in `toolmenu.ts`). M1.6 was scoped as "code-complete; feel-test pending" but as M1's surface kept shifting (pixel-mask eraser, hold-E spring-loading, P key, clear-flow focus), the M1.6 boundary stopped being meaningful — it's all M1. The tag concept is dropped; the work is part of M1's history. The ADR 0007 extension survives as the live tool interface.
 
-**No behavior change.** Drawing, erasing, hover preview, menu sections — all observable behavior is identical. Pure code reorganization.
+The original M1.6 deliverables — now part of M1:
+- `Tool` interface extended with `renderContextualMenu(host, dismiss)` and `redraw(ctx)`. ADR 0007.
+- `ToolContext` carries `liveLayer`, `camera`, `dpr`, `resolveColor`, `markCommittedDirty`.
+- Pen + eraser cursor rendering moved into the tool modules.
+- COLOR / BRUSH / ERASER menu sections moved into tools.
+- New `menu-ui.ts` for shared DOM helpers.
+- `toolmenu.ts` is a dispatcher; per-tool sections own themselves.
 
-**Scope.**
+**M1 scope (revised twice).** The remaining four brush presets (marker, pencil, highlighter, brush), the **pixel-mask wipe + object** eraser, and lasso-select. Pan/zoom, undo/redo for stroke create, and persistence all shipped at M0. Lasso-driven move/delete extends undo/redo to those operations.
 
-- **Extend `Tool` interface** (ADR 0007 supersedes 0005's interface, retains the rationale):
-  - `renderLive(layer, camera, dpr, pointerState)` — tool owns its live-layer pixels, called after every pointer event
-  - `renderContextualMenu(host, dismiss)` — tool owns its right-click menu section
-- **Extend `ToolContext`** with `liveLayer`, `camera`, `dpr`, `resolveColor` so tools can render directly without callbacks back into `main.ts`.
-- **Move pen hover preview + per-brush cursor shapes** out of `main.ts` and into `tools/pen.ts`.
-- **Move eraser cursor (with mode reticle)** out of `main.ts` and into `tools/eraser.ts`.
-- **Move COLOR + BRUSH section rendering** out of `toolmenu.ts` and into `tools/pen.ts`.
-- **Move ERASER section** out of `toolmenu.ts` and into `tools/eraser.ts`.
-- **New `menu-ui.ts`** with shared DOM helpers (sectionLabel, pill, swatch, fullItem, separator) imported by both tool modules and `toolmenu.ts`.
-- **`toolmenu.ts` becomes a thin dispatcher** that hosts the active tool's contextual menu plus the static TOOL / VIEW / CLEAR sections.
-- **`main.ts`** drops the cursor renderers and most of the per-tool callback wiring. Pen tool's only callback is `onStrokeCommit`; eraser tool's only callback is `onErase`.
-- **ADR 0007 — extended Tool surface.** Documents the choice and the renaming of "thin Tool" (ADR 0005) into the present interface.
-- **Architecture as-built table updated** (it's stale by ~6 commits anyway).
+The toolbar UI is **explicitly held back to M2** so this milestone stays tight. Brushes are switched in M1 via the existing keyboard shortcuts (`1`–`5`); the visual brush picker is M2.
 
-**Exit criteria.**
-
-- Lint, typecheck, build clean.
-- Bundle size ±1 KB gz of M1.5 close (~14 KB gz).
-- Feel-test: drawing, eraser cursor (both modes), hover preview (all 5 brushes), contextual menu (Draw vs Eraser sections) — *visually identical* to before this commit.
-- ADR 0007 written; architecture as-built refreshed; CHANGELOG entry.
-- Tagged commit `m1.6-tool-surface`.
-
-**After M1.6:** Lasso lands as a single new file `tools/lasso.ts` that conforms to the extended Tool. No diffs to `main.ts` or `toolmenu.ts` beyond a registry entry.
-
-### M1.x — Segment-eraser ⬜
-
-**Why this exists.** Feel-test on Wacom Intuos surfaced that stroke-hit erasure (touch any sample → whole stroke deleted) does not feel like an eraser. A real whiteboard eraser cuts through ink — disconnected parts of the original stroke survive. The drawing-tools tenet treats this kind of feel-cost as milestone-critical.
-
-**Scope.** Per [ADR 0008](decisions/0008-segment-eraser.md): per-sample mask (`Stroke.erasedSamples?: number[]`); renderer iterates contiguous live-sample runs per stroke; new `maskSamples` op for undo / redo. Pixel-erase and split-stroke alternatives rejected in the ADR.
-
-**Exit criteria.**
-
-- Wipe-erase visibly cuts through strokes mid-sweep — the part the eraser passes over disappears immediately; the rest of the stroke survives.
-- One `maskSamples` op per gesture; single Cmd+Z restores the whole sweep.
-- `?perftest=erase` synthetic harness shows wipe responsive within 16 ms / frame at 500 strokes.
-- SPEC § 4.1 updated; storage migration tested (legacy strokes without `erasedSamples` load with no erasure); CHANGELOG entry.
-- Feel-test gate on Intuos: user signs off that wipe now feels like a physical eraser.
-- Tagged commit `m1.x-segment-eraser`.
-
-### M1 — Eraser + lasso + brush presets ⬜
-
-**Scope (revised after M0 close).** The remaining four brush presets (marker, pencil, highlighter, brush), the stroke-hit eraser, and lasso-select. Pan/zoom, undo/redo for stroke create, and persistence all shipped at M0. Lasso-driven move/delete extends undo/redo to those operations.
-
-The toolbar UI is **explicitly held back to M2** so this milestone stays tight (~2–3 days). Brushes are switched in M1 via the existing keyboard shortcuts (`1`–`5`); the visual brush picker is M2.
+**Eraser model.** Two modes:
+- **Wipe (pixel-mask)** — "cuts through" — implemented per [ADR 0009](decisions/0009-pixel-mask-eraser.md). Each pointer event during a sweep records a cursor disk `{ x, y, r }` on every overlapping stroke's `erasedStamps` list; renderer applies `globalCompositeOperation = 'destination-out'` for every stamp on a dedicated offscreen strokes canvas, composited onto committed after the grid. Cursor circle = erased pixels, exactly. Single `eraseStamps` op per gesture for clean undo. (ADR 0008's per-sample mask was implemented mid-milestone and superseded — see ADR 0008 *Status* note.)
+- **Object (whole-stroke)** — Item pill or Shift-modifier; soft-deletes the topmost stroke under the cursor; emits a `delete` op.
 
 **Exit criteria.**
 
 - All five brushes render correctly with their tabled parameters.
-- Stroke-hit eraser soft-deletes within hit radius (deleted flag on the Stroke; renderer skips deleted; redo restores).
+- Wipe eraser visually matches the cursor 1:1 — pixels under the cursor disk disappear, nothing past the cursor disappears (verified by feel-test on Wacom Intuos).
+- One `eraseStamps` op per wipe gesture; single Cmd+Z restores the whole sweep. Object-mode emits a `delete` op as before.
 - Lasso selects strokes; selected strokes can be deleted and moved.
-- Undo / redo extends to delete and move (not just create).
-- **Perf-at-scale gate**: `?perftest=scale&n=500` keeps pan / zoom under the 16 ms frame budget. If we miss, that's the WebGL trigger and an ADR.
-- **Feel-test gate** on the target hardware (Wacom Intuos): user signs off that the new tools feel right.
+- Undo / redo extends to delete, move, and eraseStamps (not just create).
+- **Perf-at-scale gate**: `?perftest=erase&n=500` keeps wipe rendering under the 16 ms frame budget (ADR 0009). `?perftest=scale&n=500` keeps pan / zoom under the same budget. Misses trigger an ADR.
+- **Feel-test gate** on the target hardware (Wacom Intuos): user signs off that the new tools feel right — including the eraser feeling like a physical eraser.
 - Architecture doc § 6 updated; CHANGELOG entry; per-tool notes as needed.
 
 ### M1.7 — Settings side panel + sync-ready schema ⬜
