@@ -148,24 +148,57 @@ body {
   position: fixed;
   bottom: 12px;
   right: 12px;
-  padding: 8px 14px;
   background: var(--pill-bg);
   color: var(--pill-fg);
   font: 11px / 1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
   font-weight: 600;
-  border: none;
   border-radius: 999px;
-  cursor: pointer;
   z-index: 999;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.whiteboard-toolpill {
+  display: inline-flex;
+  align-items: stretch;
+  padding: 0;
+}
+
+.whiteboard-toolpill-gear,
+.whiteboard-toolpill-cycle {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
   transition: filter 0.1s;
 }
 
-#whiteboard-tool-pill:hover,
-#whiteboard-tool-pill:focus-visible {
+.whiteboard-toolpill-gear {
+  padding: 6px 10px;
+  border-radius: 999px 0 0 999px;
+  font-size: 14px;
+  line-height: 1;
+  text-transform: none;
+}
+
+.whiteboard-toolpill-cycle {
+  padding: 8px 14px;
+  border-radius: 0 999px 999px 0;
+}
+
+.whiteboard-toolpill > * + * {
+  border-left: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.whiteboard-toolpill-gear:hover,
+.whiteboard-toolpill-gear:focus-visible,
+.whiteboard-toolpill-cycle:hover,
+.whiteboard-toolpill-cycle:focus-visible {
   filter: brightness(1.15);
   outline: none;
 }

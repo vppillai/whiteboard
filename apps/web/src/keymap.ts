@@ -46,6 +46,9 @@ export interface KeyHandlers {
   /** Select all non-deleted strokes via the lasso. Activates lasso if not
    *  already active. */
   selectAll: () => void
+  /** Toggle the settings side panel (Cmd/Ctrl+,). Open if closed, dismiss if
+   *  open — single-instance side panel handles the toggle semantics. */
+  togglePanel: () => void
 
   /**
    * Esc handler. Return `true` if anything was actually cancelled — the
@@ -93,6 +96,10 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       }
       if (!shift && k === 'a') {
         preventAndCall(e, handlers.selectAll)
+        return
+      }
+      if (!shift && k === ',') {
+        preventAndCall(e, handlers.togglePanel)
         return
       }
     }

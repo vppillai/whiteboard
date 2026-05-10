@@ -19,6 +19,7 @@
  *   ⌘/Ctrl + 1         — fit all strokes to view
  *   ⌘/Ctrl + + / -     — zoom in / out
  *   ⌘/Ctrl + Shift + K — clear board (confirm)
+ *   ⌘/Ctrl + ,         — toggle settings panel
  *
  * Pointer:
  *   Pen / mouse / touch — active tool's behavior
@@ -51,6 +52,7 @@ import { createHelpPill } from './pill'
 import { attachPointer } from './pointer'
 import { dismissAllPopovers, getActiveTag } from './popover'
 import { applyCamera, clearLayer, drawStrokePath, setupCanvas } from './render'
+import { createResetFlow } from './resetflow'
 import {
   getBrushId,
   getColor,
@@ -59,6 +61,8 @@ import {
   onChange as onSettingsChange,
   setBrushId,
 } from './settings'
+import { createPanelContent } from './settings/panel-content'
+import { dismissSidePanel, isSidePanelOpen, showSidePanel } from './sidepanel'
 import { clearAllStrokes, loadAllStrokes, saveStroke } from './storage'
 import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
@@ -254,12 +258,44 @@ async function main(): Promise<void> {
   // without this the CSS default (`#app { cursor: crosshair }`) shows on
   // load until the user first switches tools.
   root.style.cursor = tool.current.cursor ?? ''
+
+  // ---------------------------------------------------------------------
+  //  Settings side panel + reset flow. Single togglePanel function drives
+  //  Cmd/Ctrl+, , the right-click → Settings… row, and the toolpill gear.
+  //  Toggle = open if closed, dismiss if open. Each open builds a fresh
+  //  panel-content tree so live `onChange` subscriptions are torn down on
+  //  close via the cleanup callback the panel-content factory returns.
+  // ---------------------------------------------------------------------
+  const resetFlow = createResetFlow({ refocusOnClose: root })
+  const togglePanel = (): void => {
+    if (isSidePanelOpen()) {
+      dismissSidePanel()
+      return
+    }
+    const content = createPanelContent({
+      onResetClick: () => resetFlow.request(),
+    })
+    showSidePanel({
+      title: 'Settings',
+      content: content.el,
+      refocusOnClose: root,
+      tag: 'settings',
+      onDismiss: content.cleanup,
+    })
+  }
+
   const toolPill = createToolPill({
     initial: 'pen',
     onCycle: (next) => {
       setTool(next)
       // Hand focus back to the canvas so subsequent keystrokes don't go
       // through the pill button.
+      root.focus({ preventScroll: true })
+    },
+    onSettingsClick: () => {
+      togglePanel()
+      // Hand focus back to the canvas so Cmd/Ctrl+, etc. keep working
+      // after a gear tap.
       root.focus({ preventScroll: true })
     },
   })
@@ -339,6 +375,7 @@ async function main(): Promise<void> {
           }
         },
         onClear: clearFlow.request,
+        togglePanel,
       })
     },
     { capture: true },
@@ -471,6 +508,7 @@ async function main(): Promise<void> {
       lassoTool.selectAll()
       committedDirty = true
     },
+    togglePanel,
     cancel: () => {
       let handled = false
       if (clearFlow.cancel()) handled = true

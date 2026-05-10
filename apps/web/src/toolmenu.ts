@@ -45,6 +45,9 @@ export interface ToolMenuOptions {
   onResetZoom: () => void
   onZoomToFit: () => void
   onClear: () => void
+  /** Toggle the settings side panel — wired by main.ts to the same flow as
+   *  the Cmd/Ctrl+, shortcut and the toolpill gear. */
+  togglePanel: () => void
 }
 
 export function openToolMenu(opts: ToolMenuOptions): Popover {
@@ -115,6 +118,17 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
     }),
   )
   root.appendChild(viewRow)
+
+  // Settings — pen-friendly entry point matching the toolpill gear and the
+  // Cmd/Ctrl+, shortcut. Above CLEAR so the destructive row stays anchored
+  // at the bottom.
+  root.appendChild(separator())
+  root.appendChild(
+    fullItem('Settings…', () => {
+      dismiss()
+      opts.togglePanel()
+    }),
+  )
 
   // Destructive — at the bottom, separated.
   root.appendChild(separator())
