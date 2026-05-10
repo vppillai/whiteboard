@@ -251,7 +251,7 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
         return
       }
       if (mode === 'wipe') {
-        const coalesced = e.getCoalescedEvents()
+        const coalesced = e.getCoalescedEvents?.() ?? []
         const events = coalesced.length > 0 ? coalesced : [e]
         let anyHit = false
         for (const ce of events) {

@@ -219,14 +219,14 @@ export function createPenTool(opts: PenToolOptions): Tool {
         return
       }
 
-      const coalesced = e.getCoalescedEvents()
+      const coalesced = e.getCoalescedEvents?.() ?? []
       if (coalesced.length === 0) {
         active.samples.push(sample(e, brush, ctx))
       } else {
         for (const ce of coalesced) active.samples.push(sample(ce, brush, ctx))
       }
       predicted = opts.usePrediction
-        ? e.getPredictedEvents().map((pe) => sample(pe, brush, ctx))
+        ? (e.getPredictedEvents?.() ?? []).map((pe) => sample(pe, brush, ctx))
         : []
       renderAsFinal = false
       renderStroke(ctx)

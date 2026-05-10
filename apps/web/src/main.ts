@@ -340,7 +340,7 @@ async function main(): Promise<void> {
   root.addEventListener('pointermove', (e) => {
     if (!(e instanceof PointerEvent)) return
     lastPointer = { x: e.clientX, y: e.clientY }
-    const coalesced = e.getCoalescedEvents().length || 1
+    const coalesced = (e.getCoalescedEvents?.() ?? []).length || 1
     metrics.notePointerEvent(coalesced)
   })
 
