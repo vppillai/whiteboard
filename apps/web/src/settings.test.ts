@@ -1,5 +1,15 @@
 import { describe, expect, test } from 'bun:test'
+import { beforeEach } from 'bun:test'
+import {
+  __resetForTesting,
+  addCustomSwatch,
+  getSettings,
+  pushRecentColor,
+  removeCustomSwatch,
+} from './settings'
 import { getEffectiveBrushConfig, migrate } from './settings'
+
+beforeEach(__resetForTesting)
 
 describe('settings: migrate', () => {
   test('v0 with all fields migrates to v1 preserving values', () => {
@@ -131,5 +141,53 @@ describe('settings: getEffectiveBrushConfig', () => {
 
   test('does not throw when no override is set', () => {
     expect(() => getEffectiveBrushConfig('marker', 'ink')).not.toThrow()
+  })
+})
+
+describe('settings: customSwatches', () => {
+  test('add appends, no duplicates', () => {
+    addCustomSwatch('#fbcfe8')
+    addCustomSwatch('#fbcfe8') // duplicate
+    expect(getSettings().customSwatches).toEqual(['#fbcfe8'])
+    addCustomSwatch('#7dd3fc')
+    expect(getSettings().customSwatches).toEqual(['#fbcfe8', '#7dd3fc'])
+  })
+
+  test('remove drops the matching hex', () => {
+    addCustomSwatch('#aabbcc')
+    addCustomSwatch('#ddeeff')
+    removeCustomSwatch('#aabbcc')
+    expect(getSettings().customSwatches).toEqual(['#ddeeff'])
+  })
+
+  test('removing nonexistent is a no-op', () => {
+    expect(() => removeCustomSwatch('#nonexistent')).not.toThrow()
+  })
+
+  test('invalid hex is rejected (no add)', () => {
+    addCustomSwatch('not-a-hex')
+    expect(getSettings().customSwatches).toEqual([])
+  })
+})
+
+describe('settings: recentColors', () => {
+  test('push prepends and dedupes', () => {
+    pushRecentColor('#111111')
+    pushRecentColor('#222222')
+    expect(getSettings().recentColors.slice(0, 2)).toEqual(['#222222', '#111111'])
+    pushRecentColor('#111111') // moves to front
+    expect(getSettings().recentColors[0]).toBe('#111111')
+  })
+
+  test('caps at 6', () => {
+    const colors = ['#a1a1a1', '#a2a2a2', '#a3a3a3', '#a4a4a4', '#a5a5a5', '#a6a6a6', '#a7a7a7']
+    for (const c of colors) pushRecentColor(c)
+    expect(getSettings().recentColors).toHaveLength(6)
+    expect(getSettings().recentColors[0]).toBe('#a7a7a7') // most recent first
+  })
+
+  test('ink token is not pushed', () => {
+    pushRecentColor('ink')
+    expect(getSettings().recentColors.includes('ink')).toBe(false)
   })
 })

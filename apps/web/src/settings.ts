@@ -263,6 +263,52 @@ export function setEraserConfig(config: { mode: EraserMode; size?: EraserSize })
   }
 }
 
+export function addCustomSwatch(hex: string): void {
+  if (!isValidHex(hex)) return
+  if (state.customSwatches.includes(hex)) return
+  state.customSwatches.push(hex)
+  persist()
+  emit()
+}
+
+export function removeCustomSwatch(hex: string): void {
+  const idx = state.customSwatches.indexOf(hex)
+  if (idx === -1) return
+  state.customSwatches.splice(idx, 1)
+  persist()
+  emit()
+}
+
+export function pushRecentColor(hex: string): void {
+  if (hex === 'ink' || !isValidHex(hex)) return
+  const existing = state.recentColors.indexOf(hex)
+  if (existing !== -1) state.recentColors.splice(existing, 1)
+  state.recentColors.unshift(hex)
+  if (state.recentColors.length > RECENT_COLORS_CAP) {
+    state.recentColors.length = RECENT_COLORS_CAP
+  }
+  persist()
+  emit()
+}
+
+export function getCustomSwatches(): readonly string[] {
+  return state.customSwatches
+}
+
+export function getRecentColors(): readonly string[] {
+  return state.recentColors
+}
+
+/** Test-only: resets in-memory state and clears the persisted key. */
+export function __resetForTesting(): void {
+  Object.assign(state, cloneSettings(DEFAULTS))
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
 export function getGrid(): Readonly<GridConfig> {
   return state.grid
 }
