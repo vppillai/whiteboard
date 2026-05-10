@@ -10,7 +10,6 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 |----|--------------------------------------------------------------------------|--------|
 | —  | Repo + dev / deploy environment                                          | ✅     |
 | M0 | Drawing core: latency, pan/zoom, theme, local persistence, undo/redo     | ✅ *(closed 2026-05-09; tagged `m0-drawing-core`)* |
-| M1.5 | Popover primitive · color picker · options menu · configurable grid    | ⬜     |
 | M1.4 | Refactor pass: tool abstraction, op-based undo, soft-delete, decompose main.ts | ✅ *(closed 2026-05-09; tagged `m1.4-refactor`)* |
 | M1 | Tool surface refactor + eraser (pixel-mask wipe + object) + brush presets + lasso | ✅ *(closed 2026-05-09; tagged `m1-eraser-lasso`)* |
 | M1.7 | Settings side panel + sync-ready schema (brush presets, fonts, swatches) | ⬜  |
@@ -63,14 +62,16 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 - [x] Production Docker stack builds and serves the SPA end-to-end.
 - [x] `docs/architecture.md` § 6 updated.
 - [x] `CHANGELOG.md` entry under `[Unreleased]`.
-- [ ] **Pen-down → first ink visible: ≤ 16 ms (1 frame).** Validate on Wacom Intuos with `?perftest=1` and a real-pen test.
-- [ ] **Pen-to-photon during drag with prediction: ≤ 33 ms.** Validate on Intuos.
-- [ ] **No dropped Wacom samples at 200 Hz on a 60 Hz display.** HUD `samples / event` should average > 1 during fast strokes.
-- [ ] ADR added if the latency work surfaces an architectural choice.
+- [x] **Pen-down → first ink visible: ≤ 16 ms (1 frame).** Validated on Wacom Intuos with `?perftest=1` and a real-pen test at M0 close; confirmed across M1.4 / M1.5 / M1 feel-tests.
+- [x] **Pen-to-photon during drag with prediction: ≤ 33 ms.** Validated on Intuos at M0 close (predicted events disabled by default — see ADR 0004 for the indirect-input rationale; re-enable with `?predict=1` to A/B).
+- [x] **No dropped Wacom samples at 200 Hz on a 60 Hz display.** Confirmed at M0 close via the metrics HUD (`samples / event` averaged well above 1 during fast strokes).
+- [x] ADR added if the latency work surfaces an architectural choice. Covered by [ADR 0004](decisions/0004-input-pipeline-tuning.md) (predicted-events default-off, sync render in pointer handler) — written during M0 close.
 
-### M1.5 — Popover primitive · color picker · options · grid config ⬜
+### M1.5 — Popover primitive · color picker · options · grid config — absorbed into M0 / M1
 
-**Why this exists** (out of order: it ships *before* M1). The user feel-test of M0 surfaced three asks at once — quick color picking, configurable grid / ruled paper, and a discoverable settings surface. All three want the same UI primitive: a **popover anchored at the pointer, dismissible, optionally pinnable**. Building that primitive once and reusing it three ways is much cleaner than the three ad-hoc popovers we'd otherwise grow into. Doing it before M1 means the eraser / lasso / brush-switcher tooling at M1 plugs into the existing popover system rather than getting retrofitted later.
+> **Status: absorbed; no separate tag.** Each M1.5 deliverable shipped — the popover primitive, color picker, options menu, configurable grid renderer, and the `settings` module — but landed piecemeal across the M0 and M1 work as need surfaced rather than as a single coherent milestone. The sub-milestone boundary stopped being meaningful, so the tag concept is dropped in favor of the M0 / M1 history. The CHANGELOG groups the deliverables under "Milestone M1.5 — popover foundation" because that captures the design intent. The original definition below is preserved as design history. Mirrors the M1.6-rolled-into-M1 decision (see M1 section).
+
+**Why this existed** (originally out of order: scoped to ship *before* M1). The user feel-test of M0 surfaced three asks at once — quick color picking, configurable grid / ruled paper, and a discoverable settings surface. All three wanted the same UI primitive: a **popover anchored at the pointer, dismissible, optionally pinnable**. Building that primitive once and reusing it three ways was much cleaner than the three ad-hoc popovers we'd otherwise have grown into. Doing it before M1 meant the eraser / lasso / brush-switcher tooling at M1 plugged into the existing popover system rather than getting retrofitted later.
 
 **Scope.**
 
@@ -163,7 +164,7 @@ The toolbar UI is **explicitly held back to M2** so this milestone stays tight. 
   - Reserved fields for future sync: `syncedAt?: number`, `remoteId?: string`.
   - Migration path from the current schema (color + grid).
 - **No backend.** No user login, no remote sync, no auth. Local-only storage. The schema fields are *placeholders* the future sync layer will fill in.
-- **ADR 0007** — settings data model design (sync-readiness, migration strategy).
+- **ADR 0010** — settings data model design (sync-readiness, migration strategy). (Next available number; 0001–0009 are taken.)
 
 **Exit criteria.**
 
