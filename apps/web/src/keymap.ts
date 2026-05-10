@@ -64,6 +64,9 @@ export interface KeyHandlers {
   cyclePaletteBackward: () => void
   /** Cycle to the next color in the curated palette. Bound to Shift+]. M2. */
   cyclePaletteForward: () => void
+
+  /** Activate the color eyedropper tool. Bound to `I`. M2. */
+  selectEyedropperTool: () => void
 }
 
 export function attachKeymap(handlers: KeyHandlers): () => void {
@@ -164,6 +167,11 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       // F — toggle distraction-free mode (hides chrome). M2.
       if (k === 'f') {
         handlers.toggleDistractionFree()
+        return
+      }
+      // I — color eyedropper tool. M2.
+      if (k === 'i') {
+        handlers.selectEyedropperTool()
         return
       }
     }

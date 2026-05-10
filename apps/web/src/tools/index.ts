@@ -15,3 +15,8 @@ export {
   type LassoToolCallbacks,
   type LassoToolOptions,
 } from './lasso'
+export {
+  createEyedropperTool,
+  type EyedropperToolCallbacks,
+  type EyedropperToolOptions,
+} from './eyedropper'

@@ -21,11 +21,15 @@ const TOOL_LABELS: Record<ToolId, string> = {
   pen: 'Draw',
   eraser: 'Eraser',
   lasso: 'Lasso',
+  eyedropper: 'Pick',
   laser: 'Laser',
   text: 'Text',
 }
 
-/** Enabled tools, in cycle order. Mirror of `toolmenu.ts` TOOLS-with-enabled. */
+/** Enabled tools, in cycle order. Mirror of `toolmenu.ts` TOOLS-with-enabled.
+ *  Eyedropper is intentionally excluded from cycle — it's a modal "pick then
+ *  revert" tool, not a sticky drawing/select mode. Reach it via I or the
+ *  right-click TOOL section. */
 const CYCLE: readonly ToolId[] = ['pen', 'eraser', 'lasso']
 
 export interface ToolPillOptions {

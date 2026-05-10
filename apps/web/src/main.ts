@@ -77,6 +77,7 @@ import {
   type ToolContext,
   type ToolId,
   createEraserTool,
+  createEyedropperTool,
   createLassoTool,
   createPenTool,
 } from './tools'
@@ -275,10 +276,18 @@ async function main(): Promise<void> {
     },
   })
 
-  const allTools: Record<'pen' | 'eraser' | 'lasso', Tool> = {
+  const eyedropperTool: Tool = createEyedropperTool({
+    callbacks: {
+      getStrokesCanvas: () => target.strokes.el,
+      setTool: (id) => setTool(id),
+    },
+  })
+
+  const allTools: Record<'pen' | 'eraser' | 'lasso' | 'eyedropper', Tool> = {
     pen: penTool,
     eraser: eraserTool,
     lasso: lassoTool,
+    eyedropper: eyedropperTool,
   }
   const tool: { current: Tool } = { current: penTool }
   // Apply the initial tool's cursor — `setTool` only fires on changes, so
@@ -329,12 +338,16 @@ async function main(): Promise<void> {
   document.body.appendChild(toolPill.el)
   const setTool = (id: ToolId): void => {
     if (tool.current.id === id) return
-    if (id !== 'pen' && id !== 'eraser' && id !== 'lasso') return // others land later
+    if (id !== 'pen' && id !== 'eraser' && id !== 'lasso' && id !== 'eyedropper') {
+      return // others land later
+    }
+    const prevId = tool.current.id
     tool.current.cleanup?.()
     tool.current = allTools[id]
     root.style.cursor = tool.current.cursor ?? ''
     toolPill.setActiveTool(id)
     committedDirty = true // active tool changed; selection halos may toggle
+    tool.current.onActivate?.(prevId, toolCtx)
   }
 
   // ---------------------------------------------------------------------
@@ -585,6 +598,7 @@ async function main(): Promise<void> {
         const next = CURATED_COLORS[cyclePaletteIndex(getColor(), 1)]
         if (next) setColor(next)
       },
+      selectEyedropperTool: () => setTool('eyedropper'),
     }),
   )
 
