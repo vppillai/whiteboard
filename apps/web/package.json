@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@whiteboard/shared": "workspace:*",
+    "jspdf": "^2.5.2",
     "perfect-freehand": "^1.2.3"
   },
   "devDependencies": {
