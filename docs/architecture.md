@@ -62,7 +62,12 @@ Key submodules:
 | `metrics.ts`    | M0 ✅    | Live FPS / events / samples / event→frame HUD.           |
 | `perftest.ts`   | M0 ✅    | Synthetic stroke harness; reports JS-side latency. M1 added `?perftest=erase` + `?perftest=scale` modes (in `main.ts`) using a shared `perfRecording` flag instrumented in `frame()` for honest per-frame render-duration measurement. |
 | `storage.ts`    | M0 ✅    | Local persistence via IndexedDB.                         |
-| `settings.ts`   | M1.5 ✅  | Brush color, grid config; localStorage.                  |
+| `settings.ts`   | M1.7 ✅  | M1.7 — v1 schema, sparse preset overrides, sync-ready reserved fields. ADR 0010. |
+| `sidepanel.ts`  | M1.7 ✅  | Side panel primitive (slide-in from right, overlay). ADR 0010. |
+| `settings/panel-content.ts` | M1.7 ✅ | M1.7 settings tree (7 sections). |
+| `destructiveconfirm.ts` | M1.7 ✅ | Generalized priming-toast (shared by clear + reset). |
+| `resetflow.ts`  | M1.7 ✅  | Reset-to-defaults flow.                                  |
+| `swatchadd.ts`  | M1.7 ✅  | Hex + OS color picker UI shared between picker and panel. |
 | `popover.ts`    | M1.5 ✅  | Anchored, viewport-clamped, pinnable popover primitive.  |
 | `colorpicker.ts`| M1.5 ✅  | Color picker popover content (swatches).                 |
 | `optionsmenu.ts`| M1.5 ✅  | Options popover content (grid type, spacing).            |

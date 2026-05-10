@@ -141,3 +141,58 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 - **Undo / redo** for stroke creation. `Cmd/Ctrl+Z` undoes; `Cmd/Ctrl+Shift+Z` (or `Cmd/Ctrl+Y` for Windows muscle-memory) redoes. Redo history clears whenever a new stroke is committed and is not persisted across reloads — matches every other drawing tool. Undone strokes are removed from the IndexedDB store; redoing re-persists them.
 - Help overlay (`?`) refreshed with the new pan and undo options.
 - GPU compositor hints on canvas elements (`transform: translateZ(0)`, `will-change: transform`) so the present-to-screen path doesn't repaint neighbouring DOM. The 2D canvas was already GPU-composited; this just makes each layer its own compositor surface.
+
+### Added (M1.7 — settings side panel + sync-ready schema)
+
+- **Side panel** (`Cmd/Ctrl + ,`) sliding in from the right edge as an overlay
+  (canvas keeps full width). Built on a new `sidepanel.ts` primitive deliberately
+  decoupled from M1.7 content so future panels (AI features, file browser) can
+  compose without rework. ADR 0010.
+- **Versioned settings schema** (`SettingsV1`) with `schemaVersion: 1`, sparse
+  brush preset overrides, custom swatches, recent colors, fonts (reserved),
+  and reserved sync fields (`syncedAt?`, `remoteId?`). Eager migrate-on-load
+  from the v0 shape; mechanical fill of new fields with defaults.
+- **Brush preset tuning** in the panel — per-brush sliders for size, opacity,
+  pressureGamma. Live-updates strokes after the slider change (existing
+  committed strokes are unaffected; their brush is captured at pointerdown).
+  "Reset this preset" link restores SPEC defaults.
+- **Custom swatches** integrated into the color picker grid (with a 1.5 px ring
+  distinguishing them from curated). New "+" tile in the picker opens a
+  sub-popover with hex text input + OS color picker + Add. Same swatchadd
+  component reused in the panel's Custom swatches section.
+- **Recent colors** implemented for the first time (was in CHANGELOG M1.5
+  but never landed). Stored as `settings.recentColors`, capped at 6, MRU order.
+  Picker auto-pushes on color pick (excludes the `'ink'` token).
+- **Advanced section** (collapsed by default) with the remaining 8 BrushConfig
+  knobs per brush — thinning, smoothing, streamline, taperStart, taperEnd,
+  capStart, capEnd. Same sparse-override semantics.
+- **Grid + Theme** sections in the panel duplicate the popover / `T` key
+  surfaces — both paths write the same state.
+- **Reset to defaults** footer wipes Scope-B targets (presets, customSwatches,
+  recentColors, scalar settings); theme deliberately preserved (lives in
+  separate `whiteboard:theme` storage key — see ADR 0010 § Theme isolation).
+  Two-step confirm via the shared `destructiveconfirm.ts` primitive
+  (refactored out of `clearflow.ts`; the clear-board flow now uses it too).
+- **First-time bun test infrastructure**: `bun test` runs across workspaces.
+  `settings.test.ts` covers `migrate()` (v0 → v1, malformed, partial,
+  type-mismatched, idempotent, hex filtering, recent cap), brush preset
+  composition, custom swatch + recent color set semantics, `resetAll()`.
+- **Toolpill gains a gear zone** to the left of the tool-name zone — a
+  pen-friendly entry to the panel.
+- **Right-click menu Settings… row** opens the panel.
+
+### Changed (M1.7)
+
+- **`settings.ts` rewritten** to v1 schema. Existing getters/setters preserved
+  with the same names; new helpers: `getEffectiveBrushConfig(brushId, color)`,
+  `setPresetField(id, field, value)`, `clearPreset(id)`, `addCustomSwatch`,
+  `removeCustomSwatch`, `pushRecentColor`, `resetAll`.
+- **`clearflow.ts` collapsed** to a thin wrapper around `destructiveconfirm`.
+  Behavior is identical; the priming-toast pattern is now reusable.
+- **`colorpicker.ts` extended** to render the integrated grid + "+" tile.
+
+### Fixed (M1.7)
+
+- Recent-colors row was listed in CHANGELOG M1.5 but never actually
+  implemented. M1.7 ships it for the first time and folds it into the
+  versioned settings schema.
