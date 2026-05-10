@@ -40,3 +40,6 @@ test-results/
 
 # Claude Code local cache
 .claude/
+
+# Superpowers brainstorm sessions (mockups + state, not code)
+.superpowers/
