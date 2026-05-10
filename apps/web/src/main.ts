@@ -82,6 +82,16 @@ const makeBrush = (): BrushConfig => ({ ...BRUSH_PRESETS[getBrushId()], color: g
 
 const ZOOM_WHEEL_FACTOR = 1.0015 // per pixel of deltaY
 
+/**
+ * Render-frame duration recorder for `?perftest=...` modes. When non-null,
+ * the main `frame()` function pushes its actual render duration (the time
+ * spent inside the `committedDirty` block) into this array on every frame
+ * that does work. Harnesses set this to an empty array before driving the
+ * test, then read out + null after. Module-level so harness functions
+ * (top-level) and `frame()` (inside `main()` closure) can share it.
+ */
+let perfRecording: number[] | null = null
+
 async function main(): Promise<void> {
   initTheme()
 
@@ -477,6 +487,7 @@ async function main(): Promise<void> {
     metrics.noteFrame(now)
 
     if (committedDirty) {
+      const renderStart = perfRecording !== null ? performance.now() : 0
       const viewBBox = {
         minX: camera.x,
         minY: camera.y,
@@ -557,6 +568,10 @@ async function main(): Promise<void> {
       // tool to re-render its in-flight state if any.
       clearLayer(target.live)
       tool.current.redraw?.(toolCtx)
+
+      if (perfRecording !== null) {
+        perfRecording.push(performance.now() - renderStart)
+      }
     }
 
     hud.update(metrics.state)
@@ -575,10 +590,81 @@ async function main(): Promise<void> {
     }
     if (mode === 'erase') {
       void runErasePerfMode(strokes, target, dirty)
+    } else if (mode === 'scale') {
+      void runScalePerfMode(strokes, target, camera, dirty)
     } else {
       void runPerfMode(camera, target, dirty)
     }
   }
+}
+
+/**
+ * Populate a fresh batch of synthetic strokes for the at-scale perftests.
+ * Lays them out in a uniform grid covering the viewport so panning + zooming
+ * always has visible content. Each stroke is a short horizontal line.
+ */
+function populatePerfStrokes(
+  strokes: Stroke[],
+  target: ReturnType<typeof setupCanvas>,
+  count: number,
+): void {
+  const cols = Math.max(1, Math.ceil(Math.sqrt(count)))
+  const rows = Math.ceil(count / cols)
+  const cellW = target.width / cols
+  const cellH = target.height / rows
+  const samplesPerStroke = 30
+  for (let i = 0; i < count; i++) {
+    const row = Math.floor(i / cols)
+    const col = i % cols
+    const x0 = col * cellW + cellW * 0.1
+    const y0 = row * cellH + cellH * 0.5
+    const samples: Sample[] = []
+    for (let j = 0; j < samplesPerStroke; j++) {
+      const u = j / (samplesPerStroke - 1)
+      samples.push({ x: x0 + u * cellW * 0.8, y: y0, p: 0.7, t: 0 })
+    }
+    strokes.push({ id: `perf-${i}`, brush: makeBrush(), samples, startedAt: 0 })
+  }
+}
+
+/**
+ * Render a perftest result banner with mean / p50 / p95 / max render-frame
+ * durations. Click to dismiss.
+ */
+function reportPerf(
+  banner: HTMLElement,
+  opts: { title: string; rows: string[]; framesObserved: number[] },
+): void {
+  banner.replaceChildren()
+  const heading = document.createElement('div')
+  heading.textContent = opts.title
+  heading.style.cssText = 'font-weight:600;font-size:14px;margin-bottom:10px'
+  banner.appendChild(heading)
+
+  const sorted = [...opts.framesObserved].sort((a, b) => a - b)
+  const at = (q: number): number =>
+    sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] ?? 0
+  const sum = sorted.reduce((a, b) => a + b, 0)
+  const r2 = (v: number): number => Math.round(v * 100) / 100
+  const max = sorted[sorted.length - 1] ?? 0
+  const n = Math.max(1, opts.framesObserved.length)
+
+  const pre = document.createElement('pre')
+  pre.textContent = [
+    ...opts.rows,
+    `frames         ${opts.framesObserved.length}`,
+    `render frame   mean ${r2(sum / n)} · p50 ${r2(at(0.5))} · p95 ${r2(at(0.95))} · max ${r2(max)}  (ms)`,
+    'budget         16 ms / frame',
+  ].join('\n')
+  banner.appendChild(pre)
+
+  const note = document.createElement('div')
+  note.textContent =
+    "Measures actual render duration (instrumented in `frame()`'s committed-redraw block). Tap to dismiss."
+  note.style.cssText = 'margin-top:12px;font-size:11px;color:var(--fg-muted);max-width:520px'
+  banner.appendChild(note)
+  banner.style.pointerEvents = 'auto'
+  banner.addEventListener('click', () => banner.remove(), { once: true })
 }
 
 async function runPerfMode(
@@ -653,9 +739,12 @@ async function runPerfMode(
 /**
  * `?perftest=erase` — synthetic eraser sweep across N pre-populated strokes.
  * Verifies the ADR 0009 budget: wipe responsive within the 16 ms frame at
- * 500 strokes. Reports per-frame render cost during the sweep.
+ * 500 strokes. Frame durations are recorded by the main `frame()` function
+ * via `perfRecording`, so the reported number is the *actual* render cost
+ * (clear strokes layer + draw outlines + apply destination-out for stamps
+ * + composite onto committed), not the harness's tick body.
  *
- * Override defaults via query params: `?perftest=erase&n=500&r=12&dur=2000`.
+ * Override defaults: `?perftest=erase&n=500&r=12&dur=2000`.
  */
 async function runErasePerfMode(
   strokes: Stroke[],
@@ -673,42 +762,27 @@ async function runErasePerfMode(
   const sweepDurationMs = Number(params.get('dur')) || 2000
   const stampHz = 200
 
-  // Populate a grid of horizontal-line strokes spread across the viewport.
-  const cols = Math.max(1, Math.ceil(Math.sqrt(strokeCount)))
-  const rows = Math.ceil(strokeCount / cols)
-  const cellW = target.width / cols
-  const cellH = target.height / rows
-  const samplesPerStroke = 30
-
-  for (let i = 0; i < strokeCount; i++) {
-    const row = Math.floor(i / cols)
-    const col = i % cols
-    const x0 = col * cellW + cellW * 0.1
-    const y0 = row * cellH + cellH * 0.5
-    const samples: Sample[] = []
-    for (let j = 0; j < samplesPerStroke; j++) {
-      const u = j / (samplesPerStroke - 1)
-      samples.push({ x: x0 + u * cellW * 0.8, y: y0, p: 0.7, t: 0 })
-    }
-    strokes.push({ id: `perf-${i}`, brush: makeBrush(), samples, startedAt: 0 })
-  }
+  populatePerfStrokes(strokes, target, strokeCount)
   markCommittedDirty()
-  // Let one frame paint the populated strokes.
+  // Let one frame paint the populated strokes before we start recording —
+  // we don't want the initial-render cost to skew the sweep stats.
   await new Promise<void>((r) => requestAnimationFrame(() => r()))
 
   banner.textContent = 'Erase perftest: sweeping…'
 
-  // Drive a synthetic sinusoidal sweep across the canvas at `stampHz`. Each
-  // stamp is applied directly to overlapping strokes (bypassing the op
-  // layer — we're measuring render cost, not the op pipeline).
   const totalStamps = Math.floor((sweepDurationMs / 1000) * stampHz)
   const startT = performance.now()
-  const frameTimes: number[] = []
+  const recordings: number[] = []
+  perfRecording = recordings
   let stampIdx = 0
 
+  // Drive a synthetic sinusoidal sweep at `stampHz`. Stamps are applied
+  // directly to overlapping strokes (bypassing the op layer — we're
+  // measuring render cost, not the op pipeline). The main `frame()`
+  // records its own render duration into `recordings` while perfRecording
+  // is non-null.
   await new Promise<void>((resolve) => {
     const tick = (now: DOMHighResTimeStamp): void => {
-      const frameStart = performance.now()
       const elapsed = now - startT
       const targetCount = Math.min(
         totalStamps,
@@ -730,7 +804,6 @@ async function runErasePerfMode(
         stampIdx++
       }
       markCommittedDirty()
-      frameTimes.push(performance.now() - frameStart)
       if (stampIdx >= totalStamps) {
         resolve()
         return
@@ -740,38 +813,89 @@ async function runErasePerfMode(
     requestAnimationFrame(tick)
   })
 
-  // Report.
-  const sorted = [...frameTimes].sort((a, b) => a - b)
-  const at = (q: number): number =>
-    sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] ?? 0
-  const sum = sorted.reduce((a, b) => a + b, 0)
-  const r2 = (v: number): number => Math.round(v * 100) / 100
+  perfRecording = null
 
-  banner.replaceChildren()
-  const heading = document.createElement('div')
-  heading.textContent = 'Erase perftest complete'
-  heading.style.cssText = 'font-weight:600;font-size:14px;margin-bottom:10px'
-  banner.appendChild(heading)
+  reportPerf(banner, {
+    title: 'Erase perftest complete',
+    rows: [
+      `strokes        ${strokeCount}`,
+      `eraser radius  ${eraserRadius} px`,
+      `sweep dur      ${sweepDurationMs} ms`,
+      `total stamps   ${totalStamps}`,
+    ],
+    framesObserved: recordings,
+  })
+}
 
-  const pre = document.createElement('pre')
-  pre.textContent = [
-    `strokes        ${strokeCount}`,
-    `eraser radius  ${eraserRadius} px`,
-    `sweep dur      ${sweepDurationMs} ms`,
-    `total stamps   ${totalStamps}`,
-    `frames         ${frameTimes.length}`,
-    `frame work     mean ${r2(sum / frameTimes.length)} · p50 ${r2(at(0.5))} · p95 ${r2(at(0.95))} · max ${r2(sorted[sorted.length - 1] ?? 0)}  (ms)`,
-    'budget         16 ms / frame (ADR 0009)',
-  ].join('\n')
-  banner.appendChild(pre)
+/**
+ * `?perftest=scale` — synthetic pan + zoom drive over N pre-populated
+ * strokes. Verifies M1's perf-at-scale gate: pan / zoom holds the 16 ms
+ * frame budget at 500 strokes. Render durations come from the same
+ * `perfRecording` instrumentation as `?perftest=erase`.
+ *
+ * Override defaults: `?perftest=scale&n=500&dur=2000`.
+ */
+async function runScalePerfMode(
+  strokes: Stroke[],
+  target: ReturnType<typeof setupCanvas>,
+  camera: ReturnType<typeof makeCamera>,
+  markCommittedDirty: () => void,
+): Promise<void> {
+  const banner = document.createElement('div')
+  banner.id = 'whiteboard-banner'
+  banner.textContent = 'Scale perftest: populating strokes…'
+  document.body.appendChild(banner)
 
-  const note = document.createElement('div')
-  note.textContent =
-    'Measures stamp-application + render cost only. Compositor + display latency separate. Tap to dismiss.'
-  note.style.cssText = 'margin-top:12px;font-size:11px;color:var(--fg-muted);max-width:520px'
-  banner.appendChild(note)
-  banner.style.pointerEvents = 'auto'
-  banner.addEventListener('click', () => banner.remove(), { once: true })
+  const params = new URLSearchParams(window.location.search)
+  const strokeCount = Number(params.get('n')) || 500
+  const durationMs = Number(params.get('dur')) || 2000
+
+  // Snapshot camera so we can restore on completion (the user shouldn't be
+  // left somewhere weird in board space).
+  const initialCam = { x: camera.x, y: camera.y, scale: camera.scale }
+
+  populatePerfStrokes(strokes, target, strokeCount)
+  markCommittedDirty()
+  await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+  banner.textContent = 'Scale perftest: panning + zooming…'
+
+  const startT = performance.now()
+  const recordings: number[] = []
+  perfRecording = recordings
+
+  // Sinusoidal pan + zoom — covers a wide range of camera positions and
+  // scales so viewport-clip cache + per-stroke bbox math is exercised.
+  await new Promise<void>((resolve) => {
+    const tick = (now: DOMHighResTimeStamp): void => {
+      const elapsed = now - startT
+      const u = Math.min(1, elapsed / durationMs)
+      camera.x = initialCam.x + Math.sin(u * Math.PI * 4) * (target.width * 0.6)
+      camera.y = initialCam.y + Math.cos(u * Math.PI * 4) * (target.height * 0.4)
+      camera.scale = initialCam.scale * (1 + 0.4 * Math.sin(u * Math.PI * 6))
+      markCommittedDirty()
+      if (u >= 1) {
+        resolve()
+        return
+      }
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })
+
+  perfRecording = null
+
+  // Restore camera so the user lands back where they started.
+  camera.x = initialCam.x
+  camera.y = initialCam.y
+  camera.scale = initialCam.scale
+  markCommittedDirty()
+
+  reportPerf(banner, {
+    title: 'Scale (pan + zoom) perftest complete',
+    rows: [`strokes        ${strokeCount}`, `drive dur      ${durationMs} ms`],
+    framesObserved: recordings,
+  })
 }
 
 void main()

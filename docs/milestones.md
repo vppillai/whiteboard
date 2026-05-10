@@ -138,7 +138,7 @@ The toolbar UI is **explicitly held back to M2** so this milestone stays tight. 
 - One `eraseStamps` op per wipe gesture; single Cmd+Z restores the whole sweep. Object-mode emits a `delete` op as before.
 - Lasso selects strokes; selected strokes can be deleted and moved.
 - Undo / redo extends to delete, move, and eraseStamps (not just create).
-- **Perf-at-scale gate**: `?perftest=erase&n=500` keeps wipe rendering under the 16 ms frame budget (ADR 0009). `?perftest=scale&n=500` keeps pan / zoom under the same budget. Misses trigger an ADR.
+- **Perf-at-scale gate**: `?perftest=erase&n=500` keeps wipe rendering under the 16 ms frame budget (ADR 0009). `?perftest=scale&n=500` keeps pan / zoom under the same budget. Both harnesses report actual render-frame durations via `perfRecording` instrumentation in `frame()`. Misses trigger an ADR.
 - **Feel-test gate** on the target hardware (Wacom Intuos): user signs off that the new tools feel right — including the eraser feeling like a physical eraser.
 - Architecture doc § 6 updated; CHANGELOG entry; per-tool notes as needed.
 

@@ -60,7 +60,7 @@ Key submodules:
 | `grid.ts`       | M1.5 ✅  | Configurable grid (dots / lines / ruled / none + spacing). |
 | `theme.ts`      | M0 ✅    | Light / dark / system themes; theme-aware "ink" color.   |
 | `metrics.ts`    | M0 ✅    | Live FPS / events / samples / event→frame HUD.           |
-| `perftest.ts`   | M0 ✅    | Synthetic stroke harness; reports JS-side latency.       |
+| `perftest.ts`   | M0 ✅    | Synthetic stroke harness; reports JS-side latency. M1 added `?perftest=erase` + `?perftest=scale` modes (in `main.ts`) using a shared `perfRecording` flag instrumented in `frame()` for honest per-frame render-duration measurement. |
 | `storage.ts`    | M0 ✅    | Local persistence via IndexedDB.                         |
 | `settings.ts`   | M1.5 ✅  | Brush color, grid config; localStorage.                  |
 | `popover.ts`    | M1.5 ✅  | Anchored, viewport-clamped, pinnable popover primitive.  |
