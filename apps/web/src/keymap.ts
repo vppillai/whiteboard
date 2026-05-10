@@ -56,6 +56,9 @@ export interface KeyHandlers {
    * no-op for us; let the browser handle it (e.g. in a focused input)."
    */
   cancel: () => boolean
+
+  /** Toggle distraction-free mode (hides app chrome). Bound to `F`. M2. */
+  toggleDistractionFree: () => void
 }
 
 export function attachKeymap(handlers: KeyHandlers): () => void {
@@ -151,6 +154,11 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       }
       if (k === 's') {
         handlers.selectLassoTool()
+        return
+      }
+      // F — toggle distraction-free mode (hides chrome). M2.
+      if (k === 'f') {
+        handlers.toggleDistractionFree()
         return
       }
     }

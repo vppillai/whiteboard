@@ -39,6 +39,7 @@ import { BRUSH_IDS, BRUSH_PRESETS } from './brushes'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
 import { createClearFlow } from './clearflow'
 import { openColorPicker } from './colorpicker'
+import { exitDistractionFree, isDistractionFree, toggleDistractionFree } from './distractionfree'
 import { attachEraserHold } from './eraserhold'
 import { drawGrid } from './grid'
 import { createHelpOverlay } from './helpoverlay'
@@ -551,6 +552,13 @@ async function main(): Promise<void> {
       togglePanel,
       cancel: () => {
         let handled = false
+        // Distraction-free exits first — popovers are dismissed on entry so
+        // there shouldn't be one to handle, but if state diverged for any
+        // reason, exiting distraction-free is the most user-visible action.
+        if (isDistractionFree()) {
+          exitDistractionFree()
+          handled = true
+        }
         if (clearFlow.cancel()) handled = true
         if (dismissAllPopovers()) handled = true
         // Esc in lasso mode falls back to the pen tool. The lasso's `cleanup`
@@ -562,6 +570,12 @@ async function main(): Promise<void> {
         }
         return handled
       },
+      toggleDistractionFree: () =>
+        toggleDistractionFree({
+          appEl: root,
+          dismissPopover: () => dismissAllPopovers(),
+          dismissSidePanel: () => dismissSidePanel(),
+        }),
     }),
   )
 

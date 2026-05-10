@@ -916,3 +916,33 @@ body {
 body.distraction-free .firstrun-hint {
   display: none;
 }
+
+/* Distraction-free mode — hides chrome (M2). */
+body.distraction-free .pill,
+body.distraction-free .helppill,
+body.distraction-free .toolmenu,
+body.distraction-free .whiteboard-sidepanel,
+body.distraction-free .whiteboard-popover {
+  display: none !important;
+}
+
+/* Exit-affordance toast (M2 distraction-free). */
+.df-exit-toast {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--toast-bg, oklch(0.25 0 0));
+  color: var(--toast-fg, oklch(0.95 0 0));
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0;
+  transition: opacity 250ms ease-out;
+  pointer-events: none;
+  z-index: 50;
+}
+.df-exit-toast.visible {
+  opacity: 1;
+}
