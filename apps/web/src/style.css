@@ -894,3 +894,25 @@ body {
 .whiteboard-settings-reset-btn:hover {
   background: rgba(239, 68, 68, 0.08);
 }
+
+/* First-run hint — empty-board discovery overlay (M2). */
+.firstrun-hint {
+  position: fixed;
+  bottom: 25vh;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--ink-muted, oklch(from var(--ink) calc(l * 0.65) c h));
+  font-size: 14px;
+  font-weight: 500;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 200ms ease-out;
+  opacity: 1;
+  z-index: 5;
+}
+.firstrun-hint.fading {
+  opacity: 0;
+}
+body.distraction-free .firstrun-hint {
+  display: none;
+}
