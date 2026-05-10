@@ -8,3 +8,10 @@ export {
   type Stamp,
   type StampEdit,
 } from './eraser'
+export {
+  createLassoTool,
+  type DragState,
+  type LassoTool,
+  type LassoToolCallbacks,
+  type LassoToolOptions,
+} from './lasso'

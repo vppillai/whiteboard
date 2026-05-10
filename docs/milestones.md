@@ -12,7 +12,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | M0 | Drawing core: latency, pan/zoom, theme, local persistence, undo/redo     | ✅ *(closed 2026-05-09; tagged `m0-drawing-core`)* |
 | M1.5 | Popover primitive · color picker · options menu · configurable grid    | ⬜     |
 | M1.4 | Refactor pass: tool abstraction, op-based undo, soft-delete, decompose main.ts | ✅ *(closed 2026-05-09; tagged `m1.4-refactor`)* |
-| M1 | Tool surface refactor + eraser (pixel-mask wipe + object) + brush presets + lasso | 🟦 *(M1.6 sub-milestone code is in M1's flow; not separately tagged)* |
+| M1 | Tool surface refactor + eraser (pixel-mask wipe + object) + brush presets + lasso | 🟦 *(code complete; awaiting feel-test + tag)* |
 | M1.7 | Settings side panel + sync-ready schema (brush presets, fonts, swatches) | ⬜  |
 | M2 | Toolbar UI, keyboard shortcuts, export                                   | ⬜     |
 | M3 | Server, sync, room URLs                                                  | ⬜     |
@@ -148,7 +148,7 @@ The toolbar UI is **explicitly held back to M2** so this milestone stays tight. 
 
 **Scope.**
 
-- **Side panel UI.** Slide-in from one edge (right is the typical default), pen-friendly hit targets, dismissible. Lives alongside the existing popover system but is a longer-lived surface — opened deliberately via keyboard or the tool menu, closed deliberately. Sections: **Brush presets**, **Custom swatches**, **Fonts** (placeholder for Text tool), **Grid** (move from the popover here?), **Theme**, **Advanced**.
+- **Side panel UI.** Slide-in from one edge (right is the typical default), pen-friendly hit targets, dismissible. Lives alongside the existing popover system but is a longer-lived surface — opened deliberately via keyboard or the tool menu, closed deliberately. Sections: **Brush presets**, **Custom swatches**, **Fonts** (placeholder for Text tool), **Grid** (move from the popover here?), **Theme**, **Advanced**, plus a footer **Reset to defaults** action that wipes the persisted settings (with two-step confirm — same priming-toast pattern as clear-board) and reloads `DEFAULTS`. User profile / project state is not affected; only the user-tunable preferences.
 - **`settings.ts` schema redesign**:
   - Versioned root (`{ schemaVersion: 1, ... }`).
   - Brush presets as a keyed map: `{ presets: Record<string, BrushPreset>, activePresetId: string }`.
@@ -161,12 +161,13 @@ The toolbar UI is **explicitly held back to M2** so this milestone stays tight. 
 
 **Exit criteria.**
 
-- Side panel toggleable (likely a key like `S` and a tool-menu entry).
+- Side panel toggleable (some key — `S` is taken by lasso, so a different one or a chord; final binding decided during M1.7).
 - Brush size adjustable from the panel; immediately reflects in the active brush.
 - Custom swatch addable (small "+" tile in the color picker that opens a hex input or color sampler); shows alongside the curated palette and persists.
 - Theme selector and grid options accessible from the panel (in addition to existing popovers — gives people who prefer panels a single place to find everything).
+- **Reset to defaults** action present in the panel footer; two-step confirm; wipes `whiteboard:settings` (and any session-scoped state like `eraserMode`) and reloads `DEFAULTS`. Verified to leave the strokes / IDB store untouched.
 - Schema version field present; loading old `whiteboard:settings` localStorage data migrates cleanly.
-- ADR 0007 written; architecture as-built and SPEC § 10 updated; CHANGELOG entry.
+- ADR written for settings schema (next available number); architecture as-built and SPEC § 10 updated; CHANGELOG entry.
 - Tagged commit `m1.7-settings-panel`.
 
 **Future sync (post-M1.7, post-v1):** when a backend lands, the settings store gets a "synced" boolean per record and conflict resolution (last-write-wins or per-field merge). That work is *not* in M1.7's scope — just the schema design that won't need to break.

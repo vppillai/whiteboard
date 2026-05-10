@@ -72,6 +72,22 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 - **`docs/process.md`** gains a "tool changes require a feel-test scenario before code-complete" rule, captured from the four-iteration journey through this work.
 - SPEC § 4.1 describes pixel-mask as the shipped wipe behavior; milestones.md M1 row updated to 🟦.
 
+### Added (M1 — tool indicator pill)
+
+- **Bottom-right tool pill** (`apps/web/src/toolpill.ts`) — small persistent indicator showing the active tool, tap to cycle (`Draw → Eraser → Lasso → Draw`). Pen-friendly one-step activation alongside the existing `S` / `B` / `P` / `Shift+E` keyboard paths and the right-click → TOOL menu. Pill mirrors the existing bottom-left help pill in placement and style; clicking it refocuses `#app` so subsequent keystrokes don't go through the button. Styles in `style.css` use `--pill-bg` / `--pill-fg` for theme-awareness.
+
+### Added (M1 — lasso tool)
+
+- **Lasso select-move-delete** as a single new file (`apps/web/src/tools/lasso.ts`) conforming to the extended `Tool` interface (ADR 0007). No diffs to `main.ts` or `toolmenu.ts` beyond a registry entry and the keymap callbacks — the contract held.
+- **Three-phase state machine**: idle → lasso (drawing polygon) → moving (dragging selection). Drag in empty space draws a polygon; tap on a stroke single-selects it; drag inside the existing selection's union bbox moves all selected strokes. Pointerup picks the right phase exit based on movement.
+- **Polygon-in-stroke hit test**: any sample of a stroke inside the closed polygon = stroke selected. Standard ray-casting, sample-level. Single-tap path uses sample-distance to the click point with an 8 px tolerance.
+- **Selection visualization**: per-stroke **halo** (perfect-freehand outline traced with a wider accent-blue line on the live layer) + **dashed bounding-box** outline around the selection union. Both rendered in `lasso.redraw()` so they survive committed-dirty cycles. Marching-ants animation deferred — would force a live redraw every frame, breaking the dirty-driven render-loop optimization; revisit if static dashes feel flat in feel-test.
+- **Drag-to-move with ghost preview**. `LassoTool.getDragState()` returns `{ ids, dx, dy }` while moving; the orchestrator's render loop skips those strokes from the offscreen pass, and `lasso.redraw()` paints them on the live layer at offset. On pointerup, a single `move` op fires (existing op kind from M1.4); undo restores the original positions.
+- **`move` op now translates `erasedStamps` alongside samples** so a partly-erased stroke keeps its holes in the right place after a move (ADR 0009 stamps live in absolute board coords, like the samples themselves).
+- **Keyboard**: `S` activates lasso; `Delete` / `Backspace` deletes selection (preventDefault only on success so Backspace can still go-back when there's nothing selected); `⌘/Ctrl + A` activates lasso and selects all non-deleted strokes.
+- **Right-click → ERASER section** still works when eraser active; lasso adds its own **Selection (N)** section with **Delete** + **Clear** pills (the latter just deselects). TOOL row's Lasso pill is now enabled.
+- SPEC § 4.3 keyboard table: `S`, `Delete` / `Backspace`, `⌘/Ctrl + A` flipped to ✅. Help overlay (`?`) updated. milestones.md M1 row reflects lasso shipped. architecture.md as-built table gains the `tools/lasso.ts` entry.
+
 ### Refactored (M1 — tool surface; was M1.6 sub-milestone)
 
 - **Tool interface extended** (ADR 0007 supersedes 0005's interface). Each tool now owns its cursor / stroke / hover rendering AND its right-click menu section. `ToolContext` carries `liveLayer`, `camera`, `dpr`, `resolveColor` so tools render directly to the live layer without callbacks.

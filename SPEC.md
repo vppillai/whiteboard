@@ -173,7 +173,7 @@ Floating, draggable, dockable to any edge. Compact (icon-only) with hover labels
 | `P`                            | Draw tool + Pen brush preset              | ✅     |
 | `E` (hold)                     | Spring-loaded eraser — release reverts    | ✅     |
 | `Shift + E`                    | Sticky eraser (toggle to eraser tool)     | ✅     |
-| `S`                            | Select (lasso)                            | M1     |
+| `S`                            | Select (lasso)                            | ✅     |
 | `Space` (hold) + drag          | Pan (any pointer device)                  | ✅     |
 | Middle-mouse drag              | Pan                                       | ✅     |
 | `1`–`5`                        | Switch to brush preset 1–5                | M1     |
@@ -183,8 +183,8 @@ Floating, draggable, dockable to any edge. Compact (icon-only) with hover labels
 | `Cmd/Ctrl + Shift + Z`         | Redo (also `Cmd/Ctrl + Y`)                | ✅     |
 | `Cmd/Ctrl + 0`                 | Reset zoom                                | ✅     |
 | `Cmd/Ctrl + =` / `-`           | Zoom in / out                             | ✅     |
-| `Cmd/Ctrl + A`                 | Select all                                | M1     |
-| `Delete` / `Backspace`         | Delete selected                           | M1     |
+| `Cmd/Ctrl + A`                 | Select all (activates lasso)              | ✅     |
+| `Delete` / `Backspace`         | Delete selected                           | ✅     |
 | `Cmd/Ctrl + Shift + K`         | Clear board (confirm twice within 3 s)    | ✅     |
 | `M`                            | Toggle metrics HUD                        | ✅     |
 | `T`                            | Cycle theme (system → light → dark)       | ✅     |

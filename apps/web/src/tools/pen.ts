@@ -64,6 +64,11 @@ export function createPenTool(opts: PenToolOptions): Tool {
   let active: Stroke | null = null
   let predicted: Sample[] = []
   let renderAsFinal = false
+  // Last cursor position painted as a hover preview. Cached so `redraw()`
+  // can repaint after the render loop clears the live layer (settings
+  // change, theme change, undo) — without it the brush cursor would blink
+  // off until the next pointermove.
+  let lastHover: { x: number; y: number } | null = null
 
   const sample = (e: SampleSource, brush: BrushConfig, ctx: ToolContext): Sample => {
     const { x, y } = ctx.toBoard(e.clientX, e.clientY)
@@ -137,11 +142,15 @@ export function createPenTool(opts: PenToolOptions): Tool {
     active = null
     predicted = []
     renderAsFinal = false
+    lastHover = null
   }
 
   return {
     id: 'pen',
-    cursor: 'crosshair',
+    // OS cursor hidden — the per-brush hover preview drawn on the live
+    // layer in `renderHover` (filled circle / chisel rect / soft halo) is
+    // the cursor. Showing both stacks two indicators on the same spot.
+    cursor: 'none',
 
     onPointerDown(e, ctx) {
       const brush = ctx.getBrush()
@@ -157,10 +166,11 @@ export function createPenTool(opts: PenToolOptions): Tool {
     },
 
     onPointerMove(e, ctx) {
+      const board = ctx.toBoard(e.clientX, e.clientY)
+      lastHover = board
       if (!active) {
         // Hover render — brush preview at cursor.
-        const { x, y } = ctx.toBoard(e.clientX, e.clientY)
-        renderHover(x, y, ctx)
+        renderHover(board.x, board.y, ctx)
         return
       }
       const brush = active.brush
@@ -198,10 +208,14 @@ export function createPenTool(opts: PenToolOptions): Tool {
     },
 
     redraw(ctx) {
-      // Camera change or committed-layer redraw: re-render the in-flight
-      // stroke (if any) so its position tracks the new camera. Hover preview
-      // can wait for the next pointermove.
-      if (active) renderStroke(ctx)
+      // Camera change, theme change, settings change (e.g. brush switch),
+      // undo: re-render in-flight stroke OR hover preview so the live layer
+      // is never visually empty between pointer events.
+      if (active) {
+        renderStroke(ctx)
+      } else if (lastHover) {
+        renderHover(lastHover.x, lastHover.y, ctx)
+      }
     },
 
     renderContextualMenu(host, dismiss) {

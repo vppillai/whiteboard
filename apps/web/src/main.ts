@@ -62,12 +62,15 @@ import { clearAllStrokes, loadAllStrokes, saveStroke } from './storage'
 import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { openToolMenu } from './toolmenu'
+import { createToolPill } from './toolpill'
 import {
   type EraserTool,
+  type LassoTool,
   type Tool,
   type ToolContext,
   type ToolId,
   createEraserTool,
+  createLassoTool,
   createPenTool,
 } from './tools'
 import { clearView, loadView, makeViewSaver } from './viewstate'
@@ -210,14 +213,54 @@ async function main(): Promise<void> {
     },
   })
 
-  const allTools: Record<'pen' | 'eraser', Tool> = { pen: penTool, eraser: eraserTool }
+  const lassoTool: LassoTool = createLassoTool({
+    callbacks: {
+      getStrokes: () => strokes,
+      onDelete: (ids) => {
+        if (ids.length === 0) return
+        const op: Op = { kind: 'delete', strokeIds: ids }
+        applyOp(op, opCtx)
+        undoStack.push(op)
+        redoStack.length = 0
+      },
+      onMove: (ids, dx, dy) => {
+        if (ids.length === 0 || (dx === 0 && dy === 0)) return
+        const op: Op = { kind: 'move', strokeIds: ids, dx, dy }
+        applyOp(op, opCtx)
+        undoStack.push(op)
+        redoStack.length = 0
+      },
+    },
+  })
+
+  const allTools: Record<'pen' | 'eraser' | 'lasso', Tool> = {
+    pen: penTool,
+    eraser: eraserTool,
+    lasso: lassoTool,
+  }
   const tool: { current: Tool } = { current: penTool }
+  // Apply the initial tool's cursor — `setTool` only fires on changes, so
+  // without this the CSS default (`#app { cursor: crosshair }`) shows on
+  // load until the user first switches tools.
+  root.style.cursor = tool.current.cursor ?? ''
+  const toolPill = createToolPill({
+    initial: 'pen',
+    onCycle: (next) => {
+      setTool(next)
+      // Hand focus back to the canvas so subsequent keystrokes don't go
+      // through the pill button.
+      root.focus({ preventScroll: true })
+    },
+  })
+  document.body.appendChild(toolPill.el)
   const setTool = (id: ToolId): void => {
     if (tool.current.id === id) return
-    if (id !== 'pen' && id !== 'eraser') return // others land at later milestones
+    if (id !== 'pen' && id !== 'eraser' && id !== 'lasso') return // others land later
     tool.current.cleanup?.()
     tool.current = allTools[id]
     root.style.cursor = tool.current.cursor ?? ''
+    toolPill.setActiveTool(id)
+    committedDirty = true // active tool changed; selection halos may toggle
   }
 
   // ---------------------------------------------------------------------
@@ -407,6 +450,16 @@ async function main(): Promise<void> {
       setBrushId('pen')
     },
     selectEraserSticky: () => setTool('eraser'),
+    selectLassoTool: () => setTool('lasso'),
+    deleteSelection: () => {
+      if (tool.current !== lassoTool) return false
+      return lassoTool.deleteSelection()
+    },
+    selectAll: () => {
+      setTool('lasso')
+      lassoTool.selectAll()
+      committedDirty = true
+    },
     cancel: () => {
       let handled = false
       if (clearFlow.cancel()) handled = true
@@ -438,8 +491,14 @@ async function main(): Promise<void> {
       clearLayer(target.strokes)
       applyCamera(target.strokes, camera, target.dpr)
 
+      // Strokes the lasso is live-moving are skipped here and ghost-painted
+      // on live by the lasso's `redraw()` at offset.
+      const dragState = tool.current === lassoTool ? lassoTool.getDragState() : null
+      const draggingIds = dragState?.ids
+
       for (const s of strokes) {
         if (s.deleted) continue
+        if (draggingIds?.has(s.id)) continue
         if (!bboxesIntersect(getStrokeBBox(s), viewBBox)) continue
         const path = getStrokePath(s, [], true)
         if (!path) continue
@@ -459,6 +518,7 @@ async function main(): Promise<void> {
       sCtx.fillStyle = '#000' // destination-out only cares about source alpha
       for (const s of strokes) {
         if (s.deleted) continue
+        if (draggingIds?.has(s.id)) continue
         const committedStamps = s.erasedStamps
         const pendingForStroke = pendingStamps?.get(s.id)
         if (!committedStamps && !pendingForStroke) continue

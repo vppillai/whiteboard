@@ -37,6 +37,15 @@ export interface KeyHandlers {
   /** Activate the eraser tool persistently (sticky toggle). Bound to Shift+E
    *  because plain E is pure spring-loaded — see `eraserhold.ts`. */
   selectEraserSticky: () => void
+  /** Activate the lasso tool. Bound to `S`. */
+  selectLassoTool: () => void
+  /** Delete the active selection (lasso). Returns `true` if anything was
+   *  actually deleted; the dispatcher uses this to decide whether to
+   *  preventDefault (so Backspace doesn't trigger browser history-back). */
+  deleteSelection: () => boolean
+  /** Select all non-deleted strokes via the lasso. Activates lasso if not
+   *  already active. */
+  selectAll: () => void
 
   /**
    * Esc handler. Return `true` if anything was actually cancelled — the
@@ -82,12 +91,24 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
         preventAndCall(e, handlers.clear)
         return
       }
+      if (!shift && k === 'a') {
+        preventAndCall(e, handlers.selectAll)
+        return
+      }
     }
 
     // Esc cancels — dispatcher prevents default only if anything was actually
     // cancelled, so an Esc in a focused input still has its native effect.
     if (e.key === 'Escape') {
       if (handlers.cancel()) e.preventDefault()
+      return
+    }
+
+    // Delete / Backspace removes the lasso selection. preventDefault only on
+    // success so Backspace can still go-back when there's no selection (and
+    // when typed into a focused input — there are none in v1, but future-proof).
+    if (!meta && !alt && (e.key === 'Delete' || e.key === 'Backspace')) {
+      if (handlers.deleteSelection()) e.preventDefault()
       return
     }
 
@@ -119,6 +140,10 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       }
       if (k === 'p') {
         handlers.selectPenDefault()
+        return
+      }
+      if (k === 's') {
+        handlers.selectLassoTool()
         return
       }
     }

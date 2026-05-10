@@ -100,6 +100,15 @@ function translateStrokes(ctx: OpContext, ids: readonly string[], dx: number, dy
       sample.x += dx
       sample.y += dy
     }
+    // Erased pixels live at absolute board coords — translate alongside the
+    // stroke they belong to so a partly-erased stroke keeps its holes in
+    // the right place after a move.
+    if (stroke.erasedStamps) {
+      for (const stamp of stroke.erasedStamps) {
+        stamp.x += dx
+        stamp.y += dy
+      }
+    }
     invalidateStrokeBBox(stroke)
     ctx.saveStroke(stroke)
   }

@@ -144,6 +144,32 @@ body {
   letter-spacing: 0.02em;
 }
 
+#whiteboard-tool-pill {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  padding: 8px 14px;
+  background: var(--pill-bg);
+  color: var(--pill-fg);
+  font: 11px / 1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  z-index: 999;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: filter 0.1s;
+}
+
+#whiteboard-tool-pill:hover,
+#whiteboard-tool-pill:focus-visible {
+  filter: brightness(1.15);
+  outline: none;
+}
+
 #whiteboard-banner {
   position: fixed;
   top: 50%;

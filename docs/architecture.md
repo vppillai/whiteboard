@@ -48,6 +48,7 @@ Key submodules:
 | `tools/types.ts`| M1 ✅    | `Tool` + `ToolContext` interfaces (cursor / menu / redraw owned by tools). |
 | `tools/pen.ts`  | M1 ✅    | Drawing tool — strokes, hover preview per brush, COLOR + BRUSH menu section. |
 | `tools/eraser.ts`| M1 ✅   | Eraser — pixel-mask wipe + object modes, cursor reticle, 4-pill ERASER menu, `getPendingStamps` for live preview. ADR 0009. |
+| `tools/lasso.ts`| M1 ✅    | Lasso — polygon select + tap-select + drag-to-move + delete. Halo + dashed bbox visualization. `getDragState` for live offset preview during drag. |
 | `eraserhold.ts` | M1 ✅    | `E` key spring-loaded eraser modifier; mirror of `pan.ts` pattern. Tap `Shift+E` for sticky. |
 | `brushes.ts`    | M1 ✅    | Five brush presets (pen / marker / pencil / highlighter / brush). |
 | `menu-ui.ts`    | M1 ✅    | Shared DOM helpers — sectionLabel / pill / swatch / fullItem / separator. |
@@ -71,6 +72,7 @@ Key submodules:
 | `keymap.ts`     | M1.4 ✅  | Keyboard shortcut registry + dispatcher.                 |
 | `helpoverlay.ts`| M1.4 ✅  | `?` help overlay (shortcuts + repo link).                |
 | `pill.ts`       | M1.4 ✅  | Bottom-left "? for help" pill.                           |
+| `toolpill.ts`   | M1 ✅    | Bottom-right active-tool indicator + tap-to-cycle. Pen-friendly one-step activation alongside `S` / `B` / `P` / right-click TOOL menu. |
 | `ui/`           | M2 ⬜    | Floating toolbar, full settings side panel.              |
 | `sync/`         | M3 ⬜    | Y.Doc binding; WebSocket transport; presence.            |
 | `export/`       | M2 ⬜    | PNG / SVG / PDF serialization.                           |
@@ -222,7 +224,7 @@ This section reflects what is *actually in the code right now*. It is updated at
 | **Color picker** (popover at pointer) | ✅ Complete | M1.5; swatches + recent colors; pin to keep open.        |
 | **Options menu** (popover)        | ✅ Complete    | M1.5; grid type + spacing.                               |
 | **Configurable grid**             | ✅ Complete    | M1.5; dots / lines / ruled / none.                       |
-| Lasso (select / move / delete)    | ❌ Not started | M1 — final remaining piece.                              |
+| **Lasso (select / move / delete)** | ✅ Complete    | M1; `S` activates, polygon-or-tap select, halo + dashed bbox, drag-to-move emits `move` op, `Delete`/`Backspace` deletes, `⌘/Ctrl+A` select all. |
 | Floating toolbar / palette        | ❌ Not started | M2.                                                      |
 | Pressure curve UI                 | ❌ Not started | M2.                                                      |
 | Export PNG / SVG / PDF            | ❌ Not started | M2.                                                      |
