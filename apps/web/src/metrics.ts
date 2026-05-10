@@ -102,9 +102,11 @@ export function createHud(): Hud {
   return { el, update, setVisible, toggle }
 }
 
-export function bindHudToggle(hud: Hud, key = 'm'): void {
-  document.addEventListener('keydown', (e) => {
+export function bindHudToggle(hud: Hud, key = 'm'): () => void {
+  const onKey = (e: KeyboardEvent): void => {
     if (e.metaKey || e.ctrlKey || e.altKey) return
     if (e.key.toLowerCase() === key) hud.toggle()
-  })
+  }
+  document.addEventListener('keydown', onKey)
+  return () => document.removeEventListener('keydown', onKey)
 }

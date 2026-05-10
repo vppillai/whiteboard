@@ -18,6 +18,8 @@ export interface PanController {
    * middle-button events.
    */
   isPanIntent(e: PointerEvent): boolean
+  /** Remove all listeners attached by `attachPan`. Idempotent. */
+  cleanup(): void
 }
 
 export interface PanOptions {
@@ -43,21 +45,19 @@ export function attachPan(opts: PanOptions): PanController {
 
   const isPanIntent = (e: PointerEvent): boolean => spaceHeld || e.button === 1
 
-  document.addEventListener('keydown', (e) => {
+  const onKeyDown = (e: KeyboardEvent): void => {
     if (e.key === ' ' && !e.repeat) {
       spaceHeld = true
       if (!panState) root.dataset.input = 'pan'
     }
-  })
-
-  document.addEventListener('keyup', (e) => {
+  }
+  const onKeyUp = (e: KeyboardEvent): void => {
     if (e.key === ' ') {
       spaceHeld = false
       if (!panState) delete root.dataset.input
     }
-  })
-
-  root.addEventListener('pointerdown', (e) => {
+  }
+  const onPointerDown = (e: PointerEvent): void => {
     if (!isPanIntent(e)) return
     e.preventDefault()
     root.setPointerCapture(e.pointerId)
@@ -69,17 +69,15 @@ export function attachPan(opts: PanOptions): PanController {
       startCameraX: camera.x,
       startCameraY: camera.y,
     }
-  })
-
-  root.addEventListener('pointermove', (e) => {
+  }
+  const onPointerMove = (e: PointerEvent): void => {
     if (!panState || e.pointerId !== panState.pointerId) return
     const dx = e.clientX - panState.startClientX
     const dy = e.clientY - panState.startClientY
     camera.x = panState.startCameraX - dx / camera.scale
     camera.y = panState.startCameraY - dy / camera.scale
     onCameraChange()
-  })
-
+  }
   const endPan = (e: PointerEvent): void => {
     if (!panState || e.pointerId !== panState.pointerId) return
     if (root.hasPointerCapture(e.pointerId)) root.releasePointerCapture(e.pointerId)
@@ -87,13 +85,28 @@ export function attachPan(opts: PanOptions): PanController {
     if (spaceHeld) root.dataset.input = 'pan'
     else delete root.dataset.input
   }
+  // Suppress browser middle-click auto-scroll cursor on Windows/Linux.
+  const onAuxClick = (e: MouseEvent): void => {
+    if (e.button === 1) e.preventDefault()
+  }
+
+  document.addEventListener('keydown', onKeyDown)
+  document.addEventListener('keyup', onKeyUp)
+  root.addEventListener('pointerdown', onPointerDown)
+  root.addEventListener('pointermove', onPointerMove)
   root.addEventListener('pointerup', endPan)
   root.addEventListener('pointercancel', endPan)
+  root.addEventListener('auxclick', onAuxClick)
 
-  // Suppress browser middle-click auto-scroll cursor on Windows/Linux.
-  root.addEventListener('auxclick', (e) => {
-    if (e.button === 1) e.preventDefault()
-  })
+  const cleanup = (): void => {
+    document.removeEventListener('keydown', onKeyDown)
+    document.removeEventListener('keyup', onKeyUp)
+    root.removeEventListener('pointerdown', onPointerDown)
+    root.removeEventListener('pointermove', onPointerMove)
+    root.removeEventListener('pointerup', endPan)
+    root.removeEventListener('pointercancel', endPan)
+    root.removeEventListener('auxclick', onAuxClick)
+  }
 
-  return { isPanIntent }
+  return { isPanIntent, cleanup }
 }

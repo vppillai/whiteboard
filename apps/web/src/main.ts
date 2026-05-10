@@ -109,6 +109,20 @@ async function main(): Promise<void> {
   const target = setupCanvas(root)
   const camera = makeCamera()
 
+  // ---------------------------------------------------------------------
+  //  Teardown registry. Modules that add global listeners return cleanup
+  //  functions; we collect them and run them all on page unload AND on
+  //  Vite HMR `dispose` so a hot-replaced main.ts doesn't double-stack
+  //  listeners (defensive — vite currently force-reloads on save because
+  //  no module calls `import.meta.hot.accept`, but the discipline keeps
+  //  the codebase safe if anyone adds `accept()` later).
+  // ---------------------------------------------------------------------
+  const cleanups: Array<() => void> = []
+  const registerCleanup = (fn: () => void): void => {
+    cleanups.push(fn)
+  }
+  registerCleanup(() => target.cleanup())
+
   // Restore last-saved camera position. Per-device, no sync; reset on clear-
   // board. Infinite canvas has no canonical "origin" — wherever you left off
   // is home.
@@ -126,7 +140,7 @@ async function main(): Promise<void> {
   const metrics = new MetricsCollector()
   const hud = createHud()
   document.body.appendChild(hud.el)
-  bindHudToggle(hud)
+  registerCleanup(bindHudToggle(hud))
   hud.setVisible(false) // M to toggle
 
   document.body.appendChild(createHelpPill())
@@ -139,6 +153,19 @@ async function main(): Promise<void> {
   const strokes: Stroke[] = []
   const undoStack: Op[] = []
   const redoStack: Op[] = []
+  // Cap stack growth so long sessions don't accumulate unbounded memory.
+  // FIFO eviction of the oldest entries: the user loses the ability to undo
+  // beyond UNDO_MAX historical actions, which is a fair trade for bounded
+  // memory in multi-day dev sessions. Sized for a typical drawing session;
+  // bump if feel-testing shows users hitting the cap routinely.
+  const UNDO_MAX = 500
+  const pushUndoOp = (op: Op): void => {
+    undoStack.push(op)
+    if (undoStack.length > UNDO_MAX) {
+      undoStack.splice(0, undoStack.length - UNDO_MAX)
+    }
+    redoStack.length = 0
+  }
   let committedDirty = true
 
   try {
@@ -152,9 +179,11 @@ async function main(): Promise<void> {
   //  Pointer-coordinate mapping. Cached canvas rect (M1.5 perf fix).
   // ---------------------------------------------------------------------
   let canvasRect = root.getBoundingClientRect()
-  window.addEventListener('resize', () => {
+  const onWindowResize = (): void => {
     canvasRect = root.getBoundingClientRect()
-  })
+  }
+  window.addEventListener('resize', onWindowResize)
+  registerCleanup(() => window.removeEventListener('resize', onWindowResize))
   const toBoard = (clientX: number, clientY: number): { x: number; y: number } =>
     screenToBoard(camera, clientX - canvasRect.left, clientY - canvasRect.top)
 
@@ -166,6 +195,7 @@ async function main(): Promise<void> {
     viewSaver.queueSave()
   }
   const pan = attachPan({ root, camera, onCameraChange })
+  registerCleanup(pan.cleanup)
 
   // ---------------------------------------------------------------------
   //  Tool registry. Pen and eraser implement the Tool interface (ADR 0005,
@@ -193,8 +223,7 @@ async function main(): Promise<void> {
     callbacks: {
       onStrokeCommit(stroke) {
         strokes.push(stroke)
-        undoStack.push({ kind: 'create', strokeId: stroke.id })
-        redoStack.length = 0
+        pushUndoOp({ kind: 'create', strokeId: stroke.id })
         // Don't clear live here — the next RAF redraws committed (with this
         // stroke baked in) and clears live, avoiding a flicker.
         committedDirty = true
@@ -212,8 +241,7 @@ async function main(): Promise<void> {
         if (ids.length === 0) return
         const op: Op = { kind: 'delete', strokeIds: ids }
         applyOp(op, opCtx)
-        undoStack.push(op)
-        redoStack.length = 0
+        pushUndoOp(op)
       },
       onWipeErase: (edits) => {
         if (edits.length === 0) return
@@ -222,8 +250,7 @@ async function main(): Promise<void> {
         // ops are the source of truth, the sweep was just a render preview.
         const op: Op = { kind: 'eraseStamps', edits }
         applyOp(op, opCtx)
-        undoStack.push(op)
-        redoStack.length = 0
+        pushUndoOp(op)
       },
     },
   })
@@ -235,15 +262,13 @@ async function main(): Promise<void> {
         if (ids.length === 0) return
         const op: Op = { kind: 'delete', strokeIds: ids }
         applyOp(op, opCtx)
-        undoStack.push(op)
-        redoStack.length = 0
+        pushUndoOp(op)
       },
       onMove: (ids, dx, dy) => {
         if (ids.length === 0 || (dx === 0 && dy === 0)) return
         const op: Op = { kind: 'move', strokeIds: ids, dx, dy }
         applyOp(op, opCtx)
-        undoStack.push(op)
-        redoStack.length = 0
+        pushUndoOp(op)
       },
     },
   })
@@ -411,12 +436,16 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------
   //  Theme + settings change hooks
   // ---------------------------------------------------------------------
-  document.documentElement.addEventListener('themechange', () => {
+  const onThemechange = (): void => {
     committedDirty = true
-  })
-  onSettingsChange(() => {
-    committedDirty = true
-  })
+  }
+  document.documentElement.addEventListener('themechange', onThemechange)
+  registerCleanup(() => document.documentElement.removeEventListener('themechange', onThemechange))
+  registerCleanup(
+    onSettingsChange(() => {
+      committedDirty = true
+    }),
+  )
 
   // ---------------------------------------------------------------------
   //  Clear-board flow
@@ -460,77 +489,81 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------
   //  Keyboard shortcuts
   // ---------------------------------------------------------------------
-  attachEraserHold({
-    getActiveToolId: () => tool.current.id,
-    setTool,
-  })
+  registerCleanup(
+    attachEraserHold({
+      getActiveToolId: () => tool.current.id,
+      setTool,
+    }),
+  )
 
-  attachKeymap({
-    undo,
-    redo,
-    zoomReset: () => {
-      resetZoom(camera)
-      onCameraChange()
-    },
-    zoomIn: () => {
-      zoomAt(camera, target.width / 2, target.height / 2, 1.2)
-      onCameraChange()
-    },
-    zoomOut: () => {
-      zoomAt(camera, target.width / 2, target.height / 2, 1 / 1.2)
-      onCameraChange()
-    },
-    zoomToFit: () => {
-      if (fitToContent(camera, strokes, { width: target.width, height: target.height })) {
+  registerCleanup(
+    attachKeymap({
+      undo,
+      redo,
+      zoomReset: () => {
+        resetZoom(camera)
         onCameraChange()
-      }
-    },
-    clear: clearFlow.request,
-    toggleTheme: cycleMode,
-    toggleColor: () => {
-      if (getActiveTag() === 'color') dismissAllPopovers()
-      else openColorPicker(lastPointer)
-    },
-    toggleOptions: () => {
-      if (getActiveTag() === 'options') dismissAllPopovers()
-      else openOptionsMenu(lastPointer)
-    },
-    toggleHelp: help.toggle,
-    selectBrush: (index1Based) => {
-      const id = BRUSH_IDS[index1Based - 1]
-      if (id) setBrushId(id)
-    },
-    selectDrawingTool: () => setTool('pen'),
-    selectPenDefault: () => {
-      setTool('pen')
-      setBrushId('pen')
-    },
-    selectEraserSticky: () => setTool('eraser'),
-    selectLassoTool: () => setTool('lasso'),
-    deleteSelection: () => {
-      if (tool.current !== lassoTool) return false
-      return lassoTool.deleteSelection()
-    },
-    selectAll: () => {
-      setTool('lasso')
-      lassoTool.selectAll()
-      committedDirty = true
-    },
-    togglePanel,
-    cancel: () => {
-      let handled = false
-      if (clearFlow.cancel()) handled = true
-      if (dismissAllPopovers()) handled = true
-      // Esc in lasso mode falls back to the pen tool. The lasso's `cleanup`
-      // hook (called from `setTool`) clears any in-progress polygon and
-      // selection state, so switching is a clean reset.
-      if (tool.current === lassoTool) {
+      },
+      zoomIn: () => {
+        zoomAt(camera, target.width / 2, target.height / 2, 1.2)
+        onCameraChange()
+      },
+      zoomOut: () => {
+        zoomAt(camera, target.width / 2, target.height / 2, 1 / 1.2)
+        onCameraChange()
+      },
+      zoomToFit: () => {
+        if (fitToContent(camera, strokes, { width: target.width, height: target.height })) {
+          onCameraChange()
+        }
+      },
+      clear: clearFlow.request,
+      toggleTheme: cycleMode,
+      toggleColor: () => {
+        if (getActiveTag() === 'color') dismissAllPopovers()
+        else openColorPicker(lastPointer)
+      },
+      toggleOptions: () => {
+        if (getActiveTag() === 'options') dismissAllPopovers()
+        else openOptionsMenu(lastPointer)
+      },
+      toggleHelp: help.toggle,
+      selectBrush: (index1Based) => {
+        const id = BRUSH_IDS[index1Based - 1]
+        if (id) setBrushId(id)
+      },
+      selectDrawingTool: () => setTool('pen'),
+      selectPenDefault: () => {
         setTool('pen')
-        handled = true
-      }
-      return handled
-    },
-  })
+        setBrushId('pen')
+      },
+      selectEraserSticky: () => setTool('eraser'),
+      selectLassoTool: () => setTool('lasso'),
+      deleteSelection: () => {
+        if (tool.current !== lassoTool) return false
+        return lassoTool.deleteSelection()
+      },
+      selectAll: () => {
+        setTool('lasso')
+        lassoTool.selectAll()
+        committedDirty = true
+      },
+      togglePanel,
+      cancel: () => {
+        let handled = false
+        if (clearFlow.cancel()) handled = true
+        if (dismissAllPopovers()) handled = true
+        // Esc in lasso mode falls back to the pen tool. The lasso's `cleanup`
+        // hook (called from `setTool`) clears any in-progress polygon and
+        // selection state, so switching is a clean reset.
+        if (tool.current === lassoTool) {
+          setTool('pen')
+          handled = true
+        }
+        return handled
+      },
+    }),
+  )
 
   // ---------------------------------------------------------------------
   //  Render loop. Committed layer rebuilt on dirty (camera, commit, theme,
@@ -632,8 +665,22 @@ async function main(): Promise<void> {
   }
   requestAnimationFrame(frame)
 
-  // Cleanup on unload (HMR safety).
-  window.addEventListener('beforeunload', () => detachPointer())
+  // Cleanup on unload AND on HMR dispose. Run all registered teardowns +
+  // detach the pointer pipeline. Idempotent (cleanups array is drained).
+  registerCleanup(detachPointer)
+  const runAllCleanups = (): void => {
+    for (const fn of cleanups.splice(0)) {
+      try {
+        fn()
+      } catch (err) {
+        console.warn('whiteboard/web: teardown failed:', err)
+      }
+    }
+  }
+  window.addEventListener('beforeunload', runAllCleanups)
+  if (import.meta.hot) {
+    import.meta.hot.dispose(runAllCleanups)
+  }
 
   // Perftest mode.
   if (params.has('perftest')) {

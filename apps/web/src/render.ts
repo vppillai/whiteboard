@@ -31,6 +31,8 @@ export interface RenderTarget {
   width: number
   height: number
   dpr: number
+  /** Remove the window-resize listener. Used at HMR / page-unload teardown. */
+  cleanup(): void
 }
 
 export function setupCanvas(parent: HTMLElement): RenderTarget {
@@ -40,15 +42,6 @@ export function setupCanvas(parent: HTMLElement): RenderTarget {
   // Only committed and live live in the DOM. `strokes` is an offscreen
   // scratch — never appended.
   parent.append(committed.el, live.el)
-
-  const target: RenderTarget = {
-    committed,
-    strokes,
-    live,
-    width: 0,
-    height: 0,
-    dpr: window.devicePixelRatio || 1,
-  }
 
   const resize = () => {
     const rect = parent.getBoundingClientRect()
@@ -64,6 +57,16 @@ export function setupCanvas(parent: HTMLElement): RenderTarget {
       // Reset to identity; callers apply camera transform per draw pass.
       layer.ctx.setTransform(target.dpr, 0, 0, target.dpr, 0, 0)
     }
+  }
+
+  const target: RenderTarget = {
+    committed,
+    strokes,
+    live,
+    width: 0,
+    height: 0,
+    dpr: window.devicePixelRatio || 1,
+    cleanup: () => window.removeEventListener('resize', resize),
   }
 
   resize()
