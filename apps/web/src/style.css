@@ -527,3 +527,86 @@ body {
   color: var(--banner-bg);
   border-color: var(--banner-fg);
 }
+
+.whiteboard-swatch-add {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 200px;
+}
+.whiteboard-swatch-add-title {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted, rgba(0, 0, 0, 0.5));
+}
+.whiteboard-swatch-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.whiteboard-swatch-add-hex {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.15));
+  background: var(--surface-2, transparent);
+  color: var(--text, inherit);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 13px;
+}
+.whiteboard-swatch-add-os-picker {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  cursor: pointer;
+  background: var(--surface-2, rgba(0, 0, 0, 0.05));
+  font-size: 16px;
+  position: relative;
+}
+.whiteboard-swatch-add-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.whiteboard-swatch-add-preview {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.15));
+}
+.whiteboard-swatch-add-preview.invalid {
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(0, 0, 0, 0.05),
+    rgba(0, 0, 0, 0.05) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+}
+.whiteboard-swatch-add-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.whiteboard-swatch-add-cancel,
+.whiteboard-swatch-add-confirm {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.15));
+  background: var(--surface-2, transparent);
+  cursor: pointer;
+  font-size: 12px;
+}
+.whiteboard-swatch-add-confirm {
+  background: var(--accent, #3b82f6);
+  color: white;
+  border-color: transparent;
+}
+.whiteboard-swatch-add-confirm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
