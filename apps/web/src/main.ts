@@ -43,6 +43,7 @@ import { exitDistractionFree, isDistractionFree, toggleDistractionFree } from '.
 import { attachEraserHold } from './eraserhold'
 import { exportBoard } from './export'
 import { openExportPopover } from './exportpopover'
+import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid } from './grid'
 import { createHelpOverlay } from './helpoverlay'
 import { attachKeymap } from './keymap'
@@ -152,6 +153,11 @@ async function main(): Promise<void> {
   const help = createHelpOverlay()
   document.body.appendChild(help.el)
 
+  // First-run discovery hint (M2). Idempotent + respects localStorage flag —
+  // no-op for users who've seen it. Dismissed at the first create-op
+  // emission point in the pen tool's onStrokeCommit callback below.
+  mountFirstRunHint(document.body)
+
   // ---------------------------------------------------------------------
   //  App state — strokes + op-based undo / redo (ADR 0006)
   // ---------------------------------------------------------------------
@@ -237,6 +243,9 @@ async function main(): Promise<void> {
         // Don't clear live here — the next RAF redraws committed (with this
         // stroke baked in) and clears live, avoiding a flicker.
         committedDirty = true
+        // First-run hint fades on first stroke commit. Idempotent — no-ops
+        // after the first call and after the localStorage flag is set.
+        dismissFirstRunHint()
         void saveStroke(stroke).catch((err) => {
           console.warn('whiteboard/web: failed to persist stroke:', err)
         })
