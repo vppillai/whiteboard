@@ -16,7 +16,7 @@
  * line renderer; deferred to a future ADR.)
  */
 
-import type { Sample, Stroke } from '@whiteboard/shared'
+import type { BrushConfig, Sample, Stroke } from '@whiteboard/shared'
 import { getStroke } from 'perfect-freehand'
 
 /** Multiplier range applied to brush opacity. min = light pressure, max = heavy.
@@ -193,4 +193,62 @@ function outlineToPath2D(outline: number[][]): Path2D {
 
   path.closePath()
   return path
+}
+
+/**
+ * Quadratic bezier from (0,0) through mid to (1,1) in normalized 0–1 coords.
+ * `mid` is a through-point on the curve (not a control point). The curve
+ * always passes through (mx, my) when x === mx.
+ *
+ * Implementation: convert through-point mid to a bezier control point Q using
+ * the t=0.5 through-point formula: Q = 2·mid − 0.5·(P0+P2) = (2mx−0.5, 2my−0.5).
+ * Then solve x(t) = 2(1−t)t·Qx + t² for t via the quadratic formula, and
+ * evaluate y(t) = 2(1−t)t·Qy + t².
+ *
+ * Quadratic to solve: (1−2Qx)t² + 2Qx·t − x = 0
+ */
+export function bezierY(x: number, mid: readonly [number, number]): number {
+  const [mx, my] = mid
+  // Control point derived from through-point at t=0.5
+  const qx = 2 * mx - 0.5
+  const qy = 2 * my - 0.5
+  const a = 1 - 2 * qx
+  const b = 2 * qx
+  const c = -x
+  let t: number
+  if (Math.abs(a) < 1e-9) {
+    // Degenerate: linear in t → t = -c / b
+    t = b === 0 ? 0 : -c / b
+  } else {
+    const disc = b * b - 4 * a * c
+    const sqrtDisc = Math.sqrt(Math.max(0, disc))
+    // Two roots; pick the one in [0, 1] closest to x (t ≈ x for well-behaved
+    // curves, so this selects the forward root and avoids the extraneous one
+    // at the opposite boundary).
+    const t1 = (-b + sqrtDisc) / (2 * a)
+    const t2 = (-b - sqrtDisc) / (2 * a)
+    const inRange1 = t1 >= -1e-9 && t1 <= 1 + 1e-9
+    const inRange2 = t2 >= -1e-9 && t2 <= 1 + 1e-9
+    if (inRange1 && inRange2) {
+      // Both roots in range: pick the one closest to x (the "forward" root).
+      t = Math.abs(t1 - x) <= Math.abs(t2 - x) ? t1 : t2
+    } else if (inRange1) {
+      t = t1
+    } else {
+      t = t2
+    }
+  }
+  t = t < 0 ? 0 : t > 1 ? 1 : t
+  const y = 2 * (1 - t) * t * qy + t * t
+  return y < 0 ? 0 : y > 1 ? 1 : y
+}
+
+/**
+ * Map raw pen pressure to effective pressure for stroke rendering. When a
+ * brush has a `pressureCurve` override, use the bezier; otherwise fall back
+ * to the `pressureGamma` power curve.
+ */
+export function applyPressure(input: number, brush: BrushConfig): number {
+  if (brush.pressureCurve) return bezierY(input, brush.pressureCurve.mid)
+  return input ** brush.pressureGamma
 }

@@ -24,7 +24,7 @@ import { boardToScreen } from '../camera'
 import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
 import { applyCamera, clearLayer, drawStrokePath } from '../render'
 import { getBrushId, getColor, setBrushId, setColor } from '../settings'
-import { effectiveOpacity, getStrokePath } from '../stroke'
+import { applyPressure, effectiveOpacity, getStrokePath } from '../stroke'
 import type { Tool, ToolContext } from './types'
 
 // Finder halo: constant screen-px ring drawn around the hover preview when
@@ -86,7 +86,7 @@ export function createPenTool(opts: PenToolOptions): Tool {
     return {
       x,
       y,
-      p: applyGamma(e.pressure, brush.pressureGamma),
+      p: applyPressure(e.pressure, brush),
       tx: e.tiltX,
       ty: e.tiltY,
       t: e.timeStamp,
