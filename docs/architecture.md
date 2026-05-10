@@ -78,9 +78,18 @@ Key submodules:
 | `helpoverlay.ts`| M1.4 ✅  | `?` help overlay (shortcuts + repo link).                |
 | `pill.ts`       | M1.4 ✅  | Bottom-left "? for help" pill.                           |
 | `toolpill.ts`   | M1 ✅    | Bottom-right active-tool indicator + tap-to-cycle. Pen-friendly one-step activation alongside `S` / `B` / `P` / right-click TOOL menu. |
-| `ui/`           | M2 ⬜    | Floating toolbar, full settings side panel.              |
+| `firstrun.ts`   | M2 ✅    | First-run hint mount + dismissal; localStorage flag.    |
+| `distractionfree.ts` | M2 ✅ | F-toggle distraction-free mode; hides app chrome via body class. |
+| `tools/eyedropper.ts` | M2 ✅ | Color eyedropper Tool. ADR 0007 conformance; samples strokes offscreen layer; reverts to previous tool on commit. |
+| `settings/curve-editor.ts` | M2 ✅ | SVG curve graph + draggable midpoint + test pad + thumbnail renderer. |
+| `exportpopover.ts`| M2 ✅    | Cmd/Ctrl+E export popover (PNG / SVG / PDF pills).      |
+| `export/bounds.ts`| M2 ✅    | Compute board bounds + 32 px margin from non-deleted strokes' AABBs. |
+| `export/png.ts`   | M2 ✅    | PNG export — detached canvas + `drawStrokeOntoLayer` + `toBlob`. |
+| `export/svg.ts`   | M2 ✅    | Custom SVG serializer; mask-based `erasedStamps` subtraction. |
+| `export/pdf.ts`   | M2 ✅    | PDF export — lazy `jspdf`, PNG embed.                   |
+| `export/index.ts` | M2 ✅    | Export dispatcher + filename + download trigger.         |
 | `sync/`         | M3 ⬜    | Y.Doc binding; WebSocket transport; presence.            |
-| `export/`       | M2 ⬜    | PNG / SVG / PDF serialization.                           |
+| `ui/`           | 🟡 Deferred | Floating toolbar dropped from v1 per ADR 0011 — right-click + keyboard + side panel cover discovery. |
 | `ai/`           | v2 ⬜    | Shape recognition, HTR, math — `transformers.js`.        |
 
 ### 2.2 Server (`apps/server`)
@@ -230,9 +239,15 @@ This section reflects what is *actually in the code right now*. It is updated at
 | **Options menu** (popover)        | ✅ Complete    | M1.5; grid type + spacing.                               |
 | **Configurable grid**             | ✅ Complete    | M1.5; dots / lines / ruled / none.                       |
 | **Lasso (select / move / delete)** | ✅ Complete    | M1; `S` activates, polygon-or-tap select, halo + dashed bbox, drag-to-move emits `move` op, `Delete`/`Backspace` deletes, `⌘/Ctrl+A` select all. |
-| Floating toolbar / palette        | ❌ Not started | M2.                                                      |
-| Pressure curve UI                 | ❌ Not started | M2.                                                      |
-| Export PNG / SVG / PDF            | ❌ Not started | M2.                                                      |
+| **Floating toolbar / palette**    | 🟡 Deferred    | M2 — dropped per [ADR 0011](decisions/0011-toolbar-deferred.md); right-click + keyboard + side panel cover discovery. |
+| **Pressure curve UI**             | ✅ Complete    | M2; inline collapsed thumbnail per Brush preset card; bezier-midpoint (through-point) editor + test pad. |
+| **Predicted-events toggle**       | ✅ Complete    | M2; settings panel Advanced section; URL `?predict=1` continues to override. |
+| **Color eyedropper tool**         | ✅ Complete    | M2; `I` key, samples strokes offscreen layer, reverts to prev tool. |
+| **First-run hint**                | ✅ Complete    | M2; localStorage `whiteboard:hint-shown`; fades on first stroke commit. |
+| **Distraction-free mode (`F`)**   | ✅ Complete    | M2; `body.distraction-free` hides chrome; Esc/F exits. |
+| **Palette cycle (`Shift+[/]`)**   | ✅ Complete    | M2; cycles 10 curated colors with wraparound. |
+| **Export PNG / SVG / PDF**        | ✅ Complete    | M2; right-click EXPORT row + `Cmd/Ctrl+E` popover; mask-based SVG erasure; lazy `jspdf`. |
+| **Bounded undo / redo + listener cleanup** | ✅ Complete    | M2 (Option C); undoStack capped at 500 with FIFO eviction; modules return cleanup functions; HMR dispose + beforeunload run all teardowns. |
 | Live collaboration                | ❌ Not started | M3.                                                      |
 | Room URLs / owner token           | ❌ Not started | M3.                                                      |
 | Server-side SQLite snapshots      | ❌ Not started | M3.                                                      |
