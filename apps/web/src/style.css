@@ -1036,3 +1036,14 @@ body.distraction-free .whiteboard-popover {
   flex-shrink: 0;
   cursor: pointer;
 }
+
+/* Export popover content layout (M2 Cmd/Ctrl+E). */
+.whiteboard-export-popover {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+}
+.whiteboard-export-popover .whiteboard-export-pill {
+  min-width: 56px;
+  text-align: center;
+}
