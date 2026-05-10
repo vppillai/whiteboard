@@ -27,6 +27,22 @@ const ERASER_SIZES: readonly EraserSize[] = ['small', 'medium', 'large']
 const isValidEraserSize = (s: string): s is EraserSize =>
   (ERASER_SIZES as readonly string[]).includes(s)
 
+type PresetField = keyof Omit<BrushConfig, 'color'>
+const VALID_PRESET_FIELDS: readonly PresetField[] = [
+  'size',
+  'opacity',
+  'thinning',
+  'smoothing',
+  'streamline',
+  'taperStart',
+  'taperEnd',
+  'capStart',
+  'capEnd',
+  'pressureGamma',
+]
+const isValidPresetField = (k: string): k is PresetField =>
+  (VALID_PRESET_FIELDS as readonly string[]).includes(k)
+
 export interface GridConfig {
   type: GridType
   /** Board-pixel spacing between grid units. */
@@ -261,6 +277,40 @@ export function setEraserConfig(config: { mode: EraserMode; size?: EraserSize })
     persist()
     emit()
   }
+}
+
+export function setPresetField<K extends PresetField>(
+  brushId: BrushId,
+  field: K,
+  value: BrushConfig[K],
+): void {
+  if (!isValidPresetField(field as string)) return
+  const cur = state.presets[brushId] ?? {}
+  ;(cur as Record<string, unknown>)[field as string] = value
+  state.presets[brushId] = cur
+  persist()
+  emit()
+}
+
+export function clearPreset(brushId: BrushId): void {
+  if (state.presets[brushId] === undefined) return
+  delete state.presets[brushId]
+  persist()
+  emit()
+}
+
+export function resetAll(): void {
+  state.presets = {}
+  state.customSwatches = []
+  state.recentColors = []
+  state.color = DEFAULTS.color
+  state.brush = DEFAULTS.brush
+  state.eraserSize = DEFAULTS.eraserSize
+  state.eraserMode = DEFAULTS.eraserMode
+  state.grid = { ...DEFAULTS.grid }
+  // theme intentionally NOT reset — see spec § 9
+  persist()
+  emit()
 }
 
 export function addCustomSwatch(hex: string): void {

@@ -8,6 +8,7 @@ import {
   removeCustomSwatch,
 } from './settings'
 import { getEffectiveBrushConfig, migrate } from './settings'
+import { clearPreset, resetAll, setBrushId, setColor, setPresetField } from './settings'
 
 beforeEach(__resetForTesting)
 
@@ -189,5 +190,45 @@ describe('settings: recentColors', () => {
   test('ink token is not pushed', () => {
     pushRecentColor('ink')
     expect(getSettings().recentColors.includes('ink')).toBe(false)
+  })
+})
+
+describe('settings: setPresetField / clearPreset', () => {
+  test('setPresetField writes a sparse override', () => {
+    setPresetField('pen', 'size', 5)
+    expect(getEffectiveBrushConfig('pen', 'ink').size).toBe(5)
+    expect(getEffectiveBrushConfig('pen', 'ink').opacity).toBe(0.94) // unchanged
+  })
+
+  test('clearPreset removes the override entry entirely', () => {
+    setPresetField('pen', 'size', 5)
+    setPresetField('pen', 'opacity', 0.5)
+    clearPreset('pen')
+    const cfg = getEffectiveBrushConfig('pen', 'ink')
+    expect(cfg.size).toBe(3.5) // SPEC default restored
+    expect(cfg.opacity).toBe(0.94)
+  })
+
+  test('clearPreset on a brush with no override is a no-op', () => {
+    expect(() => clearPreset('marker')).not.toThrow()
+  })
+})
+
+describe('settings: resetAll', () => {
+  test('wipes presets, customSwatches, recentColors, scalar settings', () => {
+    setPresetField('pen', 'size', 5)
+    addCustomSwatch('#fbcfe8')
+    pushRecentColor('#111111')
+    setColor('#22c55e')
+    setBrushId('marker')
+    resetAll()
+    const s = getSettings()
+    expect(s.presets).toEqual({})
+    expect(s.customSwatches).toEqual([])
+    expect(s.recentColors).toEqual([])
+    expect(s.color).toBe('ink')
+    expect(s.brush).toBe('pen')
+    expect(s.eraserSize).toBe('medium')
+    expect(s.grid).toEqual({ type: 'dots', spacing: 24 })
   })
 })
