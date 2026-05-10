@@ -12,7 +12,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | M0 | Drawing core: latency, pan/zoom, theme, local persistence, undo/redo     | ✅ *(closed 2026-05-09; tagged `m0-drawing-core`)* |
 | M1.5 | Popover primitive · color picker · options menu · configurable grid    | ⬜     |
 | M1.4 | Refactor pass: tool abstraction, op-based undo, soft-delete, decompose main.ts | ✅ *(closed 2026-05-09; tagged `m1.4-refactor`)* |
-| M1 | Tool surface refactor + eraser (pixel-mask wipe + object) + brush presets + lasso | 🟦 *(code complete; awaiting feel-test + tag)* |
+| M1 | Tool surface refactor + eraser (pixel-mask wipe + object) + brush presets + lasso | ✅ *(closed 2026-05-09; tagged `m1-eraser-lasso`)* |
 | M1.7 | Settings side panel + sync-ready schema (brush presets, fonts, swatches) | ⬜  |
 | M2 | Toolbar UI, keyboard shortcuts, export                                   | ⬜     |
 | M3 | Server, sync, room URLs                                                  | ⬜     |
@@ -111,7 +111,13 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 - ADRs 0005 and 0006 written; architecture as-built table updated; CHANGELOG entry.
 - Tagged commit `m1.4-refactor`.
 
-### M1 — Tool surface + eraser + brush presets + lasso 🟦
+### M1 — Tool surface + eraser + brush presets + lasso ✅
+
+> **Closed 2026-05-09.** Tagged `m1-eraser-lasso`. Perf gates verified on dev hardware:
+> `?perftest=scale&n=500` mean 3.65 ms / p95 5.7 ms / max 7 ms (44% of 16 ms budget);
+> `?perftest=erase&n=500` mean 3.98 ms / p95 4.4 ms / max 5.1 ms (32% of budget).
+> Both well under the WebGL trigger.
+
 
 **Originally a sub-milestone called M1.6.** The tool abstraction from M1.4 (ADR 0005) was deliberately thin; with pen and eraser shipped, the pattern's gaps were visible (~85 LOC of cursor rendering in `main.ts`, ~60 LOC of contextual menu logic in `toolmenu.ts`). M1.6 was scoped as "code-complete; feel-test pending" but as M1's surface kept shifting (pixel-mask eraser, hold-E spring-loading, P key, clear-flow focus), the M1.6 boundary stopped being meaningful — it's all M1. The tag concept is dropped; the work is part of M1's history. The ADR 0007 extension survives as the live tool interface.
 
