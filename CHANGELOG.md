@@ -196,3 +196,39 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 - Recent-colors row was listed in CHANGELOG M1.5 but never actually
   implemented. M1.7 ships it for the first time and folds it into the
   versioned settings schema.
+
+### Fixed (M1.7.1 — hardening pass)
+
+Three minor concerns flagged by the M1.7 holistic code review, plus a
+favicon polish item:
+
+- **`validatePresets` now deep-validates preset field types.** The
+  earlier shallow cast accepted any object as a `Partial<BrushConfig>`,
+  so a tampered `localStorage` could surface `NaN` at render time
+  (e.g. `{ size: 'banana' }`). New `validateOnePreset` filters fields
+  to known numeric (`size` / `thinning` / `smoothing` / `streamline` /
+  `taperStart` / `taperEnd` / `pressureGamma` / `opacity`) and boolean
+  (`capStart` / `capEnd`) keys, with per-field type checks. Preset
+  entries with no surviving fields are dropped entirely.
+- **`migrate(null)` returns a clean `SettingsV1`.** Previously the
+  null-input branch returned `cloneSettings(DEFAULTS)`, which is a
+  `State` (carrying the session-only `eraserMode`) — a type-contract
+  violation that would surface if a future sync layer treated
+  `migrate()`'s output as authoritative for persistence. New
+  `defaultV1()` helper returns a fresh `SettingsV1` literal; `DEFAULTS`
+  layers `eraserMode: 'wipe'` on top for the in-memory `State`.
+- **`persist()` now debounces writes (100 ms).** Slider drags fired
+  one `input` event per drag step (~60 Hz); each step did
+  `JSON.stringify(state) + localStorage.setItem`. On slow devices,
+  that's ~60 ms of main-thread work per second of drag. The new
+  debounce coalesces a flurry of writes into a single trailing-edge
+  write. Trailing edits flush via `pagehide` so a slider tweak right
+  before tab close isn't lost. `__resetForTesting` cancels any
+  pending timer to keep tests deterministic.
+- **Inline SVG favicon** at `apps/web/public/favicon.svg` referenced
+  from `apps/web/index.html` silences the persistent
+  `/favicon.ico 404` in dev / production logs. The icon is a small
+  scribble path that scales cleanly across favicon sizes.
+
+5 new unit tests cover the validatePresets / migrate(null) paths.
+26 tests pass in total (was 21 at M1.7 close).

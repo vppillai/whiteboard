@@ -131,6 +131,84 @@ describe('settings: migrate edge cases', () => {
   })
 })
 
+describe('settings: M1.7.1 hardening', () => {
+  test('migrate(null) does not include session-only eraserMode', () => {
+    const v1 = migrate(null)
+    expect('eraserMode' in v1).toBe(false)
+  })
+
+  test('validateOnePreset drops bad-typed numeric fields', () => {
+    const v1 = migrate({
+      schemaVersion: 1,
+      color: 'ink',
+      brush: 'pen',
+      eraserSize: 'medium',
+      grid: { type: 'dots', spacing: 24 },
+      presets: {
+        pen: { size: 'banana', opacity: 0.5, pressureGamma: Number.NaN },
+      },
+      customSwatches: [],
+      recentColors: [],
+      fonts: [],
+    })
+    // size dropped (not a number); pressureGamma dropped (NaN); opacity kept.
+    expect(v1.presets.pen).toEqual({ opacity: 0.5 })
+  })
+
+  test('validateOnePreset drops bad-typed boolean fields', () => {
+    const v1 = migrate({
+      schemaVersion: 1,
+      color: 'ink',
+      brush: 'pen',
+      eraserSize: 'medium',
+      grid: { type: 'dots', spacing: 24 },
+      presets: {
+        pen: { capStart: 'yes', capEnd: false, size: 5 },
+      },
+      customSwatches: [],
+      recentColors: [],
+      fonts: [],
+    })
+    expect(v1.presets.pen).toEqual({ capEnd: false, size: 5 })
+  })
+
+  test('validatePresets drops a preset that ends up with no valid fields', () => {
+    const v1 = migrate({
+      schemaVersion: 1,
+      color: 'ink',
+      brush: 'pen',
+      eraserSize: 'medium',
+      grid: { type: 'dots', spacing: 24 },
+      presets: {
+        pen: { junk: 1, size: 'bad' },
+      },
+      customSwatches: [],
+      recentColors: [],
+      fonts: [],
+    })
+    // No valid fields → preset entry omitted entirely.
+    expect(v1.presets).toEqual({})
+  })
+
+  test('validatePresets drops invalid brush ids', () => {
+    const v1 = migrate({
+      schemaVersion: 1,
+      color: 'ink',
+      brush: 'pen',
+      eraserSize: 'medium',
+      grid: { type: 'dots', spacing: 24 },
+      presets: {
+        notabrush: { size: 5 },
+        pen: { size: 4 },
+      },
+      customSwatches: [],
+      recentColors: [],
+      fonts: [],
+    })
+    expect(v1.presets).toEqual({ pen: { size: 4 } })
+  })
+})
+
 describe('settings: getEffectiveBrushConfig', () => {
   test('empty override returns SPEC default with color', () => {
     const cfg = getEffectiveBrushConfig('pen', '#ef4444')

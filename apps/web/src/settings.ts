@@ -73,18 +73,25 @@ const VALID_GRID_TYPES: readonly GridType[] = ['dots', 'lines', 'ruled', 'none']
 const VALID_SPACINGS: readonly number[] = [16, 24, 32, 48]
 const RECENT_COLORS_CAP = 6
 
-const DEFAULTS: State = {
-  schemaVersion: 1,
-  color: 'ink',
-  brush: 'pen',
-  eraserSize: 'medium',
-  eraserMode: 'wipe',
-  grid: { type: 'dots', spacing: 24 },
-  presets: {},
-  customSwatches: [],
-  recentColors: [],
-  fonts: [],
+/** Persisted V1 defaults. State extends with the session-only `eraserMode`
+ *  via `DEFAULTS`. Keeping these split lets `migrate(null)` return a clean
+ *  SettingsV1 without leaking eraserMode into the persisted shape. */
+function defaultV1(): SettingsV1 {
+  return {
+    schemaVersion: 1,
+    color: 'ink',
+    brush: 'pen',
+    eraserSize: 'medium',
+    grid: { type: 'dots', spacing: 24 },
+    presets: {},
+    customSwatches: [],
+    recentColors: [],
+    fonts: [],
+  }
 }
+
+const DEFAULTS: State = { ...defaultV1(), eraserMode: 'wipe' }
+const PERSIST_DEBOUNCE_MS = 100
 
 function isValidGridType(s: unknown): s is GridType {
   return typeof s === 'string' && (VALID_GRID_TYPES as readonly string[]).includes(s)
@@ -109,7 +116,7 @@ function isV1(parsed: unknown): parsed is SettingsV1 {
 /** Migrate any input to a well-formed SettingsV1. Mechanical fill — never
  *  strips or transforms v0 data. Idempotent on v1 input. */
 export function migrate(input: unknown): SettingsV1 {
-  if (input === null || typeof input !== 'object') return cloneSettings(DEFAULTS)
+  if (input === null || typeof input !== 'object') return defaultV1()
   const v = input as Record<string, unknown>
 
   const grid = (v.grid && typeof v.grid === 'object' ? v.grid : {}) as Record<string, unknown>
@@ -141,12 +148,43 @@ export function migrate(input: unknown): SettingsV1 {
   }
 }
 
+/** Numeric BrushConfig fields a preset override may carry. Mirror of the
+ *  numeric keys in `BrushConfig` (`color` excluded; `capStart`/`capEnd` are
+ *  booleans, validated separately). */
+const NUMERIC_PRESET_FIELDS = [
+  'size',
+  'thinning',
+  'smoothing',
+  'streamline',
+  'taperStart',
+  'taperEnd',
+  'pressureGamma',
+  'opacity',
+] as const
+
 function validatePresets(raw: Record<string, unknown>): SettingsV1['presets'] {
   const out: SettingsV1['presets'] = {}
   for (const [key, val] of Object.entries(raw)) {
     if (!isValidBrushId(key)) continue
     if (!val || typeof val !== 'object') continue
-    out[key] = val as Partial<Omit<BrushConfig, 'color'>>
+    const validated = validateOnePreset(val as Record<string, unknown>)
+    if (Object.keys(validated).length > 0) out[key] = validated
+  }
+  return out
+}
+
+/** Field-level validation for a single preset override. Drops unknown keys
+ *  and type-mismatched values rather than letting a tampered localStorage
+ *  surface NaN downstream (e.g. `size: "banana"`). */
+function validateOnePreset(raw: Record<string, unknown>): Partial<Omit<BrushConfig, 'color'>> {
+  const out: Partial<Omit<BrushConfig, 'color'>> = {}
+  for (const k of NUMERIC_PRESET_FIELDS) {
+    const v = raw[k]
+    if (typeof v === 'number' && Number.isFinite(v)) out[k] = v
+  }
+  for (const k of ['capStart', 'capEnd'] as const) {
+    const v = raw[k]
+    if (typeof v === 'boolean') out[k] = v
   }
   return out
 }
@@ -194,10 +232,41 @@ function persistSettings(s: SettingsV1): void {
   }
 }
 
-function persist(): void {
-  // strip session-only field
+/** Synchronous write — strips the session-only `eraserMode` and shoves the
+ *  rest into localStorage. Called from `persist` after the debounce fires
+ *  AND from the `beforeunload` flush so a slider drag right before tab
+ *  close doesn't lose its trailing edit. */
+function persistNow(): void {
   const { eraserMode: _ignore, ...persisted } = state
   persistSettings(persisted)
+}
+
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Debounced persist. Slider drags emit one `input` event per drag step
+ *  (~60 Hz); without debounce, each step triggers JSON.stringify + a
+ *  synchronous localStorage.setItem — measurably noticeable on slow
+ *  devices. The in-memory state is updated synchronously by setters; only
+ *  the disk write lags by up to PERSIST_DEBOUNCE_MS. */
+function persist(): void {
+  if (persistTimer !== null) clearTimeout(persistTimer)
+  persistTimer = setTimeout(() => {
+    persistTimer = null
+    persistNow()
+  }, PERSIST_DEBOUNCE_MS)
+}
+
+// Flush any pending debounced write on tab close so a trailing slider edit
+// doesn't get lost. `pagehide` is more reliable than `beforeunload` on
+// mobile / SPA navigation (the latter doesn't always fire).
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    if (persistTimer !== null) {
+      clearTimeout(persistTimer)
+      persistTimer = null
+      persistNow()
+    }
+  })
 }
 
 function emit(): void {
@@ -349,8 +418,14 @@ export function getRecentColors(): readonly string[] {
   return state.recentColors
 }
 
-/** Test-only: resets in-memory state and clears the persisted key. */
+/** Test-only: resets in-memory state and clears the persisted key. Also
+ *  cancels any pending debounced persist so a stale write from a previous
+ *  test doesn't fire after the reset and clobber the cleared key. */
 export function __resetForTesting(): void {
+  if (persistTimer !== null) {
+    clearTimeout(persistTimer)
+    persistTimer = null
+  }
   Object.assign(state, cloneSettings(DEFAULTS))
   try {
     localStorage.removeItem(STORAGE_KEY)
