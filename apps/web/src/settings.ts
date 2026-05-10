@@ -400,7 +400,12 @@ export function clearPreset(brushId: BrushId): void {
 export function clearPresetCurve(brushId: BrushId): void {
   const cur = state.presets[brushId]
   if (!cur || cur.pressureCurve === undefined) return
-  cur.pressureCurve = undefined
+  // Use bracket-notation delete (cold path; biome's noDelete rule allows
+  // computed-key deletes) so `Object.keys(cur).length === 0` below can detect
+  // that no fields remain. Assigning `undefined` keeps the key in iteration
+  // and would prevent the GC of the preset entry.
+  const field: keyof typeof cur = 'pressureCurve'
+  delete cur[field]
   if (Object.keys(cur).length === 0) {
     delete state.presets[brushId]
   }

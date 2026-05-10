@@ -378,6 +378,11 @@ describe('settings: pressureCurve preset (M2)', () => {
     __resetForTesting()
     setPresetField('pen', 'pressureCurve', { mid: [0.7, 0.3] })
     clearPresetCurve('pen')
+    // Directly assert the preset entry was removed (spec reviewer
+    // strengthening — the previous indirect check via setPresetField + read
+    // could pass even with a broken GC).
+    expect(getSettings().presets.pen).toBeUndefined()
+    // Re-add a different field and confirm subsequent operations work.
     setPresetField('pen', 'size', 7)
     const eff = getEffectiveBrushConfig('pen', '#000000')
     expect(eff.pressureCurve).toBeUndefined()
