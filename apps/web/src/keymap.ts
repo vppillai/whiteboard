@@ -59,6 +59,11 @@ export interface KeyHandlers {
 
   /** Toggle distraction-free mode (hides app chrome). Bound to `F`. M2. */
   toggleDistractionFree: () => void
+
+  /** Cycle to the previous color in the curated palette. Bound to Shift+[. M2. */
+  cyclePaletteBackward: () => void
+  /** Cycle to the next color in the curated palette. Bound to Shift+]. M2. */
+  cyclePaletteForward: () => void
 }
 
 export function attachKeymap(handlers: KeyHandlers): () => void {
@@ -168,6 +173,17 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       // Shift+E: sticky eraser (the counterpart to plain E's spring-load).
       if (k === 'e') {
         handlers.selectEraserSticky()
+        return
+      }
+      // Shift+[ / Shift+] — cycle curated palette. M2.
+      // Note: `e.key` is `{` / `}` on most layouts when Shift is held with
+      // `[` / `]`. Match either the literal bracket or the shifted form.
+      if (e.key === '{' || (shift && k === '[')) {
+        handlers.cyclePaletteBackward()
+        return
+      }
+      if (e.key === '}' || (shift && k === ']')) {
+        handlers.cyclePaletteForward()
         return
       }
     }

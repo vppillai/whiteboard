@@ -38,7 +38,7 @@ import type { BrushConfig, Sample, Stroke } from '@whiteboard/shared'
 import { BRUSH_IDS, BRUSH_PRESETS } from './brushes'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
 import { createClearFlow } from './clearflow'
-import { openColorPicker } from './colorpicker'
+import { CURATED_COLORS, cyclePaletteIndex, openColorPicker } from './colorpicker'
 import { exitDistractionFree, isDistractionFree, toggleDistractionFree } from './distractionfree'
 import { attachEraserHold } from './eraserhold'
 import { drawGrid } from './grid'
@@ -61,6 +61,7 @@ import {
   getSettings,
   onChange as onSettingsChange,
   setBrushId,
+  setColor,
 } from './settings'
 import { createPanelContent } from './settings/panel-content'
 import { dismissSidePanel, isSidePanelOpen, showSidePanel } from './sidepanel'
@@ -576,6 +577,14 @@ async function main(): Promise<void> {
           dismissPopover: () => dismissAllPopovers(),
           dismissSidePanel: () => dismissSidePanel(),
         }),
+      cyclePaletteBackward: () => {
+        const next = CURATED_COLORS[cyclePaletteIndex(getColor(), -1)]
+        if (next) setColor(next)
+      },
+      cyclePaletteForward: () => {
+        const next = CURATED_COLORS[cyclePaletteIndex(getColor(), 1)]
+        if (next) setColor(next)
+      },
     }),
   )
 

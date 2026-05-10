@@ -58,18 +58,9 @@ interface SampleSource {
   timeStamp: number
 }
 
-const PALETTE: readonly string[] = [
-  'ink',
-  '#ef4444',
-  '#f97316',
-  '#eab308',
-  '#22c55e',
-  '#06b6d4',
-  '#3b82f6',
-  '#a855f7',
-  '#ec4899',
-  '#6b7280',
-]
+// Curated palette imported from colorpicker.ts to keep the right-click COLOR
+// section and the C-key popover synchronized (one list = one source of truth).
+import { CURATED_COLORS as PALETTE } from '../colorpicker'
 
 export function createPenTool(opts: PenToolOptions): Tool {
   let active: Stroke | null = null
