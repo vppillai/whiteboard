@@ -13,7 +13,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | M1.4 | Refactor pass: tool abstraction, op-based undo, soft-delete, decompose main.ts | ✅ *(closed 2026-05-09; tagged `m1.4-refactor`)* |
 | M1 | Tool surface refactor + eraser (pixel-mask wipe + object) + brush presets + lasso | ✅ *(closed 2026-05-09; tagged `m1-eraser-lasso`)* |
 | M1.7 | Settings side panel + sync-ready schema (brush presets, fonts, swatches) | ✅ *(closed 2026-05-09; tagged `m1.7-settings-panel`)* |
-| M2 | Toolbar UI, keyboard shortcuts, export                                   | ⬜     |
+| M2 | Export, settings polish, eyedropper, distraction-free                    | ✅ *(closed 2026-05-10; tag pending feel-test)* |
 | M3 | Server, sync, room URLs                                                  | ⬜     |
 | M4 | Production deployment polish                                             | ⬜     |
 | M4.5 | PWA install + offline (manifest, service worker)                       | ⬜     |
@@ -196,23 +196,30 @@ The toolbar UI is **explicitly held back to M2** so this milestone stays tight. 
 
 **Future sync (post-M1.7, post-v1):** when a backend lands, the settings store gets a "synced" boolean per record and conflict resolution (last-write-wins or per-field merge). That work is *not* in M1.7's scope — just the schema design that won't need to break.
 
-### M2 — Toolbar UI, settings, export ⬜
+### M2 — Export, settings polish, eyedropper, distraction-free ✅
 
-**Scope (revised).** Floating toolbar, palette, brush picker, settings panel (pressure curve, theme override, predicted-events toggle for screen-tablet users), PNG / SVG / PDF export. Local persistence already shipped at M0; image import decision happens at the start of this milestone.
+> **Closed 2026-05-10.** Tag `m2-export-polish` pending Wacom Intuos feel-test signoff. Toolbar UI dropped per [ADR 0011](decisions/0011-toolbar-deferred.md).
 
-The settings panel is the natural home for the screen-tablet prediction toggle (see SPEC § 10 backlog) and for any per-device pressure presets.
+**Scope (post-brainstorm; see [spec](superpowers/specs/2026-05-09-m2-export-polish-design.md)).** Color eyedropper tool, first-run hint, `Shift+[/]` palette cycle, `F` distraction-free, pressure curve UI per brush (inline collapsed thumbnail + bezier-midpoint editor + test pad), predicted-events toggle in settings, PNG/SVG/PDF export via right-click EXPORT row + `Cmd/Ctrl+E` popover.
+
+The original SPEC § 4.2 toolbar commitment was dropped during brainstorm on tenet grounds (less chrome = less cognitive load); existing surfaces (right-click menu, keyboard shortcuts, settings panel) cover the discovery and one-click paths a toolbar would have served. The image-paste workflow was deferred to a future M5.1 milestone (BoardObject discriminated union is its own architectural surface).
+
+Mid-milestone, a perceived drawing-latency drift triggered a defensive **Option C** hardening pass on `main`: bounded undo/redo at 500 entries (FIFO eviction), refactored `metrics`/`pan`/`render`/`keymap`/`eraserhold`/`settings.onChange` to return cleanup functions, wired `window.beforeunload` + `import.meta.hot.dispose` teardown chain. Perftest=1 numbers came in within the documented range (`mean 8.11 / p95 15.4 ms`) — no JS-side regression — but the cleanup discipline lands as good hygiene for long-running browser tabs.
 
 **Exit criteria.**
 
-- Toolbar dockable to any edge, draggable. Decision on UI framework (vanilla vs Solid) made and noted (ADR if non-obvious).
-- All M2-tagged keyboard shortcuts in [SPEC § 4.3](../SPEC.md#43-keyboard-shortcuts) work.
-- Pressure curve UI saves per-brush; survives reload.
-- Export PNG / SVG / PDF produces visually correct output (manual visual diff acceptable for v1).
-- **Cursor preview**: a small circle at the cursor showing the brush's effective size + color before any stroke. Disappears during contact.
-- **First-run hint**: empty board shows a single subtle line ("Right-click for tools · ? for help") that fades on first stroke. Not shown on subsequent visits.
-- **Color eyedropper** (per [SPEC § 4.1](../SPEC.md#41-tool-set-v1)): a tool-menu entry / shortcut that samples color from existing strokes and sets the brush color.
-- **Feel-test gate** on the target hardware: toolbar interaction doesn't disrupt drawing; settings persist sensibly.
-- `docs/architecture.md` updated; CHANGELOG entry.
+- [x] Color eyedropper modal tool (`I` key + right-click TOOL pill) samples strokes offscreen layer, commits + reverts on pointerdown.
+- [x] First-run hint fades on first stroke commit; localStorage flag prevents re-show.
+- [x] `Shift+[` / `Shift+]` cycles 10 curated colors with wraparound; skips custom + recent.
+- [x] `F` toggles distraction-free; hides app chrome; Esc / F exits.
+- [x] Pressure curve UI per Brush preset card; clickable 30 × 18 px thumbnail expands inline editor with draggable midpoint (through-point bezier); test pad; reset link.
+- [x] Predicted-events toggle in settings panel Advanced section; URL `?predict=1` continues to override.
+- [x] PNG / SVG / PDF export via right-click EXPORT row + `Cmd/Ctrl+E` popover. Bounds = all non-deleted strokes + 32 px margin. SVG uses mask-based erasure. PDF lazy-imports `jspdf`.
+- [x] Schema bump-free: `predictedEvents: boolean` + `pressureCurve?: { mid: [number, number] }` added as sparse-additive (ADR 0010 mechanical-fill).
+- [x] 94 unit tests passing (was 26 at M1.7 close + M1.7.1's 5; +63 new for M2).
+- [x] `docs/architecture.md` updated; ADR 0011 written; SPEC § 1/4/6/10 updated; CHANGELOG entry.
+- [ ] **Feel-test gate** on Wacom Intuos: all M2 surfaces feel right (pending).
+- [ ] Tag `m2-export-polish` after feel-test signoff.
 
 ### M3 — Server, sync, room URLs ⬜
 
