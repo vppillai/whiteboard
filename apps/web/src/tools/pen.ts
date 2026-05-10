@@ -20,11 +20,22 @@
 
 import type { BrushConfig, Sample, Stroke } from '@whiteboard/shared'
 import { BRUSH_IDS, BRUSH_LABELS, BRUSH_PRESETS } from '../brushes'
+import { boardToScreen } from '../camera'
 import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
 import { applyCamera, clearLayer, drawStrokePath } from '../render'
 import { getBrushId, getColor, setBrushId, setColor } from '../settings'
 import { effectiveOpacity, getStrokePath } from '../stroke'
 import type { Tool, ToolContext } from './types'
+
+// Finder halo: constant screen-px ring drawn around the hover preview when
+// the brush's effective radius falls below the threshold in screen pixels.
+// Small brushes (pen / pencil) and any brush at low zoom otherwise leave
+// the cursor invisible on Wacom Intuos (indirect input — user is looking
+// at the screen, not the pen). The halo gives a consistent locator without
+// lying about brush size.
+const HOVER_HALO_RADIUS_PX = 11
+const HOVER_HALO_THRESHOLD_PX = 4
+const HOVER_HALO_ALPHA = 0.35
 
 export interface PenToolCallbacks {
   /** Stroke finalized at pointerup. Caller pushes it to the strokes array
@@ -136,6 +147,26 @@ export function createPenTool(opts: PenToolOptions): Tool {
       c.fill()
     }
     c.restore()
+
+    // Halo (gated): screen-coords ring so the cursor is locatable when the
+    // brush is sub-finder-sized. preset.size / 2 is a coarse "visible radius"
+    // proxy — close enough for the gate; brush's wider soft halo and
+    // highlighter's chisel half-width fall slightly above their own
+    // brush-shape extents, so the gate trips a touch eagerly on those, which
+    // is fine because the ring is faint by design.
+    const screenRadius = (preset.size / 2) * ctx.camera.scale
+    if (screenRadius < HOVER_HALO_THRESHOLD_PX) {
+      const screen = boardToScreen(ctx.camera, boardX, boardY)
+      c.save()
+      c.setTransform(ctx.dpr, 0, 0, ctx.dpr, 0, 0)
+      c.globalAlpha = HOVER_HALO_ALPHA
+      c.strokeStyle = ctx.resolveColor(getColor())
+      c.lineWidth = 1
+      c.beginPath()
+      c.arc(screen.x, screen.y, HOVER_HALO_RADIUS_PX, 0, Math.PI * 2)
+      c.stroke()
+      c.restore()
+    }
   }
 
   const cancel = (): void => {
