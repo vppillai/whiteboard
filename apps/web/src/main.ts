@@ -90,6 +90,26 @@ import { fitToContent } from './zoomfit'
 // active color (settings). Called once per stroke at pointerdown.
 const makeBrush = (): BrushConfig => ({ ...BRUSH_PRESETS[getBrushId()], color: getColor() })
 
+/** Minimal informational toast — appears bottom-center, fades after 2 s.
+ *  Reuses the .df-exit-toast styling for visual consistency with the
+ *  distraction-free exit hint. M2 feel-test added for empty-board exports. */
+function showInfoToast(msg: string): void {
+  const id = 'whiteboard-info-toast'
+  let toast = document.getElementById(id)
+  if (!toast) {
+    toast = document.createElement('div')
+    toast.id = id
+    toast.className = 'df-exit-toast'
+    document.body.appendChild(toast)
+  }
+  toast.textContent = msg
+  toast.classList.add('visible')
+  window.setTimeout(() => {
+    toast?.classList.remove('visible')
+    window.setTimeout(() => toast?.remove(), 300)
+  }, 2000)
+}
+
 const ZOOM_WHEEL_FACTOR = 1.0015 // per pixel of deltaY
 
 /**
@@ -428,7 +448,15 @@ async function main(): Promise<void> {
         onClear: clearFlow.request,
         togglePanel,
         onExport: (format) => {
-          void exportBoard(format, { getStrokes: () => strokes })
+          // Right-click EXPORT defaults to 'all' (the quick-path). For per-
+          // export scope choice, use Cmd/Ctrl+E which shows the toggle.
+          void exportBoard(format, 'all', {
+            getStrokes: () => strokes,
+            camera,
+            viewportWidth: target.width,
+            viewportHeight: target.height,
+            onEmptyBoard: () => showInfoToast('Nothing to export'),
+          })
         },
       })
     },
@@ -610,6 +638,10 @@ async function main(): Promise<void> {
           openExportPopover({
             anchor: lastPointer,
             getStrokes: () => strokes,
+            camera,
+            viewportWidth: target.width,
+            viewportHeight: target.height,
+            onEmptyBoard: () => showInfoToast('Nothing to export'),
           })
       },
     }),

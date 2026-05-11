@@ -7,6 +7,7 @@
  */
 
 import type { Stroke } from '@whiteboard/shared'
+import type { Camera } from '../camera'
 import { getStrokeBBox } from '../stroke'
 
 export interface Bounds {
@@ -40,5 +41,27 @@ export function computeBoardBounds(strokes: Stroke[]): Bounds | null {
     y: minY - EXPORT_MARGIN,
     width: maxX - minX + 2 * EXPORT_MARGIN,
     height: maxY - minY + 2 * EXPORT_MARGIN,
+  }
+}
+
+/**
+ * Compute the visible viewport's bounds in board coordinates. Returns the
+ * rectangle the user can currently see on screen. Used for `scope: 'visible'`
+ * exports — what you see is what you get. Never returns null (the viewport
+ * always has dimensions); if there are no strokes inside, the export simply
+ * captures the grid + background.
+ */
+export function computeViewportBounds(
+  camera: Camera,
+  viewportWidth: number,
+  viewportHeight: number,
+): Bounds {
+  // Screen (0, 0) maps to board (camera.x, camera.y); screen (w, h) maps to
+  // board (camera.x + w/scale, camera.y + h/scale).
+  return {
+    x: camera.x,
+    y: camera.y,
+    width: viewportWidth / camera.scale,
+    height: viewportHeight / camera.scale,
   }
 }

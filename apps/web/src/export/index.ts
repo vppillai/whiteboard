@@ -9,22 +9,36 @@
  */
 
 import type { Stroke } from '@whiteboard/shared'
+import type { Camera } from '../camera'
 import { getSettings } from '../settings'
-import { type Bounds, computeBoardBounds } from './bounds'
+import { type Bounds, computeBoardBounds, computeViewportBounds } from './bounds'
 import { exportPDF } from './pdf'
 import { exportPNG } from './png'
 import { exportSVG } from './svg'
 
 export type ExportFormat = 'png' | 'svg' | 'pdf'
+/** Scope of the export — the bounding rectangle in board space. */
+export type ExportScope = 'visible' | 'all'
 
 export interface ExportOptions {
   getStrokes: () => Stroke[]
+  /** For scope === 'visible'. */
+  camera: Camera
+  viewportWidth: number
+  viewportHeight: number
   onEmptyBoard?: () => void
 }
 
-export async function exportBoard(format: ExportFormat, opts: ExportOptions): Promise<void> {
+export async function exportBoard(
+  format: ExportFormat,
+  scope: ExportScope,
+  opts: ExportOptions,
+): Promise<void> {
   const strokes = opts.getStrokes()
-  const bounds = computeBoardBounds(strokes)
+  const bounds =
+    scope === 'visible'
+      ? computeViewportBounds(opts.camera, opts.viewportWidth, opts.viewportHeight)
+      : computeBoardBounds(strokes)
   if (!bounds) {
     if (opts.onEmptyBoard) opts.onEmptyBoard()
     else console.warn('whiteboard/export: nothing to export')

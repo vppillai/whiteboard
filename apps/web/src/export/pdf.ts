@@ -18,7 +18,9 @@ export async function exportPDF(
   settings: SettingsV1,
 ): Promise<Blob> {
   const { jsPDF } = await import('jspdf')
-  const png = await exportPNG(strokes, bounds, settings)
+  // Render the embedded PNG at 2× DPR so the PDF rasterization is sharp
+  // when zoomed or printed — 1× looked soft in the M2 feel-test.
+  const png = await exportPNG(strokes, bounds, settings, { dpr: 2 })
   const dataUrl = await blobToDataURL(png)
   const orientation: 'l' | 'p' = bounds.width > bounds.height ? 'l' : 'p'
   const pdf = new jsPDF({

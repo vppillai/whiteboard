@@ -1066,3 +1066,27 @@ body.panel-open #whiteboard-pill {
   transition: opacity 150ms ease-out;
   pointer-events: none;
 }
+
+/* Export popover with scope row + format row. M2 feel-test polish. */
+.whiteboard-export-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+}
+.whiteboard-export-row + .whiteboard-export-row {
+  padding-top: 0;
+}
+.whiteboard-export-row-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--ink-muted, oklch(from var(--ink) calc(l * 0.55) c h));
+  min-width: 48px;
+}
+.whiteboard-export-scope-pill.active {
+  background: var(--accent, #3b82f6);
+  color: white;
+  border-color: transparent;
+}

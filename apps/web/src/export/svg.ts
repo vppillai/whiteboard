@@ -19,15 +19,30 @@ import { resolveInkColor } from '../theme'
 import type { Bounds } from './bounds'
 
 export function exportSVG(strokes: Stroke[], bounds: Bounds, settings: SettingsV1): Blob {
+  // Resolve theme tokens at export time so the SVG matches the user's
+  // active theme. Dark theme → dark bg + lighter grid; light theme → light
+  // bg + darker grid. Strokes use resolveInkColor below (same path). Bun's
+  // test runner has no DOM, so we fall back to sensible light-theme defaults.
+  const styles = typeof document !== 'undefined' ? getComputedStyle(document.documentElement) : null
+  const bg = styles?.getPropertyValue('--bg-canvas').trim() || '#ffffff'
+  const gridDot = styles?.getPropertyValue('--grid-dot').trim() || 'rgba(0,0,0,0.18)'
+  const gridLine = styles?.getPropertyValue('--grid-line').trim() || 'rgba(0,0,0,0.12)'
+
   const parts: string[] = []
   parts.push('<?xml version="1.0" encoding="UTF-8"?>')
   parts.push(
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${fmt(bounds.x)} ${fmt(bounds.y)} ${fmt(bounds.width)} ${fmt(bounds.height)}" width="${fmt(bounds.width)}" height="${fmt(bounds.height)}">`,
   )
 
+  // Background rect (theme-derived). Always present so dark-theme exports
+  // render correctly when opened in any viewer.
+  parts.push(
+    `<rect x="${fmt(bounds.x)}" y="${fmt(bounds.y)}" width="${fmt(bounds.width)}" height="${fmt(bounds.height)}" fill="${escapeAttr(bg)}"/>`,
+  )
+
   // Grid (omitted for type 'none').
   if (settings.grid.type !== 'none') {
-    parts.push(renderGridDefs(settings.grid.type, settings.grid.spacing))
+    parts.push(renderGridDefs(settings.grid.type, settings.grid.spacing, gridDot, gridLine))
     parts.push(
       `<rect x="${fmt(bounds.x)}" y="${fmt(bounds.y)}" width="${fmt(bounds.width)}" height="${fmt(bounds.height)}" fill="url(#wb-grid)"/>`,
     )
@@ -82,21 +97,27 @@ export function exportSVG(strokes: Stroke[], bounds: Bounds, settings: SettingsV
   return new Blob([parts.join('\n')], { type: 'image/svg+xml' })
 }
 
-function renderGridDefs(type: GridType, spacing: number): string {
+function renderGridDefs(
+  type: GridType,
+  spacing: number,
+  dotColor: string,
+  lineColor: string,
+): string {
   if (type === 'dots') {
-    return `<defs><pattern id="wb-grid" x="0" y="0" width="${spacing}" height="${spacing}" patternUnits="userSpaceOnUse"><circle cx="0" cy="0" r="0.8" fill="#d4d4d8"/></pattern></defs>`
+    return `<defs><pattern id="wb-grid" x="0" y="0" width="${spacing}" height="${spacing}" patternUnits="userSpaceOnUse"><circle cx="0" cy="0" r="0.8" fill="${escapeAttr(dotColor)}"/></pattern></defs>`
   }
   if (type === 'lines') {
-    return (
-      `<defs><pattern id="wb-grid" x="0" y="0" width="${spacing}" height="${spacing}" patternUnits="userSpaceOnUse">` +
-      `<path d="M 0 0 L ${spacing} 0 M 0 0 L 0 ${spacing}" stroke="#e4e4e7" stroke-width="0.5" fill="none"/></pattern></defs>`
-    )
+    return `<defs><pattern id="wb-grid" x="0" y="0" width="${spacing}" height="${spacing}" patternUnits="userSpaceOnUse"><path d="M 0 0 L ${spacing} 0 M 0 0 L 0 ${spacing}" stroke="${escapeAttr(lineColor)}" stroke-width="0.5" fill="none"/></pattern></defs>`
   }
   // 'ruled' — horizontal lines only (notebook paper).
-  return (
-    `<defs><pattern id="wb-grid" x="0" y="0" width="${spacing}" height="${spacing}" patternUnits="userSpaceOnUse">` +
-    `<path d="M 0 0 L ${spacing} 0" stroke="#e4e4e7" stroke-width="0.5" fill="none"/></pattern></defs>`
-  )
+  return `<defs><pattern id="wb-grid" x="0" y="0" width="${spacing}" height="${spacing}" patternUnits="userSpaceOnUse"><path d="M 0 0 L ${spacing} 0" stroke="${escapeAttr(lineColor)}" stroke-width="0.5" fill="none"/></pattern></defs>`
+}
+
+function escapeAttr(s: string): string {
+  // Minimal escaping for color strings inserted into SVG attributes. Theme
+  // tokens are rgb()/oklch()/hex — none of these contain '<' or '"', but
+  // be defensive against future tokens with quotes.
+  return s.replace(/"/g, '&quot;').replace(/</g, '&lt;')
 }
 
 function outlineToPath(outline: number[][]): string {

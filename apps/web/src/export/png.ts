@@ -1,11 +1,11 @@
 /**
- * PNG export. Renders all non-deleted strokes (grid + composited strokes
- * with destination-out erasure) into a detached HTMLCanvasElement sized
- * to the board bounds, then converts via canvas.toBlob.
+ * PNG export. Renders all non-deleted strokes (theme-aware bg + grid + strokes
+ * with destination-out erasure) into a detached HTMLCanvasElement sized to
+ * the board bounds, then converts via `canvas.toBlob`.
  *
  * Mirrors the on-screen `frame()` pass-1/pass-2 scaffolding so the export
- * pixel-for-pixel matches what the user sees, using the shared
- * `drawStrokeOntoLayer` helper (M2 Task 3) for the per-stroke work.
+ * matches what the user sees, using the shared `drawStrokeOntoLayer` helper
+ * for the per-stroke work.
  */
 
 import type { Stroke } from '@whiteboard/shared'
@@ -17,28 +17,33 @@ import { effectiveOpacity, getStrokePath } from '../stroke'
 import { resolveInkColor } from '../theme'
 import type { Bounds } from './bounds'
 
+export interface PngExportOptions {
+  /** Device-pixel-ratio multiplier. Default 1 (matches on-screen-at-100%
+   *  zoom). PDF embed bumps to 2 for print quality. */
+  dpr?: number
+}
+
 /**
- * Render the board (grid + strokes + erasure) into a PNG blob. Filename is
- * provided by the caller (export/index.ts dispatcher).
- *
- * @param strokes  All strokes; deleted + zero-sample entries are skipped.
- * @param bounds   The output rectangle in board coordinates (export/bounds.ts).
- * @param settings A SettingsV1 snapshot (`getSettings()`); only `grid` is
- *                 consumed but the full shape is passed for future-proofing.
+ * Render the board (theme bg + grid + strokes + erasure) into a PNG blob.
+ * Background color reads from `--bg-canvas` so the export matches the user's
+ * active theme — dark theme renders dark-bg PNG so light-ink strokes are
+ * visible.
  */
-export function exportPNG(strokes: Stroke[], bounds: Bounds, settings: SettingsV1): Promise<Blob> {
-  // v1 ships at 1× DPR; spec § 7.1 / § 9 marks 2× / 4× selector as a follow-up.
-  const dpr = 1
+export function exportPNG(
+  strokes: Stroke[],
+  bounds: Bounds,
+  settings: SettingsV1,
+  options: PngExportOptions = {},
+): Promise<Blob> {
+  const dpr = options.dpr ?? 1
   const w = Math.max(1, Math.ceil(bounds.width * dpr))
   const h = Math.max(1, Math.ceil(bounds.height * dpr))
 
-  // Two detached canvases: strokes (offscreen scratch for destination-out)
-  // + committed (grid + composite, the final output).
   const strokesLayer = makeDetachedLayer(w, h)
   const committedLayer = makeDetachedLayer(w, h)
 
   // Camera anchored on bounds top-left, no zoom — board coord (bounds.x,
-  // bounds.y) maps to canvas (0, 0). Mirrors applyCamera's semantics.
+  // bounds.y) maps to canvas (0, 0).
   const camera = makeCamera()
   camera.x = bounds.x
   camera.y = bounds.y
@@ -61,11 +66,18 @@ export function exportPNG(strokes: Stroke[], bounds: Bounds, settings: SettingsV
     )
   }
 
-  // ----- Pass 2: committed = grid + composited strokes -----
+  // ----- Pass 2: committed = theme bg + grid + composited strokes -----
   clearLayer(committedLayer)
+  const cCtx = committedLayer.ctx
+  // Theme background — read CSS variable at export time so light / dark
+  // themes produce matching PNGs.
+  cCtx.save()
+  cCtx.setTransform(1, 0, 0, 1, 0, 0)
+  cCtx.fillStyle = resolveBgColor()
+  cCtx.fillRect(0, 0, w, h)
+  cCtx.restore()
   applyCamera(committedLayer, camera, dpr)
   drawGrid(committedLayer, camera, bounds.width, bounds.height, settings.grid)
-  const cCtx = committedLayer.ctx
   cCtx.save()
   cCtx.setTransform(1, 0, 0, 1, 0, 0)
   cCtx.drawImage(strokesLayer.el, 0, 0)
@@ -77,6 +89,11 @@ export function exportPNG(strokes: Stroke[], bounds: Bounds, settings: SettingsV
       else reject(new Error('export/png: canvas.toBlob returned null'))
     }, 'image/png')
   })
+}
+
+function resolveBgColor(): string {
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--bg-canvas').trim()
+  return v || '#ffffff'
 }
 
 function makeDetachedLayer(w: number, h: number): CanvasLayer {
