@@ -76,7 +76,7 @@ export function mountCurveEditor(host: HTMLElement, opts: CurveEditorOptions): (
       y1: String(GRAPH_H),
       x2: String(GRAPH_W),
       y2: '0',
-      stroke: '#d4d4d8',
+      stroke: 'var(--border, #d4d4d8)',
       'stroke-dasharray': '3 3',
       'stroke-width': '0.5',
     }),
@@ -90,7 +90,7 @@ export function mountCurveEditor(host: HTMLElement, opts: CurveEditorOptions): (
         y1: '0',
         x2: String(f * GRAPH_W),
         y2: String(GRAPH_H),
-        stroke: '#f4f4f5',
+        stroke: 'var(--border, #f4f4f5)',
         'stroke-width': '0.5',
       }),
     )
@@ -100,7 +100,7 @@ export function mountCurveEditor(host: HTMLElement, opts: CurveEditorOptions): (
         y1: String((1 - f) * GRAPH_H),
         x2: String(GRAPH_W),
         y2: String((1 - f) * GRAPH_H),
-        stroke: '#f4f4f5',
+        stroke: 'var(--border, #f4f4f5)',
         'stroke-width': '0.5',
       }),
     )
