@@ -256,19 +256,19 @@ The sharing-related env vars (`OWNER_TOKEN`, `DATA_DIR`, `MAX_ROOMS`, `MAX_BOARD
 
 ## 9. Milestones
 
-| M    | Scope                                                                 | Status |
-|------|-----------------------------------------------------------------------|--------|
-| M0   | Skeleton; canvas + perfect-freehand + coalesced events. **Latency-validated on Intuos.** | ✅ |
-| M1   | Predicted events, three-layer render, pressure curve, 5 brushes, undo/redo, pan/zoom, eraser (pixel-mask + object), lasso | ✅ |
-| M1.7 | Settings side panel + sync-ready schema (brush presets, custom swatches) | ✅ |
-| M2   | Export (PNG/SVG/PDF), distraction-free, palette cycle, pressure-curve UI, first-run hint, predicted-events toggle | ✅ |
-| M2.1 | Pre-sharing hardening; `StrokeStore` interface seam; CRDT-safe schema choices; identity scrub | ✅ |
-| M4   | Deployment polish: clean-host validation, reverse-proxy paths, release notes | ⬜ |
-| M4.5 | PWA install + offline (manifest, service worker, install affordance)  | ⬜ |
-| **v1 ship** | tag `v1.0.0` after M4.5 |  |
-| M5   | AI v2-a: shape recognition                                            | ⬜ |
-| M6   | AI v2-b: HTR                                                          | ⬜ |
-| M7   | AI v2-c: math/LaTeX                                                   | ⬜ |
+| Milestone | Scope                                                                 | Status |
+|-----------|-----------------------------------------------------------------------|--------|
+| M0        | Drawing core: canvas + perfect-freehand + coalesced events. Latency-validated on Intuos. | ✅ |
+| M1        | Predicted events, three-layer render, pressure curve, 5 brushes, undo/redo, pan/zoom, eraser (pixel-mask + object), lasso | ✅ |
+| M1.7      | Settings side panel + sync-ready schema (brush presets, custom swatches) | ✅ |
+| M2        | Export (PNG/SVG/PDF), distraction-free, palette cycle, pressure-curve UI, first-run hint, predicted-events toggle | ✅ |
+| M2.1      | Pre-sharing hardening; `StrokeStore` interface seam; CRDT-safe schema choices; identity scrub | ✅ |
+| **v1.0.0** | First production release — offline-first, pen-optimized              | ✅ *(2026-05-11)* |
+| M4        | Deployment polish: clean-host validation, reverse-proxy paths, release notes | ⬜ post-v1 |
+| M4.5      | PWA install + offline (manifest, service worker, install affordance)  | ⬜ post-v1 |
+| M5        | AI v2-a: shape recognition                                            | ⬜ v2 |
+| M6        | AI v2-b: HTR                                                          | ⬜ v2 |
+| M7        | AI v2-c: math/LaTeX                                                   | ⬜ v2 |
 
 The original M3 (live collaboration) is deferred to the post-v1 backlog (§ 10) per [ADR 0012](docs/decisions/0012-sharing-deferred.md). The design archive is preserved at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](docs/superpowers/specs/2026-05-10-m3-sync-design.md).
 

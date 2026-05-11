@@ -146,7 +146,7 @@ git pull
 
 - **Healthcheck**: `GET /health` returns `200 {"status":"ok",...}`. Wired into Docker's healthcheck and `docker compose ps`.
 - **Logs**: `docker compose logs -f`.
-- **Metrics**: not yet shipped. Likely a `/metrics` Prometheus endpoint in a future revision; not on the v1 critical path.
+- **Metrics**: no built-in metrics endpoint. Container resource usage is observable via `docker stats`; for richer observability behind a reverse proxy, instrument at that layer.
 
 ## Troubleshooting
 

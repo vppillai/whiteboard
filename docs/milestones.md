@@ -2,26 +2,28 @@
 
 The work is broken into discrete milestones. Each milestone has a defined scope, exit criteria, and a documentation-update checklist that must be satisfied before the milestone is closed.
 
-> **Status legend** — ⬜ not started · 🟦 in progress · ✅ complete
+> **Status legend** — ⬜ not started · 🟦 in progress · ✅ complete · 🟡 deferred
 
 ## Current state
+
+**v1.0.0 shipped 2026-05-11.** Single-user, offline-first whiteboard. Live collaboration deferred per [ADR 0012](decisions/0012-sharing-deferred.md). PWA install + deployment polish are post-v1 work tracked below.
 
 | M  | Title                                                                    | Status |
 |----|--------------------------------------------------------------------------|--------|
 | —  | Repo + dev / deploy environment                                          | ✅     |
-| M0 | Drawing core: latency, pan/zoom, theme, local persistence, undo/redo     | ✅ *(closed 2026-05-09; tagged `m0-drawing-core`)* |
-| M1.4 | Refactor pass: tool abstraction, op-based undo, soft-delete, decompose main.ts | ✅ *(closed 2026-05-09; tagged `m1.4-refactor`)* |
-| M1 | Tool surface refactor + eraser (pixel-mask wipe + object) + brush presets + lasso | ✅ *(closed 2026-05-09; tagged `m1-eraser-lasso`)* |
-| M1.7 | Settings side panel + sync-ready schema (brush presets, fonts, swatches) | ✅ *(closed 2026-05-09; tagged `m1.7-settings-panel`)* |
-| M2 | Export, settings polish, eyedropper, distraction-free                    | ✅ *(closed 2026-05-10; tagged `m2-export-polish`)* |
-| M2.1 | Pre-sharing hardening — review-driven fixes; StrokeStore seam; identity scrub | ✅ *(closed 2026-05-10; tagged `m2.1-pre-m3-hardening`)* |
+| M0 | Drawing core: latency, pan/zoom, theme, local persistence, undo/redo     | ✅ *(2026-05-09; tag `m0-drawing-core`)* |
+| M1.4 | Refactor pass: tool abstraction, op-based undo, soft-delete, decompose main.ts | ✅ *(2026-05-09; tag `m1.4-refactor`)* |
+| M1 | Tool surface refactor + eraser (pixel-mask wipe + object) + brush presets + lasso | ✅ *(2026-05-09; tag `m1-eraser-lasso`)* |
+| M1.7 | Settings side panel + sync-ready schema (brush presets, fonts, swatches) | ✅ *(2026-05-09; tag `m1.7-settings-panel`)* |
+| M2 | Export, settings polish, eyedropper, distraction-free                    | ✅ *(2026-05-10; tag `m2-export-polish`)* |
+| M2.1 | Pre-sharing hardening — review-driven fixes; StrokeStore seam; identity scrub | ✅ *(2026-05-10; tag `m2.1-pre-m3-hardening`)* |
 | M3 | Server, sync, room URLs                                                  | 🟡 **Deferred from v1** *(see [ADR 0012](decisions/0012-sharing-deferred.md); design archive at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](superpowers/specs/2026-05-10-m3-sync-design.md))* |
-| M4 | Production deployment polish                                             | ⬜ **next** |
-| M4.5 | PWA install + offline (manifest, service worker)                       | ⬜     |
-| **v1 ship** | tag `v1.0.0` after M4.5                                          | **—**  |
-| M5 | AI: shape recognition                                                    | ⬜     |
-| M6 | AI: handwriting → text                                                   | ⬜     |
-| M7 | AI: math / LaTeX                                                         | ⬜     |
+| **v1.0.0** | First production release (offline-first, pen-optimized)         | ✅ *(2026-05-11; tag `v1.0.0`)* |
+| M4 | Deployment polish — clean-host validation, reverse-proxy paths           | ⬜ post-v1 |
+| M4.5 | PWA install + offline (manifest, service worker)                       | ⬜ post-v1 |
+| M5 | AI: shape recognition                                                    | ⬜ v2 |
+| M6 | AI: handwriting → text                                                   | ⬜ v2 |
+| M7 | AI: math / LaTeX                                                         | ⬜ v2 |
 
 ---
 
@@ -227,21 +229,20 @@ Mid-milestone, a perceived drawing-latency drift triggered a defensive **Option 
 
 The original v1-blocking exit criteria (two browsers shared state, owner-token, 30 s snapshots, 16-peer capacity, in-flight crash recovery) are preserved in the design archive. **None of them gate the v1 ship.** Re-open this milestone only on a deliberate trigger — real user demand for multi-user editing, or a contributor with the capacity to implement and operate the stateful server runtime.
 
-### M4 — v1 deployment polish ⬜
+### M4 — Deployment polish ⬜ (post-v1)
 
-**Scope (revised — sharing-deferred shape).** Most of the original M4 scope landed at M0 (multi-stage Dockerfile, static-file serving with SPA fallback, immutable-asset caching, healthcheck, `deploy.sh` with `.env` validation). With sharing deferred per [ADR 0012](decisions/0012-sharing-deferred.md), M4 is now a lighter pre-ship gate: validate end-to-end on a clean host, exercise reverse-proxy paths against real proxies, simplify `.env.example` (drop the sharing-related vars), and write release notes.
+**Scope (post-v1 work).** v1.0.0 ships with Docker + GitHub Pages deploy paths working today (verified end-to-end in CI and on the demo Pages instance). M4 takes the deploy story from "works on the developer's machine and the demo Pages instance" to "reproducibly works on a clean third-party host": end-to-end validation on a fresh VM, exercising reverse-proxy paths against real Caddy and Nginx, writing operator-facing release notes.
 
 **Exit criteria.**
 
 - `./deploy.sh` produces a working production stack on a clean host given only Docker (validated by re-pulling on a fresh VM).
 - `BASE_PATH=/whiteboard` works behind a real reverse proxy (Caddy and Nginx, both tested against the provided snippets).
-- `.env.example` reflects the v1-stateless shape (no `OWNER_TOKEN` / `DATA_DIR` / `MAX_ROOMS` / `MAX_BOARD_BLOB_MB`).
-- No backup / restore procedure needed at v1 (no server-side state); the deployment doc is updated accordingly.
-- `docs/deployment.md` updated; CHANGELOG entry; tag `m4-deploy-polish`. v1.0.0 release notes drafted from the `[Unreleased]` section of `CHANGELOG.md` and finalized at M4.5 tagging.
+- `docs/deployment.md` reverse-proxy snippets verified.
+- CHANGELOG entry under `[Unreleased]`; release tagged `v1.1.0`.
 
-### M4.5 — PWA install + offline ⬜
+### M4.5 — PWA install + offline ⬜ (post-v1)
 
-**Scope.** Make a deployed instance installable as a Progressive Web App so users can run it from their dock / home screen with a native-app feel. Strong tenet fit ("sleek").
+**Scope (post-v1 work).** Make a deployed instance installable as a Progressive Web App so users can run it from their dock / home screen with a native-app feel. Strong tenet fit ("sleek"). v1.0.0 already supports offline drawing via IndexedDB; this milestone adds the install affordance and a service worker for offline shell loading.
 
 - `manifest.json` with name, theme colors honoring `prefers-color-scheme`, `display: standalone`, scope, start URL.
 - App icons (square + maskable, 192 / 512 px).
@@ -257,11 +258,7 @@ The original v1-blocking exit criteria (two browsers shared state, owner-token, 
 - Offline: app loads, draws, persists strokes locally with no network. Reload after going offline still works.
 - Lighthouse PWA score ≥ 90.
 - ADR if any non-obvious choice surfaces (e.g. the install-prompt policy).
-- `docs/deployment.md` updated; CHANGELOG entry; tag `m4.5-pwa`.
-
-### v1 ship 🎯
-
-After M4.5: tag `v1.0.0`, write release notes, publish.
+- `docs/deployment.md` updated; CHANGELOG entry; release tagged `v1.2.0`.
 
 ### M5 — AI: shape recognition ⬜
 

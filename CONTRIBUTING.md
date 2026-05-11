@@ -37,4 +37,4 @@ Each milestone closes with a structured review — see [docs/process.md](docs/pr
 
 ## Reporting security issues
 
-If you find something with security impact, please email rather than filing a public issue. (Contact info forthcoming.)
+If you find something with security impact, please use GitHub's [private security advisory](https://github.com/vppillai/whiteboard/security/advisories/new) flow rather than filing a public issue.
