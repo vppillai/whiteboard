@@ -36,7 +36,6 @@ describe('settings: migrate', () => {
     expect(v1.presets).toEqual({})
     expect(v1.customSwatches).toEqual([])
     expect(v1.recentColors).toEqual([])
-    expect(v1.fonts).toEqual([])
   })
 })
 
@@ -67,7 +66,6 @@ describe('settings: migrate edge cases', () => {
     expect(v1.color).toBe('#22c55e')
     expect(v1.customSwatches).toEqual([])
     expect(v1.recentColors).toEqual([])
-    expect(v1.fonts).toEqual([])
   })
 
   test('type-mismatched eraserSize falls back to default; rest preserved', () => {
@@ -104,7 +102,6 @@ describe('settings: migrate edge cases', () => {
       presets: {},
       customSwatches: ['#abcdef', 'not-a-hex', '#GGG', '#123456'],
       recentColors: [],
-      fonts: [],
     })
     expect(v1.customSwatches).toEqual(['#abcdef', '#123456'])
   })
@@ -131,7 +128,6 @@ describe('settings: migrate edge cases', () => {
       presets: {},
       customSwatches: [],
       recentColors: tenColors,
-      fonts: [],
     })
     expect(v1.recentColors).toHaveLength(6)
     expect(v1.recentColors[0]).toBe('#111111')
@@ -156,7 +152,6 @@ describe('settings: M1.7.1 hardening', () => {
       },
       customSwatches: [],
       recentColors: [],
-      fonts: [],
     })
     // size dropped (not a number); pressureGamma dropped (NaN); opacity kept.
     expect(v1.presets.pen).toEqual({ opacity: 0.5 })
@@ -174,7 +169,6 @@ describe('settings: M1.7.1 hardening', () => {
       },
       customSwatches: [],
       recentColors: [],
-      fonts: [],
     })
     expect(v1.presets.pen).toEqual({ capEnd: false, size: 5 })
   })
@@ -191,7 +185,6 @@ describe('settings: M1.7.1 hardening', () => {
       },
       customSwatches: [],
       recentColors: [],
-      fonts: [],
     })
     // No valid fields → preset entry omitted entirely.
     expect(v1.presets).toEqual({})
@@ -210,7 +203,6 @@ describe('settings: M1.7.1 hardening', () => {
       },
       customSwatches: [],
       recentColors: [],
-      fonts: [],
     })
     expect(v1.presets).toEqual({ pen: { size: 4 } })
   })
@@ -310,7 +302,6 @@ describe('settings: predictedEvents (M2)', () => {
       presets: {},
       customSwatches: [],
       recentColors: [],
-      fonts: [],
     }
     const out = migrate(v1Missing)
     expect(out.predictedEvents).toBe(false)
@@ -326,7 +317,6 @@ describe('settings: predictedEvents (M2)', () => {
       presets: {},
       customSwatches: [],
       recentColors: [],
-      fonts: [],
       predictedEvents: 42,
     }
     const out = migrate(v1Bad)
@@ -343,7 +333,6 @@ describe('settings: predictedEvents (M2)', () => {
       presets: {},
       customSwatches: [],
       recentColors: [],
-      fonts: [],
       predictedEvents: true,
     }
     const out = migrate(v1Ok)
@@ -399,7 +388,6 @@ describe('settings: pressureCurve preset (M2)', () => {
       presets: { pen: { pressureCurve: { mid: 'banana' } } },
       customSwatches: [],
       recentColors: [],
-      fonts: [],
       predictedEvents: false,
     })
     // malformed mid (string not [number,number]) → pressureCurve dropped

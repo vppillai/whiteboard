@@ -34,7 +34,6 @@ const baseSettings: SettingsV1 = {
   presets: {},
   customSwatches: [],
   recentColors: [],
-  fonts: [],
   predictedEvents: false,
 }
 

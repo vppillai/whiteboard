@@ -46,7 +46,6 @@ export function createPanelContent(opts: PanelContentOptions): {
   const sections: Section[] = [
     renderBrushPresetsSection(),
     renderCustomSwatchesSection(),
-    renderFontsSection(),
     renderGridSection(),
     renderThemeSection(),
     renderInputSection(),
@@ -288,16 +287,6 @@ function renderCustomSwatchesSection(): Section {
 
   update()
   return { el, update }
-}
-
-function renderFontsSection(): Section {
-  const el = document.createElement('section')
-  el.appendChild(sectionLabel('Fonts'))
-  const note = document.createElement('p')
-  note.className = 'whiteboard-settings-note'
-  note.textContent = 'Reserved for the Text tool (M2+).'
-  el.appendChild(note)
-  return { el }
 }
 
 function renderGridSection(): Section {

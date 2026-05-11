@@ -71,7 +71,6 @@ export interface SettingsV1 {
   presets: Partial<Record<BrushId, Partial<Omit<BrushConfig, 'color'>>>>
   customSwatches: string[]
   recentColors: string[]
-  fonts: string[]
   predictedEvents: boolean // NEW (M2)
   syncedAt?: number
   remoteId?: string
@@ -100,7 +99,6 @@ function defaultV1(): SettingsV1 {
     presets: {},
     customSwatches: [],
     recentColors: [],
-    fonts: [],
     predictedEvents: false, // NEW (M2; ADR 0004)
   }
 }
@@ -157,7 +155,6 @@ export function migrate(input: unknown): SettingsV1 {
     recentColors: Array.isArray(v.recentColors)
       ? v.recentColors.filter(isValidHex).slice(0, RECENT_COLORS_CAP)
       : [],
-    fonts: Array.isArray(v.fonts) ? v.fonts.filter((f) => typeof f === 'string') : [],
     predictedEvents: typeof v.predictedEvents === 'boolean' ? v.predictedEvents : false,
     syncedAt: typeof v.syncedAt === 'number' ? v.syncedAt : undefined,
     remoteId: typeof v.remoteId === 'string' ? v.remoteId : undefined,
