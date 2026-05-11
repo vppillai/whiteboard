@@ -48,6 +48,10 @@ export interface ToolMenuOptions {
   /** Toggle the settings side panel — wired by main.ts to the same flow as
    *  the Cmd/Ctrl+, shortcut and the toolpill gear. */
   togglePanel: () => void
+  /** Open the export popover (scope + format). Wired by main.ts to
+   *  `openExportPopover` at the right-click anchor. Single entry point so
+   *  scope choice is consistent with Cmd/Ctrl+E. */
+  onExport: () => void
 }
 
 export function openToolMenu(opts: ToolMenuOptions): Popover {
@@ -118,6 +122,24 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
     }),
   )
   root.appendChild(viewRow)
+
+  // EXPORT row — single pill that opens the export popover (scope + format).
+  // Symmetric with Cmd/Ctrl+E. M2 § 6.7.6 + feel-test pass: removed the
+  // three-format quick row because it bypassed the scope choice; one path
+  // now handles both scope ('Visible' / 'All') and format consistently.
+  root.appendChild(separator())
+  root.appendChild(sectionLabel('Export'))
+  const exportRow = pillRow()
+  exportRow.appendChild(
+    pill({
+      label: 'Export…',
+      onClick: () => {
+        dismiss()
+        opts.onExport()
+      },
+    }),
+  )
+  root.appendChild(exportRow)
 
   // Settings — pen-friendly entry point matching the toolpill gear and the
   // Cmd/Ctrl+, shortcut. Above CLEAR so the destructive row stays anchored

@@ -38,8 +38,11 @@ import type { BrushConfig, Sample, Stroke } from '@whiteboard/shared'
 import { BRUSH_IDS, BRUSH_PRESETS } from './brushes'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
 import { createClearFlow } from './clearflow'
-import { openColorPicker } from './colorpicker'
+import { CURATED_COLORS, cyclePaletteIndex, openColorPicker } from './colorpicker'
+import { exitDistractionFree, isDistractionFree, toggleDistractionFree } from './distractionfree'
 import { attachEraserHold } from './eraserhold'
+import { openExportPopover } from './exportpopover'
+import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid } from './grid'
 import { createHelpOverlay } from './helpoverlay'
 import { attachKeymap } from './keymap'
@@ -51,7 +54,7 @@ import { runPerftest } from './perftest'
 import { createHelpPill } from './pill'
 import { attachPointer } from './pointer'
 import { dismissAllPopovers, getActiveTag } from './popover'
-import { applyCamera, clearLayer, drawStrokePath, setupCanvas } from './render'
+import { applyCamera, clearLayer, drawStrokeOntoLayer, drawStrokePath, setupCanvas } from './render'
 import { createResetFlow } from './resetflow'
 import {
   getBrushId,
@@ -60,6 +63,7 @@ import {
   getSettings,
   onChange as onSettingsChange,
   setBrushId,
+  setColor,
 } from './settings'
 import { createPanelContent } from './settings/panel-content'
 import { dismissSidePanel, isSidePanelOpen, showSidePanel } from './sidepanel'
@@ -84,6 +88,26 @@ import { fitToContent } from './zoomfit'
 // Compose a runtime BrushConfig from the active brush preset (shape) and the
 // active color (settings). Called once per stroke at pointerdown.
 const makeBrush = (): BrushConfig => ({ ...BRUSH_PRESETS[getBrushId()], color: getColor() })
+
+/** Minimal informational toast — appears bottom-center, fades after 2 s.
+ *  Reuses the .df-exit-toast styling for visual consistency with the
+ *  distraction-free exit hint. M2 feel-test added for empty-board exports. */
+function showInfoToast(msg: string): void {
+  const id = 'whiteboard-info-toast'
+  let toast = document.getElementById(id)
+  if (!toast) {
+    toast = document.createElement('div')
+    toast.id = id
+    toast.className = 'df-exit-toast'
+    document.body.appendChild(toast)
+  }
+  toast.textContent = msg
+  toast.classList.add('visible')
+  window.setTimeout(() => {
+    toast?.classList.remove('visible')
+    window.setTimeout(() => toast?.remove(), 300)
+  }, 2000)
+}
 
 const ZOOM_WHEEL_FACTOR = 1.0015 // per pixel of deltaY
 
@@ -147,6 +171,11 @@ async function main(): Promise<void> {
   const help = createHelpOverlay()
   document.body.appendChild(help.el)
 
+  // First-run discovery hint (M2). Idempotent + respects localStorage flag —
+  // no-op for users who've seen it. Dismissed at the first create-op
+  // emission point in the pen tool's onStrokeCommit callback below.
+  mountFirstRunHint(document.body)
+
   // ---------------------------------------------------------------------
   //  App state — strokes + op-based undo / redo (ADR 0006)
   // ---------------------------------------------------------------------
@@ -204,7 +233,12 @@ async function main(): Promise<void> {
   //  (committing strokes, applying ops, switching tools).
   // ---------------------------------------------------------------------
   const params = new URLSearchParams(location.search)
-  const usePrediction = params.has('predict')
+  // URL flag wins over the settings toggle (session override per ADR 0004).
+  // Evaluated once at boot — the URL doesn't change without a reload.
+  const urlPredictFlag = params.has('predict')
+  // Pen tool calls this on every pointermove so the settings panel toggle
+  // takes effect without a reload.
+  const shouldUsePrediction = (): boolean => urlPredictFlag || getSettings().predictedEvents
 
   const opCtx: OpContext = {
     strokes,
@@ -219,7 +253,7 @@ async function main(): Promise<void> {
   }
 
   const penTool = createPenTool({
-    usePrediction,
+    shouldUsePrediction,
     callbacks: {
       onStrokeCommit(stroke) {
         strokes.push(stroke)
@@ -227,6 +261,9 @@ async function main(): Promise<void> {
         // Don't clear live here — the next RAF redraws committed (with this
         // stroke baked in) and clears live, avoiding a flicker.
         committedDirty = true
+        // First-run hint fades on first stroke commit. Idempotent — no-ops
+        // after the first call and after the localStorage flag is set.
+        dismissFirstRunHint()
         void saveStroke(stroke).catch((err) => {
           console.warn('whiteboard/web: failed to persist stroke:', err)
         })
@@ -409,6 +446,18 @@ async function main(): Promise<void> {
         },
         onClear: clearFlow.request,
         togglePanel,
+        onExport: () => {
+          // Open the export popover at the same anchor — scope + format
+          // choice live there. Single source of truth for export decisions.
+          openExportPopover({
+            anchor: { x: e.clientX, y: e.clientY },
+            getStrokes: () => strokes,
+            camera,
+            viewportWidth: target.width,
+            viewportHeight: target.height,
+            onEmptyBoard: () => showInfoToast('Nothing to export'),
+          })
+        },
       })
     },
     { capture: true },
@@ -551,6 +600,13 @@ async function main(): Promise<void> {
       togglePanel,
       cancel: () => {
         let handled = false
+        // Distraction-free exits first — popovers are dismissed on entry so
+        // there shouldn't be one to handle, but if state diverged for any
+        // reason, exiting distraction-free is the most user-visible action.
+        if (isDistractionFree()) {
+          exitDistractionFree()
+          handled = true
+        }
         if (clearFlow.cancel()) handled = true
         if (dismissAllPopovers()) handled = true
         // Esc in lasso mode falls back to the pen tool. The lasso's `cleanup`
@@ -561,6 +617,32 @@ async function main(): Promise<void> {
           handled = true
         }
         return handled
+      },
+      toggleDistractionFree: () =>
+        toggleDistractionFree({
+          appEl: root,
+          dismissPopover: () => dismissAllPopovers(),
+          dismissSidePanel: () => dismissSidePanel(),
+        }),
+      cyclePaletteBackward: () => {
+        const next = CURATED_COLORS[cyclePaletteIndex(getColor(), -1)]
+        if (next) setColor(next)
+      },
+      cyclePaletteForward: () => {
+        const next = CURATED_COLORS[cyclePaletteIndex(getColor(), 1)]
+        if (next) setColor(next)
+      },
+      openExport: () => {
+        if (getActiveTag() === 'export') dismissAllPopovers()
+        else
+          openExportPopover({
+            anchor: lastPointer,
+            getStrokes: () => strokes,
+            camera,
+            viewportWidth: target.width,
+            viewportHeight: target.height,
+            onEmptyBoard: () => showInfoToast('Nothing to export'),
+          })
       },
     }),
   )
@@ -602,7 +684,6 @@ async function main(): Promise<void> {
       // extension (in-flight wipe sweep not yet committed); skipped if a
       // different tool is active.
       const pendingStamps = tool.current === eraserTool ? eraserTool.getPendingStamps() : null
-      const sCtx = target.strokes.ctx
 
       for (const s of strokes) {
         if (s.deleted) continue
@@ -610,30 +691,14 @@ async function main(): Promise<void> {
         if (!bboxesIntersect(getStrokeBBox(s), viewBBox)) continue
         const path = getStrokePath(s, [], true)
         if (!path) continue
-        drawStrokePath(target.strokes, path, resolveInkColor(s.brush.color), effectiveOpacity(s))
-
-        const committedStamps = s.erasedStamps
-        const pendingForStroke = pendingStamps?.get(s.id)
-        if (!committedStamps?.length && !pendingForStroke?.length) continue
-
-        sCtx.save()
-        sCtx.globalCompositeOperation = 'destination-out'
-        sCtx.fillStyle = '#000' // destination-out only cares about source alpha
-        if (committedStamps) {
-          for (const st of committedStamps) {
-            sCtx.beginPath()
-            sCtx.arc(st.x, st.y, st.r, 0, Math.PI * 2)
-            sCtx.fill()
-          }
-        }
-        if (pendingForStroke) {
-          for (const st of pendingForStroke) {
-            sCtx.beginPath()
-            sCtx.arc(st.x, st.y, st.r, 0, Math.PI * 2)
-            sCtx.fill()
-          }
-        }
-        sCtx.restore()
+        drawStrokeOntoLayer(
+          target.strokes,
+          path,
+          resolveInkColor(s.brush.color),
+          effectiveOpacity(s),
+          s.erasedStamps,
+          pendingStamps?.get(s.id),
+        )
       }
 
       // ----- Pass 3: committed layer (grid + composited strokes) -----

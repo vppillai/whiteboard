@@ -18,7 +18,7 @@ import {
 } from './settings'
 import { createSwatchAdd } from './swatchadd'
 
-const CURATED: readonly string[] = [
+export const CURATED_COLORS: readonly string[] = [
   'ink',
   '#ef4444',
   '#f97316',
@@ -53,7 +53,7 @@ export function openColorPicker(at: { x: number; y: number }): Popover {
 
   const renderPalette = (): void => {
     palette.replaceChildren()
-    for (const c of CURATED) {
+    for (const c of CURATED_COLORS) {
       palette.appendChild(makeSwatch(c, false, () => onPick(c)))
     }
     for (const c of getCustomSwatches()) {
@@ -166,4 +166,20 @@ function makeAddTile(onClick: () => void): HTMLButtonElement {
   tile.textContent = '+'
   tile.addEventListener('click', onClick)
   return tile
+}
+
+/**
+ * Compute the next CURATED_COLORS index given the current color and direction.
+ * Returns 0 if `current` isn't in the curated palette (custom / recent /
+ * anything not in the list). Wraps around at the endpoints. The `'ink'`
+ * theme token IS in CURATED_COLORS at index 0, so cycling away from ink
+ * lands at index 1 or the last entry depending on direction.
+ *
+ * Pure function — unit-testable without DOM. M2 Shift+[ / Shift+] cycling.
+ */
+export function cyclePaletteIndex(current: string, direction: 1 | -1): number {
+  const idx = CURATED_COLORS.indexOf(current)
+  if (idx === -1) return 0
+  const n = CURATED_COLORS.length
+  return (idx + direction + n) % n
 }

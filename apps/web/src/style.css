@@ -5,6 +5,17 @@
   --fg-text: #1a1a1a;
   --fg-muted: #6b7280;
   --ink: #1a1a1a;
+  /* Chrome surfaces — panel/popover backgrounds (surface-1) and cards/pills
+     resting on top (surface-2). Define explicitly in BOTH themes; the
+     var(..., fallback) pattern downstream silently broke dark-mode contrast
+     when a token was defined in one theme but not the other. */
+  --surface-1: #f1f3f6;
+  --surface-2: rgba(0, 0, 0, 0.04);
+  --surface-hover: rgba(0, 0, 0, 0.06);
+  --text: #1a1a1a;
+  --text-muted: rgba(0, 0, 0, 0.55);
+  --border: rgba(0, 0, 0, 0.1);
+  --accent: #3b82f6;
   /* Grid colors: dots are pixel-sized so a low alpha reads as visible.
      Lines are spread across the whole canvas, so the per-pixel alpha must
      be higher to read at the same overall weight. */
@@ -26,6 +37,13 @@
   --fg-text: #e8eef5;
   --fg-muted: #8a93a3;
   --ink: #e8eef5;
+  --surface-1: #161b22;
+  --surface-2: rgba(255, 255, 255, 0.05);
+  --surface-hover: rgba(255, 255, 255, 0.08);
+  --text: #e8eef5;
+  --text-muted: rgba(232, 238, 245, 0.6);
+  --border: rgba(255, 255, 255, 0.1);
+  --accent: #3b82f6;
   --grid-dot: rgba(255, 255, 255, 0.16);
   --grid-line: rgba(255, 255, 255, 0.1);
   --hud-bg: rgba(20, 24, 30, 0.92);
@@ -45,6 +63,13 @@
     --fg-text: #e8eef5;
     --fg-muted: #8a93a3;
     --ink: #e8eef5;
+    --surface-1: #161b22;
+    --surface-2: rgba(255, 255, 255, 0.05);
+    --surface-hover: rgba(255, 255, 255, 0.08);
+    --text: #e8eef5;
+    --text-muted: rgba(232, 238, 245, 0.6);
+    --border: rgba(255, 255, 255, 0.1);
+    --accent: #3b82f6;
     --grid-dot: rgba(255, 255, 255, 0.16);
     --grid-line: rgba(255, 255, 255, 0.1);
     --hud-bg: rgba(20, 24, 30, 0.92);
@@ -680,8 +705,9 @@ body {
   right: 0;
   bottom: 0;
   width: 320px;
-  background: var(--surface-1, #f5f5f5);
-  border-left: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+  background: var(--surface-1);
+  color: var(--text);
+  border-left: 1px solid var(--border);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
@@ -757,9 +783,14 @@ body {
   background: var(--surface-2, rgba(0, 0, 0, 0.02));
 }
 .whiteboard-settings-brush-head {
-  font-size: 12px;
-  font-weight: 500;
-  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--ink, currentColor);
+}
+.whiteboard-settings-brush-head > span:first-child {
+  flex: 1;
+  letter-spacing: 0.2px;
 }
 .whiteboard-settings-slider {
   display: grid;
@@ -893,4 +924,198 @@ body {
 }
 .whiteboard-settings-reset-btn:hover {
   background: rgba(239, 68, 68, 0.08);
+}
+
+/* First-run hint — empty-board discovery overlay (M2). */
+.firstrun-hint {
+  position: fixed;
+  bottom: 25vh;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--ink-muted, oklch(from var(--ink) calc(l * 0.65) c h));
+  font-size: 14px;
+  font-weight: 500;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 200ms ease-out;
+  opacity: 1;
+  z-index: 5;
+}
+.firstrun-hint.fading {
+  opacity: 0;
+}
+body.distraction-free .firstrun-hint {
+  display: none;
+}
+
+/* Distraction-free mode — hides chrome (M2). */
+body.distraction-free .pill,
+body.distraction-free .helppill,
+body.distraction-free .toolmenu,
+body.distraction-free .whiteboard-sidepanel,
+body.distraction-free .whiteboard-popover {
+  display: none !important;
+}
+
+/* Exit-affordance toast (M2 distraction-free). */
+.df-exit-toast {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--toast-bg, oklch(0.25 0 0));
+  color: var(--toast-fg, oklch(0.95 0 0));
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0;
+  transition: opacity 250ms ease-out;
+  pointer-events: none;
+  z-index: 50;
+}
+.df-exit-toast.visible {
+  opacity: 1;
+}
+
+/* Pressure curve thumbnail button in Brush preset card head (M2). */
+.whiteboard-settings-brush-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.whiteboard-settings-curve-thumb-btn {
+  background: transparent;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+}
+.whiteboard-settings-curve-thumb-btn:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+}
+.whiteboard-settings-curve-thumb-btn:has(.curve-thumbnail.has-override) {
+  border-color: var(--accent, #3b82f6);
+}
+.whiteboard-settings-curve-slot {
+  margin-top: 8px;
+}
+
+/* Curve editor (mounted into the slot) styling (M2). */
+.curve-editor {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.curve-graph {
+  background: var(--surface, rgba(0, 0, 0, 0.02));
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  border-radius: 4px;
+}
+.curve-test-pad {
+  background: var(--surface, rgba(0, 0, 0, 0.02));
+  border: 1px dashed var(--border, rgba(0, 0, 0, 0.16));
+  border-radius: 4px;
+  cursor: crosshair;
+}
+.curve-reset {
+  background: transparent;
+  border: none;
+  color: var(--accent, #3b82f6);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 4px 0;
+  margin-top: 8px;
+  display: block;
+}
+
+/* Predicted-events toggle row in Advanced section (M2). */
+.whiteboard-settings-pe-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--surface, rgba(0, 0, 0, 0.02));
+  border-radius: 8px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+}
+.whiteboard-settings-pe-label {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+.whiteboard-settings-pe-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+.whiteboard-settings-pe-help {
+  font-size: 11px;
+  color: var(--ink-muted, oklch(from var(--ink) calc(l * 0.65) c h));
+  line-height: 1.4;
+}
+.whiteboard-settings-pe-input {
+  width: 18px;
+  height: 18px;
+  margin-left: 12px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+/* Export popover content layout (M2 Cmd/Ctrl+E). Column so Region and
+ * Format rows stack vertically — was row before, which clipped pills on
+ * the 320 px popover max-width. */
+.whiteboard-export-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+}
+.whiteboard-export-popover .whiteboard-export-pill {
+  min-width: 56px;
+  text-align: center;
+}
+
+/* Side panel open: shift the bottom-right tool pill left of the 320 px panel
+ * and hide the bottom-left help pill (the panel itself is the help/setting
+ * surface while open). Pill z-index already beats the panel, but the user
+ * needs them out of the way for visual clarity. M2 feel-test fix. */
+body.panel-open #whiteboard-tool-pill {
+  right: 332px; /* 320 panel + 12 margin */
+  transition: right 200ms ease-out;
+}
+body.panel-open #whiteboard-pill {
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+  pointer-events: none;
+}
+
+/* Export popover with scope row + format row. M2 feel-test polish. */
+.whiteboard-export-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+}
+.whiteboard-export-row + .whiteboard-export-row {
+  padding-top: 0;
+}
+.whiteboard-export-row-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--ink-muted, oklch(from var(--ink) calc(l * 0.55) c h));
+  min-width: 48px;
+}
+.whiteboard-export-scope-pill.active {
+  background: var(--accent, #3b82f6);
+  color: white;
+  border-color: transparent;
 }

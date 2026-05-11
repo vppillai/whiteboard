@@ -114,3 +114,52 @@ export function drawStrokePath(layer: CanvasLayer, path: Path2D, color: string, 
   ctx.fill(path)
   ctx.restore()
 }
+
+/** Cursor-disk record for the pixel-mask wipe eraser (ADR 0009). */
+export interface EraseStamp {
+  x: number
+  y: number
+  r: number
+}
+
+/**
+ * Render one stroke's outline + its destination-out erasure stamps onto
+ * `layer`. Both committed `erasedStamps` and any in-flight `pendingStamps`
+ * subtract from the just-drawn outline.
+ *
+ * Used by both the on-screen `frame()` render and the PNG export path so
+ * the two render paths can't drift. Caller must clear + apply-camera to
+ * `layer` before the first stroke and composite the layer after the last
+ * (per ADR 0009 — destination-out on a strokes-only offscreen, then
+ * composite over the grid).
+ */
+export function drawStrokeOntoLayer(
+  layer: CanvasLayer,
+  path: Path2D,
+  color: string,
+  opacity: number,
+  committedStamps: readonly EraseStamp[] | undefined,
+  pendingStamps?: readonly EraseStamp[],
+): void {
+  drawStrokePath(layer, path, color, opacity)
+  if (!committedStamps?.length && !pendingStamps?.length) return
+  const { ctx } = layer
+  ctx.save()
+  ctx.globalCompositeOperation = 'destination-out'
+  ctx.fillStyle = '#000' // destination-out only cares about source alpha
+  if (committedStamps) {
+    for (const st of committedStamps) {
+      ctx.beginPath()
+      ctx.arc(st.x, st.y, st.r, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+  if (pendingStamps) {
+    for (const st of pendingStamps) {
+      ctx.beginPath()
+      ctx.arc(st.x, st.y, st.r, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+  ctx.restore()
+}

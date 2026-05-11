@@ -12,14 +12,17 @@ import {
   getCustomSwatches,
   getEffectiveBrushConfig,
   getGrid,
+  getSettings,
   onChange,
   removeCustomSwatch,
   setGridSpacing,
   setGridType,
+  setPredictedEvents,
   setPresetField,
 } from '../settings'
 import { createSwatchAdd } from '../swatchadd'
 import { type ThemeMode, getMode as getThemeMode, setMode as setThemeMode } from '../theme'
+import { mountCurveEditor, renderCurveThumbnail } from './curve-editor'
 
 export interface PanelContentOptions {
   /** Called when the user clicks "Reset to defaults" — typically wires
@@ -46,6 +49,7 @@ export function createPanelContent(opts: PanelContentOptions): {
     renderFontsSection(),
     renderGridSection(),
     renderThemeSection(),
+    renderInputSection(),
     renderAdvancedSection(),
     renderResetFooter(opts.onResetClick),
   ]
@@ -93,8 +97,21 @@ function renderBrushCard(brushId: BrushId, parent: HTMLElement): { update: () =>
 
   const head = document.createElement('div')
   head.className = 'whiteboard-settings-brush-head'
-  head.textContent = BRUSH_LABELS[brushId]
   card.appendChild(head)
+
+  const title = document.createElement('span')
+  title.className = 'whiteboard-settings-brush-title'
+  title.textContent = BRUSH_LABELS[brushId]
+  head.appendChild(title)
+
+  // Clickable curve thumbnail — M2. Click toggles the inline curve editor.
+  const thumbBtn = document.createElement('button')
+  thumbBtn.type = 'button'
+  thumbBtn.className = 'whiteboard-settings-curve-thumb-btn'
+  thumbBtn.title = 'Edit pressure curve'
+  thumbBtn.setAttribute('aria-label', `Edit ${BRUSH_LABELS[brushId]} pressure curve`)
+  thumbBtn.appendChild(renderCurveThumbnail(brushId))
+  head.appendChild(thumbBtn)
 
   const sliders = {
     size: makeSlider('Size', 1, 24, 0.5, brushId, 'size'),
@@ -103,11 +120,38 @@ function renderBrushCard(brushId: BrushId, parent: HTMLElement): { update: () =>
   }
   card.append(sliders.size.el, sliders.opacity.el, sliders.pressureGamma.el)
 
+  // Inline curve-editor slot — visible only when this brush is expanded.
+  const curveSlot = document.createElement('div')
+  curveSlot.className = 'whiteboard-settings-curve-slot'
+  curveSlot.style.display = 'none'
+  card.appendChild(curveSlot)
+
+  let curveCleanup: (() => void) | null = null
+  const refreshThumb = (): void => {
+    thumbBtn.replaceChildren(renderCurveThumbnail(brushId))
+  }
+  thumbBtn.addEventListener('click', () => {
+    if (curveCleanup) {
+      curveCleanup()
+      curveCleanup = null
+      curveSlot.style.display = 'none'
+      return
+    }
+    curveSlot.style.display = ''
+    curveCleanup = mountCurveEditor(curveSlot, {
+      brushId,
+      onChange: refreshThumb,
+    })
+  })
+
   const resetLink = document.createElement('button')
   resetLink.type = 'button'
   resetLink.className = 'whiteboard-settings-reset-link'
   resetLink.textContent = 'Reset this preset'
-  resetLink.addEventListener('click', () => clearPreset(brushId))
+  resetLink.addEventListener('click', () => {
+    clearPreset(brushId)
+    refreshThumb()
+  })
   card.appendChild(resetLink)
 
   return {
@@ -115,6 +159,7 @@ function renderBrushCard(brushId: BrushId, parent: HTMLElement): { update: () =>
       sliders.size.update()
       sliders.opacity.update()
       sliders.pressureGamma.update()
+      refreshThumb()
     },
   }
 }
@@ -330,6 +375,48 @@ function renderThemeSection(): Section {
     el,
     update,
     dispose: () => document.documentElement.removeEventListener('themechange', update),
+  }
+}
+
+function renderInputSection(): Section {
+  const el = document.createElement('section')
+  el.appendChild(sectionLabel('Input'))
+
+  const row = document.createElement('div')
+  row.className = 'whiteboard-settings-pe-row'
+  el.appendChild(row)
+
+  const label = document.createElement('label')
+  label.className = 'whiteboard-settings-pe-label'
+  row.appendChild(label)
+
+  const title = document.createElement('span')
+  title.className = 'whiteboard-settings-pe-title'
+  title.textContent = 'Predicted events'
+  label.appendChild(title)
+
+  const help = document.createElement('span')
+  help.className = 'whiteboard-settings-pe-help'
+  help.textContent =
+    'Visual lookahead during drawing. Smoother on screen tablets (iPad, ' +
+    'Surface, MobileStudio); may flicker on indirect-input tablets like ' +
+    'Wacom Intuos. URL ?predict=1 forces on per-session.'
+  label.appendChild(help)
+
+  const input = document.createElement('input')
+  input.type = 'checkbox'
+  input.className = 'whiteboard-settings-pe-input'
+  input.checked = getSettings().predictedEvents
+  input.addEventListener('change', () => {
+    setPredictedEvents(input.checked)
+  })
+  row.appendChild(input)
+
+  return {
+    el,
+    update: () => {
+      input.checked = getSettings().predictedEvents
+    },
   }
 }
 

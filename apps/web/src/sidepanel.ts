@@ -58,6 +58,8 @@ export function showSidePanel(opts: SidePanelOptions): SidePanel {
 
   el.append(header, body)
   document.body.appendChild(el)
+  // Flag body so the bottom Help / Tool pills can step aside (CSS).
+  document.body.classList.add('panel-open')
 
   // Trigger slide-in animation on next frame.
   requestAnimationFrame(() => el.classList.add('open'))
@@ -70,6 +72,7 @@ export function showSidePanel(opts: SidePanelOptions): SidePanel {
     document.removeEventListener('keydown', onKey, true)
     el.classList.remove('open')
     el.classList.add('closing')
+    document.body.classList.remove('panel-open')
     setTimeout(() => {
       el.remove()
       opts.refocusOnClose?.focus({ preventScroll: true })

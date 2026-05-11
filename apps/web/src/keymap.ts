@@ -56,6 +56,18 @@ export interface KeyHandlers {
    * no-op for us; let the browser handle it (e.g. in a focused input)."
    */
   cancel: () => boolean
+
+  /** Toggle distraction-free mode (hides app chrome). Bound to `F`. M2. */
+  toggleDistractionFree: () => void
+
+  /** Cycle to the previous color in the curated palette. Bound to Shift+[. M2. */
+  cyclePaletteBackward: () => void
+  /** Cycle to the next color in the curated palette. Bound to Shift+]. M2. */
+  cyclePaletteForward: () => void
+
+  /** Open the export popover (PNG / SVG / PDF) at last pointer. Bound to
+   *  Cmd/Ctrl+E. M2. */
+  openExport: () => void
 }
 
 export function attachKeymap(handlers: KeyHandlers): () => void {
@@ -100,6 +112,11 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       }
       if (!shift && k === ',') {
         preventAndCall(e, handlers.togglePanel)
+        return
+      }
+      // Cmd/Ctrl+E — export popover (PNG / SVG / PDF) at cursor. M2.
+      if (!shift && k === 'e') {
+        preventAndCall(e, handlers.openExport)
         return
       }
     }
@@ -153,6 +170,11 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
         handlers.selectLassoTool()
         return
       }
+      // F — toggle distraction-free mode (hides chrome). M2.
+      if (k === 'f') {
+        handlers.toggleDistractionFree()
+        return
+      }
     }
 
     // Shift-modified single-letter bindings.
@@ -160,6 +182,17 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       // Shift+E: sticky eraser (the counterpart to plain E's spring-load).
       if (k === 'e') {
         handlers.selectEraserSticky()
+        return
+      }
+      // Shift+[ / Shift+] — cycle curated palette. M2.
+      // Note: `e.key` is `{` / `}` on most layouts when Shift is held with
+      // `[` / `]`. Match either the literal bracket or the shifted form.
+      if (e.key === '{' || (shift && k === '[')) {
+        handlers.cyclePaletteBackward()
+        return
+      }
+      if (e.key === '}' || (shift && k === ']')) {
+        handlers.cyclePaletteForward()
         return
       }
     }

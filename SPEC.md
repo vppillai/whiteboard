@@ -24,7 +24,7 @@ These aren't aspirational bullets. They are the test every design decision in th
 ### Goals
 
 - Lowest pen-to-photon latency achievable in a browser, tuned for Wacom Intuos (indirect input).
-- Drawing-first UX: floating toolbar, instant tool/color/size changes, dense keyboard shortcuts.
+- Drawing-first UX: instant tool/color/size changes via right-click menu + dense keyboard shortcuts. No persistent chrome above the canvas (per [ADR 0011](docs/decisions/0011-toolbar-deferred.md)).
 - Live multi-user collaboration with link-based sharing, owner-token-gated admin actions.
 - Single-command Docker deploy, `.env`-configured.
 - AI as v2: shape recognition, handwriting → text, math / LaTeX. v1 ships without AI.
@@ -155,13 +155,21 @@ Stored in Y.js as `Y.Array<Y.Map>`. Soft-deletes (not removals) so undo across c
 
 ### 4.1 Tool set (v1)
 
-Brush, Eraser (two modes — see below), Lasso-select, Pan, Color-eyedropper. That's it.
+Brush, Eraser (two modes — see below), Lasso-select, Pan. That's it.
 
 > **Eraser model:** the wipe-mode eraser is **segment-level** ("cuts through") — only the part of a stroke the eraser physically passes over disappears; disconnected parts of the original stroke survive as separate live runs. Implemented per [ADR 0008](docs/decisions/0008-segment-eraser.md) via a per-sample mask (`Stroke.erasedSamples`). The object-mode eraser (Shift-modifier or Item pill) is still whole-stroke deletion — surgical removal when you want a stroke gone entirely.
 
-### 4.2 Toolbar
+### 4.2 Discovery surfaces
 
-Floating, draggable, dockable to any edge. Compact (icon-only) with hover labels. Pen presets 1–5 always visible. Recent colors (last 8) inline. Long-press / right-click on a preset opens its config (size, curve, taper).
+No persistent toolbar above the canvas. Per-action discovery is covered by:
+
+- **Right-click context menu** (M1.5 → M1): COLOR · BRUSH · TOOL · VIEW · EXPORT · SETTINGS sections. Per-tool sections own themselves (ADR 0007).
+- **Keyboard shortcuts** (§ 4.3): every action has a single-keystroke or chord path.
+- **Color picker popover** (M1.5): `C` opens at cursor with curated + custom + recent colors.
+- **Settings side panel** (M1.7 + M2): brush preset tuning, custom swatches, theme, grid, advanced knobs, pressure curves, predicted-events toggle.
+- **First-run hint** (M2): empty-board guidance "Right-click for tools · ? for help" fades on first stroke; never shown again.
+
+The original toolbar commitment was retired during M2 brainstorming on tenet grounds (less chrome = less cognitive load). See [ADR 0011](docs/decisions/0011-toolbar-deferred.md) for the full rationale and considered alternatives.
 
 ### 4.3 Keyboard shortcuts
 
@@ -178,7 +186,8 @@ Floating, draggable, dockable to any edge. Compact (icon-only) with hover labels
 | Middle-mouse drag              | Pan                                       | ✅     |
 | `1`–`5`                        | Switch to brush preset 1–5                | M1     |
 | `[` / `]`                      | Decrease / increase size                  | M1     |
-| `Shift+[` / `Shift+]`          | Cycle color palette                       | M2     |
+| `Shift+[` / `Shift+]`          | Cycle color palette                       | ✅     |
+| `Cmd/Ctrl + E`                 | Export popover (PNG / SVG / PDF)          | ✅     |
 | `Cmd/Ctrl + ,`                 | Toggle settings panel                     | ✅     |
 | `Cmd/Ctrl + Z`                 | Undo                                      | ✅     |
 | `Cmd/Ctrl + Shift + Z`         | Redo (also `Cmd/Ctrl + Y`)                | ✅     |
@@ -189,13 +198,15 @@ Floating, draggable, dockable to any edge. Compact (icon-only) with hover labels
 | `Cmd/Ctrl + Shift + K`         | Clear board (confirm twice within 3 s)    | ✅     |
 | `M`                            | Toggle metrics HUD                        | ✅     |
 | `T`                            | Cycle theme (system → light → dark)       | ✅     |
-| `F`                            | Toggle fullscreen / hide UI               | M2     |
+| `F`                            | Toggle distraction-free (hide app chrome) | ✅     |
 | `?`                            | Toggle shortcut help overlay              | ✅     |
 | `Esc`                          | Cancel pending action (e.g. clear-confirm)| ✅     |
 
 ### 4.4 Pressure curve UI
 
-In settings: a small graph with draggable midpoint, plus a γ slider, plus a "test stroke" pad. Saved per-brush.
+In the settings panel's Brush presets section, each brush card shows a 30 × 18 px curve thumbnail next to its title. Click expands the card with a 200 × 120 px draggable-midpoint graph + 120 × 80 px test-stroke pad. Saved per-brush via `presets[brushId].pressureCurve?: { mid: [number, number] }` — sparse override of `pressureGamma`. The bezier representation (quadratic through-point at `mid` in normalized 0–1 coords) subsumes γ as a specific shape; γ continues to apply when no override exists.
+
+The thumbnail itself is the override-presence indicator: γ-shape vs bent. Changing brush presets between sessions is glance-readable in the panel.
 
 ## 5. Collaboration
 
@@ -209,7 +220,7 @@ In settings: a small graph with draggable midpoint, plus a γ slider, plus a "te
 
 - **Server**: SQLite. Snapshot the Y.doc to a blob column every 30 s of idle or on last-disconnect. On room load, hydrate from latest snapshot, then apply ws updates.
 - **Client**: IndexedDB caches the Y.doc via `y-indexeddb`. Offline = keep drawing; reconnect = CRDT merges.
-- **Export**: PNG (`canvas.toBlob`), SVG (custom serializer), PDF (`jspdf` wrapping the SVG). Single-click from toolbar.
+- **Export**: PNG (detached canvas + `canvas.toBlob`), SVG (custom serializer with mask-based erasure for `erasedStamps`), PDF (`jsPDF` wrapping a rasterized PNG; SVG-vector PDF deferred). Triggered via right-click → EXPORT or `Cmd/Ctrl+E`. Filename: `whiteboard-YYYY-MM-DD-HHMM.{ext}`. Empty board no-ops with a console warn (M2 future-work: surface "Nothing to export" toast).
 - **Import**: PNG/SVG drop onto canvas places it as a non-editable image layer (read-only in v1).
 
 ## 7. AI roadmap (v2)
@@ -284,7 +295,7 @@ Each milestone closes only after: feature complete, doc-update reviewed, lint + 
 
 ### Still open
 
-- **Toolbar UI framework**: vanilla TS + nanostores vs Solid.js. Decide at the start of M2 based on bundle-size headroom and the toolbar's reactive needs.
+- ~~**Toolbar UI framework**~~: dropped — toolbar deferred from v1 per [ADR 0011](docs/decisions/0011-toolbar-deferred.md). The settings panel + right-click + keyboard surfaces cover the discovery and one-click paths.
 - **Anonymous user names**: server-issued vs client-generated. Decide at M3.
 
 ### Backlog (post-v1; tracked, not committed)

@@ -40,6 +40,9 @@ export interface BrushConfig {
   /** 0..1 fill alpha. Defaults to 1 when omitted. < 1 produces visible
    *  layering where strokes overlap, which reads as "real ink". */
   opacity?: number
+  /** Optional override of pressureGamma. Quadratic bezier from (0,0) to mid to (1,1)
+   *  in normalized 0–1 coords. When present, replaces `pressureGamma` at render time. */
+  pressureCurve?: { mid: [number, number] }
 }
 
 export interface Stroke {

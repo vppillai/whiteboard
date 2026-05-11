@@ -24,7 +24,7 @@ import { boardToScreen } from '../camera'
 import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
 import { applyCamera, clearLayer, drawStrokePath } from '../render'
 import { getBrushId, getColor, setBrushId, setColor } from '../settings'
-import { effectiveOpacity, getStrokePath } from '../stroke'
+import { applyPressure, effectiveOpacity, getStrokePath } from '../stroke'
 import type { Tool, ToolContext } from './types'
 
 // Finder halo: constant screen-px ring drawn around the hover preview when
@@ -45,8 +45,12 @@ export interface PenToolCallbacks {
 
 export interface PenToolOptions {
   callbacks: PenToolCallbacks
-  /** When false, `getPredictedEvents()` is ignored. */
-  usePrediction?: boolean
+  /**
+   * Called once per pointermove to decide whether to use predicted events.
+   * Read every move so toggling the `settings.predictedEvents` setting at
+   * runtime takes effect immediately. M2 — was a captured boolean before.
+   */
+  shouldUsePrediction?: () => boolean
 }
 
 interface SampleSource {
@@ -58,18 +62,9 @@ interface SampleSource {
   timeStamp: number
 }
 
-const PALETTE: readonly string[] = [
-  'ink',
-  '#ef4444',
-  '#f97316',
-  '#eab308',
-  '#22c55e',
-  '#06b6d4',
-  '#3b82f6',
-  '#a855f7',
-  '#ec4899',
-  '#6b7280',
-]
+// Curated palette imported from colorpicker.ts to keep the right-click COLOR
+// section and the C-key popover synchronized (one list = one source of truth).
+import { CURATED_COLORS as PALETTE } from '../colorpicker'
 
 export function createPenTool(opts: PenToolOptions): Tool {
   let active: Stroke | null = null
@@ -86,7 +81,7 @@ export function createPenTool(opts: PenToolOptions): Tool {
     return {
       x,
       y,
-      p: applyGamma(e.pressure, brush.pressureGamma),
+      p: applyPressure(e.pressure, brush),
       tx: e.tiltX,
       ty: e.tiltY,
       t: e.timeStamp,
@@ -225,8 +220,17 @@ export function createPenTool(opts: PenToolOptions): Tool {
       } else {
         for (const ce of coalesced) active.samples.push(sample(ce, brush, ctx))
       }
-      predicted = opts.usePrediction
-        ? (e.getPredictedEvents?.() ?? []).map((pe) => sample(pe, brush, ctx))
+      // Cap predicted events at 2 to limit the "lead distance" of the
+      // visual lookahead. Browsers typically return 4–6 predicted events,
+      // but each predicted sample is an estimate that gets discarded and
+      // replaced on the next frame — fewer predicted samples = less visible
+      // "rubber band" glitch on direction changes. ADR 0004 documents the
+      // smoothness/glitch trade-off; 2 was the M2 feel-test sweet spot.
+      const PREDICTED_CAP = 2
+      predicted = opts.shouldUsePrediction?.()
+        ? (e.getPredictedEvents?.() ?? [])
+            .slice(0, PREDICTED_CAP)
+            .map((pe) => sample(pe, brush, ctx))
         : []
       renderAsFinal = false
       renderStroke(ctx)
