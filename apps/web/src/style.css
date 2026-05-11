@@ -1068,11 +1068,14 @@ body.distraction-free .whiteboard-popover {
   cursor: pointer;
 }
 
-/* Export popover content layout (M2 Cmd/Ctrl+E). */
+/* Export popover content layout (M2 Cmd/Ctrl+E). Column so Region and
+ * Format rows stack vertically — was row before, which clipped pills on
+ * the 320 px popover max-width. */
 .whiteboard-export-popover {
   display: flex;
-  gap: 6px;
-  padding: 8px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
 }
 .whiteboard-export-popover .whiteboard-export-pill {
   min-width: 56px;
