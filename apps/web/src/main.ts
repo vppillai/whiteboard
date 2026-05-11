@@ -41,7 +41,6 @@ import { createClearFlow } from './clearflow'
 import { CURATED_COLORS, cyclePaletteIndex, openColorPicker } from './colorpicker'
 import { exitDistractionFree, isDistractionFree, toggleDistractionFree } from './distractionfree'
 import { attachEraserHold } from './eraserhold'
-import { exportBoard } from './export'
 import { openExportPopover } from './exportpopover'
 import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid } from './grid'
@@ -447,10 +446,11 @@ async function main(): Promise<void> {
         },
         onClear: clearFlow.request,
         togglePanel,
-        onExport: (format) => {
-          // Right-click EXPORT defaults to 'all' (the quick-path). For per-
-          // export scope choice, use Cmd/Ctrl+E which shows the toggle.
-          void exportBoard(format, 'all', {
+        onExport: () => {
+          // Open the export popover at the same anchor — scope + format
+          // choice live there. Single source of truth for export decisions.
+          openExportPopover({
+            anchor: { x: e.clientX, y: e.clientY },
             getStrokes: () => strokes,
             camera,
             viewportWidth: target.width,

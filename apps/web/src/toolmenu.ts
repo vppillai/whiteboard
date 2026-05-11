@@ -48,9 +48,10 @@ export interface ToolMenuOptions {
   /** Toggle the settings side panel — wired by main.ts to the same flow as
    *  the Cmd/Ctrl+, shortcut and the toolpill gear. */
   togglePanel: () => void
-  /** Trigger an export by format. Wired by main.ts to `exportBoard(format)`.
-   *  M2 — symmetric with the Cmd/Ctrl+E popover. */
-  onExport: (format: 'png' | 'svg' | 'pdf') => void
+  /** Open the export popover (scope + format). Wired by main.ts to
+   *  `openExportPopover` at the right-click anchor. Single entry point so
+   *  scope choice is consistent with Cmd/Ctrl+E. */
+  onExport: () => void
 }
 
 export function openToolMenu(opts: ToolMenuOptions): Popover {
@@ -122,21 +123,22 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
   )
   root.appendChild(viewRow)
 
-  // EXPORT section — global, sibling to TOOL / VIEW. M2 § 6.7.6.
+  // EXPORT row — single pill that opens the export popover (scope + format).
+  // Symmetric with Cmd/Ctrl+E. M2 § 6.7.6 + feel-test pass: removed the
+  // three-format quick row because it bypassed the scope choice; one path
+  // now handles both scope ('Visible' / 'All') and format consistently.
   root.appendChild(separator())
   root.appendChild(sectionLabel('Export'))
   const exportRow = pillRow()
-  for (const fmt of ['png', 'svg', 'pdf'] as const) {
-    exportRow.appendChild(
-      pill({
-        label: fmt.toUpperCase(),
-        onClick: () => {
-          dismiss()
-          opts.onExport(fmt)
-        },
-      }),
-    )
-  }
+  exportRow.appendChild(
+    pill({
+      label: 'Export…',
+      onClick: () => {
+        dismiss()
+        opts.onExport()
+      },
+    }),
+  )
   root.appendChild(exportRow)
 
   // Settings — pen-friendly entry point matching the toolpill gear and the

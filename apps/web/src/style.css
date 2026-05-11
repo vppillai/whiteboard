@@ -5,6 +5,17 @@
   --fg-text: #1a1a1a;
   --fg-muted: #6b7280;
   --ink: #1a1a1a;
+  /* Chrome surfaces — panel/popover backgrounds (surface-1) and cards/pills
+     resting on top (surface-2). Define explicitly in BOTH themes; the
+     var(..., fallback) pattern downstream silently broke dark-mode contrast
+     when a token was defined in one theme but not the other. */
+  --surface-1: #f1f3f6;
+  --surface-2: rgba(0, 0, 0, 0.04);
+  --surface-hover: rgba(0, 0, 0, 0.06);
+  --text: #1a1a1a;
+  --text-muted: rgba(0, 0, 0, 0.55);
+  --border: rgba(0, 0, 0, 0.1);
+  --accent: #3b82f6;
   /* Grid colors: dots are pixel-sized so a low alpha reads as visible.
      Lines are spread across the whole canvas, so the per-pixel alpha must
      be higher to read at the same overall weight. */
@@ -26,6 +37,13 @@
   --fg-text: #e8eef5;
   --fg-muted: #8a93a3;
   --ink: #e8eef5;
+  --surface-1: #161b22;
+  --surface-2: rgba(255, 255, 255, 0.05);
+  --surface-hover: rgba(255, 255, 255, 0.08);
+  --text: #e8eef5;
+  --text-muted: rgba(232, 238, 245, 0.6);
+  --border: rgba(255, 255, 255, 0.1);
+  --accent: #3b82f6;
   --grid-dot: rgba(255, 255, 255, 0.16);
   --grid-line: rgba(255, 255, 255, 0.1);
   --hud-bg: rgba(20, 24, 30, 0.92);
@@ -45,6 +63,13 @@
     --fg-text: #e8eef5;
     --fg-muted: #8a93a3;
     --ink: #e8eef5;
+    --surface-1: #161b22;
+    --surface-2: rgba(255, 255, 255, 0.05);
+    --surface-hover: rgba(255, 255, 255, 0.08);
+    --text: #e8eef5;
+    --text-muted: rgba(232, 238, 245, 0.6);
+    --border: rgba(255, 255, 255, 0.1);
+    --accent: #3b82f6;
     --grid-dot: rgba(255, 255, 255, 0.16);
     --grid-line: rgba(255, 255, 255, 0.1);
     --hud-bg: rgba(20, 24, 30, 0.92);
@@ -680,8 +705,9 @@ body {
   right: 0;
   bottom: 0;
   width: 320px;
-  background: var(--surface-1, #f5f5f5);
-  border-left: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+  background: var(--surface-1);
+  color: var(--text);
+  border-left: 1px solid var(--border);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
