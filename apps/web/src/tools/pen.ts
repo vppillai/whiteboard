@@ -220,8 +220,17 @@ export function createPenTool(opts: PenToolOptions): Tool {
       } else {
         for (const ce of coalesced) active.samples.push(sample(ce, brush, ctx))
       }
+      // Cap predicted events at 2 to limit the "lead distance" of the
+      // visual lookahead. Browsers typically return 4–6 predicted events,
+      // but each predicted sample is an estimate that gets discarded and
+      // replaced on the next frame — fewer predicted samples = less visible
+      // "rubber band" glitch on direction changes. ADR 0004 documents the
+      // smoothness/glitch trade-off; 2 was the M2 feel-test sweet spot.
+      const PREDICTED_CAP = 2
       predicted = opts.shouldUsePrediction?.()
-        ? (e.getPredictedEvents?.() ?? []).map((pe) => sample(pe, brush, ctx))
+        ? (e.getPredictedEvents?.() ?? [])
+            .slice(0, PREDICTED_CAP)
+            .map((pe) => sample(pe, brush, ctx))
         : []
       renderAsFinal = false
       renderStroke(ctx)
