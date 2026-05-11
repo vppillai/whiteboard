@@ -67,8 +67,9 @@ export interface StampEdit {
 export interface EraserToolCallbacks {
   /** Returns the live strokes list. Called on each hit-test. */
   getStrokes: () => readonly Stroke[]
-  /** Object mode: emit a whole-stroke delete op. Called once per tap. */
-  onObjectErase: (strokeIds: string[]) => void
+  /** Object mode: emit a whole-stroke delete op for the topmost stroke at
+   *  the tap point. Called at most once per gesture at pointerup. */
+  onObjectErase: (strokeId: string) => void
   /** Wipe mode: emit a pixel-mask op for the per-stroke stamp edits.
    *  Called once per gesture at pointerup. */
   onWipeErase: (edits: StampEdit[]) => void
@@ -123,8 +124,11 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
   // `eraseStamps` op at pointerup. Read by the render loop via
   // `getPendingStamps()` so the cut shows live before the op commits.
   const pending = new Map<string, Stamp[]>()
-  // Strokes deleted in object mode this gesture (passed to `onObjectErase`).
-  const objectDeleted = new Set<string>()
+  // Object-mode is single-tap: only the topmost stroke under the cursor at
+  // pointerup is deleted. The matched id is captured at pointerup and
+  // handed to `onObjectErase` exactly once. (Pre-#7 this was a Set wired
+  // for sweep-delete that was never implemented.)
+  let objectDeletedId: string | null = null
   let active = false
   let mode: EraserGestureMode = 'wipe'
   // Last cursor position + mode the live layer was painted with. The render
@@ -164,20 +168,19 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
     return any
   }
 
-  /** Object-mode hit: soft-delete the topmost whole stroke under the cursor. */
-  const objectHit = (px: number, py: number): boolean => {
+  /** Object-mode hit: identify the topmost whole stroke under the cursor.
+   *  Returns the matched id (or null). Pure read — the op pipeline owns
+   *  the deletion via `applyOp({ kind: 'delete' })` so the mutation is
+   *  CRDT-friendly when M3 wraps strokes as Y.Map. */
+  const objectHit = (px: number, py: number): string | null => {
     const r = radius()
     const strokes = opts.callbacks.getStrokes()
     for (let i = strokes.length - 1; i >= 0; i--) {
       const stroke = strokes[i]
-      if (!stroke || stroke.deleted || objectDeleted.has(stroke.id)) continue
-      if (strokeNearPoint(stroke, px, py, r)) {
-        objectDeleted.add(stroke.id)
-        stroke.deleted = true
-        return true
-      }
+      if (!stroke || stroke.deleted) continue
+      if (strokeNearPoint(stroke, px, py, r)) return stroke.id
     }
-    return false
+    return null
   }
 
   /** Paint the cursor at the given board point. Caller is responsible for
@@ -220,7 +223,7 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
   const cancel = (): void => {
     active = false
     pending.clear()
-    objectDeleted.clear()
+    objectDeletedId = null
     lastCursor = null
   }
 
@@ -235,7 +238,7 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
       const wantObject = e.shiftKey || getEraserMode() === 'item'
       mode = wantObject ? 'object' : 'wipe'
       pending.clear()
-      objectDeleted.clear()
+      objectDeletedId = null
       if (mode === 'wipe') {
         if (sweepHit(x, y)) ctx.markCommittedDirty()
       }
@@ -269,8 +272,8 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
       active = false
       if (mode === 'object') {
         const { x, y } = ctx.toBoard(e.clientX, e.clientY)
-        if (objectHit(x, y)) ctx.markCommittedDirty()
-        if (objectDeleted.size > 0) opts.callbacks.onObjectErase([...objectDeleted])
+        objectDeletedId = objectHit(x, y)
+        if (objectDeletedId) opts.callbacks.onObjectErase(objectDeletedId)
       } else if (pending.size > 0) {
         // Build edits, drain pending, then emit op. Drain BEFORE emit so
         // the render pass triggered by applyOp's markDirty doesn't double-
@@ -282,7 +285,7 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
         pending.clear()
         opts.callbacks.onWipeErase(edits)
       }
-      objectDeleted.clear()
+      objectDeletedId = null
       // Gesture is over. Clear the cached cursor + live layer; hover render
       // will reappear on the next pointermove.
       lastCursor = null

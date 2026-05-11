@@ -274,9 +274,8 @@ async function main(): Promise<void> {
   const eraserTool: EraserTool = createEraserTool({
     callbacks: {
       getStrokes: () => strokes,
-      onObjectErase: (ids) => {
-        if (ids.length === 0) return
-        const op: Op = { kind: 'delete', strokeIds: ids }
+      onObjectErase: (id) => {
+        const op: Op = { kind: 'delete', strokeIds: [id] }
         applyOp(op, opCtx)
         pushUndoOp(op)
       },
