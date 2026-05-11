@@ -39,7 +39,7 @@ export interface ToolContext {
   markCommittedDirty(): void
 }
 
-export type ToolId = 'pen' | 'eraser' | 'lasso' | 'eyedropper' | 'laser' | 'text'
+export type ToolId = 'pen' | 'eraser' | 'lasso' | 'laser' | 'text'
 
 export interface Tool {
   id: ToolId
@@ -70,11 +70,4 @@ export interface Tool {
   /** Optional teardown when the tool is being deactivated (e.g. user
    *  switches to another tool). Cancel any in-flight gesture cleanly. */
   cleanup?(): void
-  /**
-   * Called when the orchestrator activates this tool. `prevToolId` is the
-   * id of the tool being deactivated — used by tools that revert (e.g. the
-   * eyedropper, which captures the caller's tool to switch back after a
-   * successful sample). Optional. M2.
-   */
-  onActivate?(prevToolId: ToolId, ctx: ToolContext): void
 }

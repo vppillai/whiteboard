@@ -155,11 +155,9 @@ Stored in Y.js as `Y.Array<Y.Map>`. Soft-deletes (not removals) so undo across c
 
 ### 4.1 Tool set (v1)
 
-Brush, Eraser (two modes — see below), Lasso-select, Pan, Color-eyedropper. That's it.
+Brush, Eraser (two modes — see below), Lasso-select, Pan. That's it.
 
 > **Eraser model:** the wipe-mode eraser is **segment-level** ("cuts through") — only the part of a stroke the eraser physically passes over disappears; disconnected parts of the original stroke survive as separate live runs. Implemented per [ADR 0008](docs/decisions/0008-segment-eraser.md) via a per-sample mask (`Stroke.erasedSamples`). The object-mode eraser (Shift-modifier or Item pill) is still whole-stroke deletion — surgical removal when you want a stroke gone entirely.
-
-> **Color eyedropper** activated via `I` (modal tool, ADR 0007 conformance). Samples color from the strokes offscreen layer at the cursor pixel; on pointerdown commits to the active brush color and reverts to the previous tool. Grid pixels live on the committed layer and never sample (clean by construction). Implemented at M2.
 
 ### 4.2 Discovery surfaces
 
@@ -189,7 +187,6 @@ The original toolbar commitment was retired during M2 brainstorming on tenet gro
 | `1`–`5`                        | Switch to brush preset 1–5                | M1     |
 | `[` / `]`                      | Decrease / increase size                  | M1     |
 | `Shift+[` / `Shift+]`          | Cycle color palette                       | ✅     |
-| `I`                            | Color eyedropper                          | ✅     |
 | `Cmd/Ctrl + E`                 | Export popover (PNG / SVG / PDF)          | ✅     |
 | `Cmd/Ctrl + ,`                 | Toggle settings panel                     | ✅     |
 | `Cmd/Ctrl + Z`                 | Undo                                      | ✅     |

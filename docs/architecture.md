@@ -80,7 +80,6 @@ Key submodules:
 | `toolpill.ts`   | M1 ✅    | Bottom-right active-tool indicator + tap-to-cycle. Pen-friendly one-step activation alongside `S` / `B` / `P` / right-click TOOL menu. |
 | `firstrun.ts`   | M2 ✅    | First-run hint mount + dismissal; localStorage flag.    |
 | `distractionfree.ts` | M2 ✅ | F-toggle distraction-free mode; hides app chrome via body class. |
-| `tools/eyedropper.ts` | M2 ✅ | Color eyedropper Tool. ADR 0007 conformance; samples strokes offscreen layer; reverts to previous tool on commit. |
 | `settings/curve-editor.ts` | M2 ✅ | SVG curve graph + draggable midpoint + test pad + thumbnail renderer. |
 | `exportpopover.ts`| M2 ✅    | Cmd/Ctrl+E export popover (PNG / SVG / PDF pills).      |
 | `export/bounds.ts`| M2 ✅    | Compute board bounds + 32 px margin from non-deleted strokes' AABBs. |
@@ -242,7 +241,7 @@ This section reflects what is *actually in the code right now*. It is updated at
 | **Floating toolbar / palette**    | 🟡 Deferred    | M2 — dropped per [ADR 0011](decisions/0011-toolbar-deferred.md); right-click + keyboard + side panel cover discovery. |
 | **Pressure curve UI**             | ✅ Complete    | M2; inline collapsed thumbnail per Brush preset card; bezier-midpoint (through-point) editor + test pad. |
 | **Predicted-events toggle**       | ✅ Complete    | M2; settings panel Advanced section; URL `?predict=1` continues to override. |
-| **Color eyedropper tool**         | ✅ Complete    | M2; `I` key, samples strokes offscreen layer, reverts to prev tool. |
+| **Color eyedropper tool**         | 🟡 Descoped    | M2 — descoped at feel-test on tenet grounds; right-click + color picker (`C`) cover the use case. |
 | **First-run hint**                | ✅ Complete    | M2; localStorage `whiteboard:hint-shown`; fades on first stroke commit. |
 | **Distraction-free mode (`F`)**   | ✅ Complete    | M2; `body.distraction-free` hides chrome; Esc/F exits. |
 | **Palette cycle (`Shift+[/]`)**   | ✅ Complete    | M2; cycles 10 curated colors with wraparound. |

@@ -200,7 +200,7 @@ The toolbar UI is **explicitly held back to M2** so this milestone stays tight. 
 
 > **Closed 2026-05-10.** Tag `m2-export-polish` pending Wacom Intuos feel-test signoff. Toolbar UI dropped per [ADR 0011](decisions/0011-toolbar-deferred.md).
 
-**Scope (post-brainstorm; see [spec](superpowers/specs/2026-05-09-m2-export-polish-design.md)).** Color eyedropper tool, first-run hint, `Shift+[/]` palette cycle, `F` distraction-free, pressure curve UI per brush (inline collapsed thumbnail + bezier-midpoint editor + test pad), predicted-events toggle in settings, PNG/SVG/PDF export via right-click EXPORT row + `Cmd/Ctrl+E` popover.
+**Scope (post-brainstorm; see [spec](superpowers/specs/2026-05-09-m2-export-polish-design.md)).** First-run hint, `Shift+[/]` palette cycle, `F` distraction-free, pressure curve UI per brush (inline collapsed thumbnail + bezier-midpoint editor + test pad), predicted-events toggle in settings, PNG/SVG/PDF export via right-click EXPORT row + `Cmd/Ctrl+E` popover. **Color eyedropper was built then descoped at feel-test** — the right-click COLOR section and `C` picker already serve the use case without a modal tool.
 
 The original SPEC § 4.2 toolbar commitment was dropped during brainstorm on tenet grounds (less chrome = less cognitive load); existing surfaces (right-click menu, keyboard shortcuts, settings panel) cover the discovery and one-click paths a toolbar would have served. The image-paste workflow was deferred to a future M5.1 milestone (BoardObject discriminated union is its own architectural surface).
 
@@ -208,7 +208,6 @@ Mid-milestone, a perceived drawing-latency drift triggered a defensive **Option 
 
 **Exit criteria.**
 
-- [x] Color eyedropper modal tool (`I` key + right-click TOOL pill) samples strokes offscreen layer, commits + reverts on pointerdown.
 - [x] First-run hint fades on first stroke commit; localStorage flag prevents re-show.
 - [x] `Shift+[` / `Shift+]` cycles 10 curated colors with wraparound; skips custom + recent.
 - [x] `F` toggles distraction-free; hides app chrome; Esc / F exits.
