@@ -67,8 +67,8 @@ import {
 } from './settings'
 import { createPanelContent } from './settings/panel-content'
 import { dismissSidePanel, isSidePanelOpen, showSidePanel } from './sidepanel'
-import { clearAllStrokes, loadAllStrokes, saveStroke } from './storage'
 import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
+import { type StrokeStore, createLocalStrokeStore } from './strokestore'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { openToolMenu } from './toolmenu'
 import { createToolPill } from './toolpill'
@@ -123,6 +123,12 @@ let perfRecording: number[] | null = null
 
 async function main(): Promise<void> {
   initTheme()
+
+  // M3 sync seam: main.ts talks to a `StrokeStore` interface rather than
+  // calling storage.ts directly. M2.1 wires up the local IDB-backed
+  // implementation; M3 will swap in a Y.Doc-backed store with the same
+  // surface (load / save / delete / clear + onRemoteChange).
+  const strokeStore: StrokeStore = createLocalStrokeStore()
 
   const root = document.getElementById('app')
   if (!root) throw new Error('#app not found')
@@ -198,7 +204,7 @@ async function main(): Promise<void> {
   let committedDirty = true
 
   try {
-    const persisted = await loadAllStrokes()
+    const persisted = await strokeStore.load()
     strokes.push(...persisted)
   } catch (err) {
     console.warn('whiteboard/web: failed to load persisted strokes:', err)
@@ -243,7 +249,7 @@ async function main(): Promise<void> {
   const opCtx: OpContext = {
     strokes,
     saveStroke: (s) => {
-      void saveStroke(s).catch((err) => {
+      void strokeStore.save(s).catch((err) => {
         console.warn('whiteboard/web: failed to persist stroke:', err)
       })
     },
@@ -264,7 +270,7 @@ async function main(): Promise<void> {
         // First-run hint fades on first stroke commit. Idempotent — no-ops
         // after the first call and after the localStorage flag is set.
         dismissFirstRunHint()
-        void saveStroke(stroke).catch((err) => {
+        void strokeStore.save(stroke).catch((err) => {
           console.warn('whiteboard/web: failed to persist stroke:', err)
         })
       },
@@ -513,7 +519,7 @@ async function main(): Promise<void> {
       camera.scale = 1
       committedDirty = true
       clearView()
-      void clearAllStrokes().catch((err) => {
+      void strokeStore.clear().catch((err) => {
         console.warn('whiteboard/web: clear failed:', err)
       })
     },
