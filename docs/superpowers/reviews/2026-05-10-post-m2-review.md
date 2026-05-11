@@ -5,9 +5,14 @@
 **Branch:** `main` at tag `m2-export-polish`
 **Scope:** Whole codebase — simplicity, maintainability, consistency, correctness
 
+**Status (2026-05-10):** All 12 numbered issues and both observations
+addressed on branch `m2.1-pre-m3-hardening`. See the M2.1 section in
+`CHANGELOG.md` and the commit log (`git log --grep=review`) for the
+per-issue commits.
+
 ---
 
-## Headline — Three Things to Fix Before M3
+## Headline — Three Things to Fix Before M3  ✅ DONE
 
 1. **Introduce a `StrokeStore` interface seam in `main.ts` before writing any sync code** (#9). This is the highest-leverage structural change. Without it, M3 sync will either pile into the existing 1067-line closure or require a disruptive refactor mid-milestone. A `StrokeStore` abstraction with `load()`, `save()`, `clear()`, and `onRemoteChange()` methods takes half a day to extract and makes local-vs-room branching trivial.
 
@@ -19,7 +24,7 @@
 
 ## Critical
 
-### 1. Object-mode eraser mutates `stroke.deleted` directly — bypasses op layer, will break under CRDT
+### 1. [DONE] Object-mode eraser mutates `stroke.deleted` directly — bypasses op layer, will break under CRDT
 
 **Location:** `apps/web/src/tools/eraser.ts:175-176, 270-273`
 
@@ -31,7 +36,7 @@
 
 ---
 
-### 2. `deleteStroke` exported but never called — soft-deleted strokes accumulate in IDB forever
+### 2. [DONE] `deleteStroke` exported but never called — soft-deleted strokes accumulate in IDB forever
 
 **Location:** `apps/web/src/storage.ts:59-67`
 
@@ -45,7 +50,7 @@
 
 ## Important
 
-### 3. Dead code: `applyGamma` in `pen.ts`
+### 3. [DONE] Dead code: `applyGamma` in `pen.ts`
 
 **Location:** `apps/web/src/tools/pen.ts:299-302`
 
@@ -57,7 +62,7 @@ Pre-M2 implementation orphaned when `applyPressure` was promoted to `stroke.ts`.
 
 ---
 
-### 4. `fonts` field is dead schema weight — persisted for explicitly-deferred Text tool
+### 4. [DONE] `fonts` field is dead schema weight — persisted for explicitly-deferred Text tool
 
 **Location:** `apps/web/src/settings.ts:74`; `apps/web/src/settings/panel-content.ts:293-300`
 
@@ -69,7 +74,7 @@ Pre-M2 implementation orphaned when `applyPressure` was promoted to `stroke.ts`.
 
 ---
 
-### 5. `getComputedStyle` called inside 60 Hz render loop
+### 5. [DONE] `getComputedStyle` called inside 60 Hz render loop
 
 **Location:** `apps/web/src/grid.ts:34`
 
@@ -81,7 +86,7 @@ Pre-M2 implementation orphaned when `applyPressure` was promoted to `stroke.ts`.
 
 ---
 
-### 6. `Stroke.startedAt` uses `performance.now()` — will collide in CRDT merge
+### 6. [DONE] `Stroke.startedAt` uses `performance.now()` — will collide in CRDT merge
 
 **Location:** `apps/web/src/tools/pen.ts:187`; `packages/shared/src/types.ts:53`
 
@@ -93,7 +98,7 @@ Pre-M2 implementation orphaned when `applyPressure` was promoted to `stroke.ts`.
 
 ---
 
-### 7. Object-mode eraser only fires at `pointerUp` — multi-id callback path is dead
+### 7. [DONE] Object-mode eraser only fires at `pointerUp` — multi-id callback path is dead
 
 **Location:** `apps/web/src/tools/eraser.ts:243-265, 272-273`
 
@@ -107,7 +112,7 @@ In object mode, `onPointerMove` doesn't call `objectHit` — just repaints curso
 
 ---
 
-### 8. Curve editor uses hardcoded hex colors — invisible in dark mode
+### 8. [DONE] Curve editor uses hardcoded hex colors — invisible in dark mode
 
 **Location:** `apps/web/src/settings/curve-editor.ts:78-107`
 
@@ -119,7 +124,7 @@ Diagonal reference line (`#d4d4d8`) and four quarter-grid lines (`#f4f4f5`) are 
 
 ---
 
-### 9. `main.ts` has no seam for M3 local-vs-sync branching
+### 9. [DONE] `main.ts` has no seam for M3 local-vs-sync branching
 
 **Location:** `apps/web/src/main.ts` (entire file, ~1067 lines)
 
@@ -133,7 +138,7 @@ The cost of not decomposing: M3 sync work will either (a) be crammed into `main.
 
 ---
 
-### 10. SVG export uses straight-line polyline — visual mismatch with canvas curves
+### 10. [DONE] SVG export uses straight-line polyline — visual mismatch with canvas curves
 
 **Location:** `apps/web/src/export/svg.ts:123-136`
 
@@ -145,7 +150,7 @@ Canvas render in `stroke.ts`'s `outlineToPath2D` uses `quadraticCurveTo` between
 
 ---
 
-### 11. `Sample.t` uses `performance.now()` and is persisted — epoch-crosses across page reloads
+### 11. [DONE] `Sample.t` uses `performance.now()` and is persisted — epoch-crosses across page reloads
 
 **Location:** `packages/shared/src/types.ts:18`; `apps/web/src/tools/pen.ts:87`
 
@@ -157,7 +162,7 @@ Canvas render in `stroke.ts`'s `outlineToPath2D` uses `quadraticCurveTo` between
 
 ---
 
-### 12. `renderCurveThumbnail` rebuilds SVG for every unrelated settings change
+### 12. [DONE] `renderCurveThumbnail` rebuilds SVG for every unrelated settings change
 
 **Location:** `apps/web/src/settings/panel-content.ts:113, 131`
 
