@@ -198,6 +198,7 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
     }
 
     if (e.key === '?' || (shift && e.key === '/')) {
+      e.preventDefault()
       handlers.toggleHelp()
     }
   }

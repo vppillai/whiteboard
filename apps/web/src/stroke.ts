@@ -126,6 +126,11 @@ export function getStrokePath(
     streamline: stroke.brush.streamline,
     start: { taper: stroke.brush.taperStart, cap: stroke.brush.capStart },
     end: { taper: stroke.brush.taperEnd, cap: stroke.brush.capEnd },
+    // Match the SVG/PDF export path: pressure already gamma/curve-applied
+    // at sample time, so perfect-freehand's velocity-derived simulation
+    // would just blur the curve we already authored. Keep both paths
+    // identical so WYSIWYG exports stay consistent with the canvas.
+    simulatePressure: false,
     last,
   })
 
