@@ -13,7 +13,8 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | M1.4 | Refactor pass: tool abstraction, op-based undo, soft-delete, decompose main.ts | ✅ *(closed 2026-05-09; tagged `m1.4-refactor`)* |
 | M1 | Tool surface refactor + eraser (pixel-mask wipe + object) + brush presets + lasso | ✅ *(closed 2026-05-09; tagged `m1-eraser-lasso`)* |
 | M1.7 | Settings side panel + sync-ready schema (brush presets, fonts, swatches) | ✅ *(closed 2026-05-09; tagged `m1.7-settings-panel`)* |
-| M2 | Export, settings polish, eyedropper, distraction-free                    | ✅ *(closed 2026-05-10; tag pending feel-test)* |
+| M2 | Export, settings polish, eyedropper, distraction-free                    | ✅ *(closed 2026-05-10; tagged `m2-export-polish`)* |
+| M2.1 | Pre-M3 hardening — review-driven fixes; StrokeStore seam; identity scrub | ✅ *(closed 2026-05-10; tagged `m2.1-pre-m3-hardening`)* |
 | M3 | Server, sync, room URLs                                                  | ⬜     |
 | M4 | Production deployment polish                                             | ⬜     |
 | M4.5 | PWA install + offline (manifest, service worker)                       | ⬜     |

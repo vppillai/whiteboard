@@ -6,6 +6,69 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 ## [Unreleased]
 
+### Added (M2.1 — pre-M3 hardening)
+
+- **`StrokeStore` interface seam** (`apps/web/src/strokestore.ts`). `main.ts`
+  now talks to a `StrokeStore` (load / save / delete / clear + an
+  `onRemoteChange` stub) instead of calling `storage.ts` directly. M3 will
+  add a Y.Doc-backed implementation with the same surface — sync becomes
+  a single-line factory swap at startup rather than a refactor of
+  `main.ts`'s 1067-line closure.
+- **IDB compaction on load.** Strokes loaded with `deleted === true` have
+  no undo path (undo stack is empty on startup) — hard-delete them in a
+  background fire-and-forget after load. `partitionForCompaction` is the
+  pure helper, unit-testable without an IDB polyfill.
+
+### Changed (M2.1)
+
+- **Identity scrub.** Copyright updated to `Vysakh Pillai (embeddedinn.ca)`;
+  local git author identity going-forward is `Vysakh Pillai
+  <vysakhpillai@gmail.com>`. Past commits retain the GitHub noreply email
+  (no history rewrite).
+- **`Stroke.startedAt` is now `Date.now()`** (wall-clock ms) instead of
+  `performance.now()` (tab-relative). Required for cross-peer chronological
+  z-order at M3 — performance.now's tab-origin epoch would have interleaved
+  two peers' strokes non-chronologically when sorted into the render order.
+- **`Sample.t` is now elapsed ms from pointerdown** (`t = 0` at first
+  sample). Epoch-independent; survives page reloads and is comparable
+  across peers. Pre-#11 it was an absolute `performance.now()` value that
+  carried stale navigation-epoch timestamps across reloads.
+- **Object-eraser no longer mutates `stroke.deleted` directly.** The
+  deletion path is now exclusive to the op pipeline (`applyOp →
+  flipDeleted`), which makes it CRDT-compatible when M3 wraps `Stroke`
+  as `Y.Map` (direct field assignment doesn't propagate through Y.js).
+  Collapsed the unused multi-id `objectDeleted: Set<string>` machinery
+  to a single `objectDeletedId: string | null` — object mode only ever
+  deletes one stroke per tap.
+- **Right-click EXPORT row** removed (now part of M2's polish, but
+  reinforced in M2.1's StrokeStore commit). The `Export…` pill opens the
+  popover so scope choice is consistent with Cmd/Ctrl+E.
+- **SVG export uses quadratic curves** (`Q cur midX midY`) matching the
+  canvas hull `quadraticCurveTo`. WYSIWYG fidelity restored — short
+  strokes no longer exported with sharp corners.
+- **Canvas `getStrokePath` passes `simulatePressure: false`** so the canvas
+  and exports use the same perfect-freehand options. Pressure is already
+  gamma/curve-applied at sample time; PF's velocity simulation would
+  re-author the curve and diverge from the file.
+- **Curve editor SVG reference + grid lines** now use `var(--border, …)`
+  instead of hardcoded light-theme grays — visible in dark mode.
+- **Brush thumbnail re-render gated** to inputs that actually affect its
+  output (`pressureGamma`, `pressureCurve.mid`). Unrelated settings
+  changes (color, grid, swatch) no longer trigger N × SVG rebuild.
+- **Grid theme tokens cached** at module scope (`grid.ts`). `getComputedStyle`
+  was forcing a style recalc every 60 Hz frame during pan/zoom. Tokens
+  are invalidated by the existing `themechange` listener.
+- **`fonts` field removed from `SettingsV1`.** Was reserved for the
+  descoped Text tool. Will be re-introduced on a V1 → V2 schema bump
+  when Text actually lands.
+- **`applyGamma` dead code** removed from `pen.ts`.
+
+### Fixed (M2.1)
+
+- **Help-key handler `preventDefault`s** so the browser's own
+  `Shift+/` shortcuts (Firefox quick-find, etc.) don't fire alongside
+  the in-app help toggle.
+
 ### Added (M2 — export, polish, settings addenda)
 
 - **Export PNG / SVG / PDF.** Right-click → EXPORT row (sibling to TOOL / VIEW / SETTINGS) with PNG / SVG / PDF pills, and `Cmd/Ctrl+E` opens a popover at cursor with the same three pills. Both paths converge on `exportBoard(format, { getStrokes })`. Filename: `whiteboard-YYYY-MM-DD-HHMM.{ext}`. Defaults: all non-deleted strokes, fit to bounding box + 32 px margin, PNG at 1× DPR. PDF embeds a rasterized PNG (SVG-vector PDF deferred per spec § 9 — `jspdf` SVG support is uneven). SVG export uses `<mask>` with subtractive `<circle>` per `erasedStamp` so partial-erased strokes export with their holes intact. Highlighter strokes (opacity < 0.6 + thinning === 0) export with `mix-blend-mode: multiply`. `jspdf` (~70 KB gz) is dynamically imported on first PDF export so non-PDF users never load it. Empty board: `exportBoard` no-ops with a console warn (a toast is a future polish).
