@@ -75,6 +75,12 @@ export function createPenTool(opts: PenToolOptions): Tool {
   // change, theme change, undo) — without it the brush cursor would blink
   // off until the next pointermove.
   let lastHover: { x: number; y: number } | null = null
+  // Performance-clock origin captured at pointerdown. `Sample.t` is the
+  // elapsed milliseconds since this origin (epoch-independent, survives
+  // page reload, comparable across peers). `Stroke.startedAt` is a
+  // separate wall-clock timestamp (Date.now) used as the render-order
+  // sort key — it must come from the same time base on every peer.
+  let strokeStartPerfTime = 0
 
   const sample = (e: SampleSource, brush: BrushConfig, ctx: ToolContext): Sample => {
     const { x, y } = ctx.toBoard(e.clientX, e.clientY)
@@ -84,7 +90,7 @@ export function createPenTool(opts: PenToolOptions): Tool {
       p: applyPressure(e.pressure, brush),
       tx: e.tiltX,
       ty: e.tiltY,
-      t: e.timeStamp,
+      t: Math.max(0, e.timeStamp - strokeStartPerfTime),
     }
   }
 
@@ -180,11 +186,12 @@ export function createPenTool(opts: PenToolOptions): Tool {
 
     onPointerDown(e, ctx) {
       const brush = ctx.getBrush()
+      strokeStartPerfTime = e.timeStamp
       active = {
         id: makeId(),
         brush,
         samples: [sample(e, brush, ctx)],
-        startedAt: e.timeStamp,
+        startedAt: Date.now(),
       }
       predicted = []
       renderAsFinal = false
