@@ -126,7 +126,19 @@ function renderBrushCard(brushId: BrushId, parent: HTMLElement): { update: () =>
   card.appendChild(curveSlot)
 
   let curveCleanup: (() => void) | null = null
+  // Snapshot of the inputs the thumbnail derives from. Compare on every
+  // update tick so unrelated settings changes (color, grid, swatches…)
+  // don't trigger N×SVG-rebuild churn. Pre-#12 we replaceChildren'd on
+  // every global onChange tick.
+  let thumbSnapshot = thumbnailFingerprint(brushId)
   const refreshThumb = (): void => {
+    thumbSnapshot = thumbnailFingerprint(brushId)
+    thumbBtn.replaceChildren(renderCurveThumbnail(brushId))
+  }
+  const refreshThumbIfChanged = (): void => {
+    const next = thumbnailFingerprint(brushId)
+    if (next === thumbSnapshot) return
+    thumbSnapshot = next
     thumbBtn.replaceChildren(renderCurveThumbnail(brushId))
   }
   thumbBtn.addEventListener('click', () => {
@@ -158,9 +170,21 @@ function renderBrushCard(brushId: BrushId, parent: HTMLElement): { update: () =>
       sliders.size.update()
       sliders.opacity.update()
       sliders.pressureGamma.update()
-      refreshThumb()
+      refreshThumbIfChanged()
     },
   }
+}
+
+/**
+ * Stable string fingerprint of the inputs `renderCurveThumbnail` reads
+ * (pressureCurve.mid + pressureGamma after preset resolution). Cheap to
+ * compute; cheap to compare. Equal fingerprints ⇒ the thumbnail would
+ * render the same SVG ⇒ skip the rebuild.
+ */
+function thumbnailFingerprint(brushId: BrushId): string {
+  const eff = getEffectiveBrushConfig(brushId, '#000000')
+  const mid = eff.pressureCurve?.mid
+  return `${eff.pressureGamma ?? 1}|${mid ? `${mid[0]},${mid[1]}` : 'none'}`
 }
 
 type NumericPresetField =
