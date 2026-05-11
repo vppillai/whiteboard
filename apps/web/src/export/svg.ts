@@ -121,15 +121,29 @@ function escapeAttr(s: string): string {
 }
 
 function outlineToPath(outline: number[][]): string {
-  if (outline.length === 0) return ''
-  const parts: string[] = []
+  const n = outline.length
+  if (n === 0) return ''
   const first = outline[0]
   if (!first || first[0] === undefined || first[1] === undefined) return ''
-  parts.push(`M ${fmt(first[0])} ${fmt(first[1])}`)
-  for (let i = 1; i < outline.length; i++) {
-    const p = outline[i]
-    if (!p || p[0] === undefined || p[1] === undefined) continue
-    parts.push(`L ${fmt(p[0])} ${fmt(p[1])}`)
+
+  // Mirror the canvas path in stroke.ts `outlineToPath2D`: quadratic-curve
+  // hull around the outline points using `Q cur midX midY`. This matches
+  // `quadraticCurveTo(cur_x, cur_y, midX, midY)` exactly, so the exported
+  // SVG renders identically to the on-screen canvas (no sharp corners on
+  // short strokes — the WYSIWYG export tenet).
+  const parts: string[] = [`M ${fmt(first[0])} ${fmt(first[1])}`]
+  for (let i = 0; i < n; i++) {
+    const cur = outline[i]
+    const nxt = outline[(i + 1) % n]
+    if (!cur || !nxt) continue
+    const x0 = cur[0]
+    const y0 = cur[1]
+    const x1 = nxt[0]
+    const y1 = nxt[1]
+    if (x0 === undefined || y0 === undefined || x1 === undefined || y1 === undefined) continue
+    const mx = (x0 + x1) / 2
+    const my = (y0 + y1) / 2
+    parts.push(`Q ${fmt(x0)} ${fmt(y0)} ${fmt(mx)} ${fmt(my)}`)
   }
   parts.push('Z')
   return parts.join(' ')

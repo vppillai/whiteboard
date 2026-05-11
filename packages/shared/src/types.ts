@@ -14,7 +14,9 @@ export interface Sample {
   /** Pen tilt in degrees, if reported by the device. */
   tx?: number
   ty?: number
-  /** performance.now() at sample acquisition. */
+  /** Elapsed milliseconds since the stroke's pointerdown (t = 0 at start).
+   *  Epoch-independent so the value survives page reloads and is comparable
+   *  across peers under M3 sync. */
   t: number
 }
 
@@ -49,7 +51,9 @@ export interface Stroke {
   id: string
   brush: BrushConfig
   samples: Sample[]
-  /** performance.now() at pointerdown. */
+  /** Wall-clock milliseconds (Date.now()) at pointerdown. Used as the
+   *  render-order sort key — must come from the same time base on every
+   *  peer so multi-device merges interleave strokes chronologically. */
   startedAt: number
   /**
    * Soft-delete flag. The renderer filters strokes with `deleted === true`;

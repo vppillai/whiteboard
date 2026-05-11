@@ -42,15 +42,42 @@ export async function saveStroke(stroke: Stroke): Promise<void> {
   })
 }
 
+/**
+ * Pure compaction predicate. A stroke loaded with `deleted === true` has
+ * no undo path in the new session (the undo stack is empty on startup),
+ * so it's safe to hard-delete from IDB. Exposed for unit testing
+ * without an IDB polyfill — see storage.test.ts.
+ */
+export function partitionForCompaction(strokes: readonly Stroke[]): {
+  kept: Stroke[]
+  toCompact: string[]
+} {
+  const kept: Stroke[] = []
+  const toCompact: string[] = []
+  for (const s of strokes) {
+    if (s.deleted === true) toCompact.push(s.id)
+    else kept.push(s)
+  }
+  return { kept, toCompact }
+}
+
 export async function loadAllStrokes(): Promise<Stroke[]> {
   const db = await getDb()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_STROKES, 'readonly')
     const req = tx.objectStore(STORE_STROKES).getAll()
     req.onsuccess = () => {
-      const strokes = (req.result as Stroke[]).slice()
-      strokes.sort((a, b) => a.startedAt - b.startedAt)
-      resolve(strokes)
+      const all = req.result as Stroke[]
+      const { kept, toCompact } = partitionForCompaction(all)
+      kept.sort((a, b) => a.startedAt - b.startedAt)
+      // Background compaction — fire-and-forget. A stroke with deleted=true
+      // loaded from a previous session can never be restored via undo
+      // (undo stack is reset on reload), so the IDB row is dead weight.
+      // Errors are non-fatal; the compaction will retry on the next load.
+      if (toCompact.length > 0) {
+        void Promise.all(toCompact.map((id) => deleteStroke(id).catch(() => undefined)))
+      }
+      resolve(kept)
     }
     req.onerror = () => reject(req.error)
   })

@@ -19,6 +19,36 @@ const MIN_SCREEN_SPACING = 6
 
 export type { GridType }
 
+// Cached theme tokens — read once and refreshed on themechange. Reading
+// getComputedStyle on every draw forced a style recalc 60×/sec during
+// pan/zoom, which is unnecessary because these tokens only change when
+// the theme flips. invalidateGridColors() is wired by main.ts to the
+// `themechange` CustomEvent on document.documentElement.
+let cachedDotColor: string | null = null
+let cachedLineColor: string | null = null
+
+function readGridColors(): { dot: string; line: string } {
+  if (cachedDotColor && cachedLineColor) {
+    return { dot: cachedDotColor, line: cachedLineColor }
+  }
+  if (typeof document === 'undefined') {
+    cachedDotColor = 'rgba(0,0,0,0.18)'
+    cachedLineColor = 'rgba(0,0,0,0.12)'
+    return { dot: cachedDotColor, line: cachedLineColor }
+  }
+  const styles = getComputedStyle(document.documentElement)
+  cachedDotColor = styles.getPropertyValue('--grid-dot').trim() || 'rgba(0,0,0,0.18)'
+  cachedLineColor = styles.getPropertyValue('--grid-line').trim() || 'rgba(0,0,0,0.12)'
+  return { dot: cachedDotColor, line: cachedLineColor }
+}
+
+/** Clears the cached grid colors so the next draw re-reads them from
+ *  the active theme. Call from the `themechange` handler. */
+export function invalidateGridColors(): void {
+  cachedDotColor = null
+  cachedLineColor = null
+}
+
 export function drawGrid(
   layer: CanvasLayer,
   camera: Camera,
@@ -31,19 +61,26 @@ export function drawGrid(
   const screenSpacing = config.spacing * camera.scale
   if (screenSpacing < MIN_SCREEN_SPACING) return
 
-  const styles = getComputedStyle(document.documentElement)
   const ctx = layer.ctx
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
 
   const dpr = window.devicePixelRatio || 1
+  const colors = readGridColors()
 
   if (config.type === 'dots') {
-    const color = styles.getPropertyValue('--grid-dot').trim() || 'rgba(0,0,0,0.18)'
-    drawDots(ctx, camera, screenW, screenH, config.spacing, dpr, color)
+    drawDots(ctx, camera, screenW, screenH, config.spacing, dpr, colors.dot)
   } else {
-    const color = styles.getPropertyValue('--grid-line').trim() || 'rgba(0,0,0,0.12)'
-    drawLines(ctx, camera, screenW, screenH, config.spacing, dpr, color, config.type === 'lines')
+    drawLines(
+      ctx,
+      camera,
+      screenW,
+      screenH,
+      config.spacing,
+      dpr,
+      colors.line,
+      config.type === 'lines',
+    )
   }
 
   ctx.restore()
