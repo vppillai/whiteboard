@@ -757,9 +757,14 @@ body {
   background: var(--surface-2, rgba(0, 0, 0, 0.02));
 }
 .whiteboard-settings-brush-head {
-  font-size: 12px;
-  font-weight: 500;
-  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--ink, currentColor);
+}
+.whiteboard-settings-brush-head > span:first-child {
+  flex: 1;
+  letter-spacing: 0.2px;
 }
 .whiteboard-settings-slider {
   display: grid;
@@ -1046,4 +1051,18 @@ body.distraction-free .whiteboard-popover {
 .whiteboard-export-popover .whiteboard-export-pill {
   min-width: 56px;
   text-align: center;
+}
+
+/* Side panel open: shift the bottom-right tool pill left of the 320 px panel
+ * and hide the bottom-left help pill (the panel itself is the help/setting
+ * surface while open). Pill z-index already beats the panel, but the user
+ * needs them out of the way for visual clarity. M2 feel-test fix. */
+body.panel-open #whiteboard-tool-pill {
+  right: 332px; /* 320 panel + 12 margin */
+  transition: right 200ms ease-out;
+}
+body.panel-open #whiteboard-pill {
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+  pointer-events: none;
 }

@@ -49,6 +49,7 @@ export function createPanelContent(opts: PanelContentOptions): {
     renderFontsSection(),
     renderGridSection(),
     renderThemeSection(),
+    renderInputSection(),
     renderAdvancedSection(),
     renderResetFooter(opts.onResetClick),
   ]
@@ -99,6 +100,7 @@ function renderBrushCard(brushId: BrushId, parent: HTMLElement): { update: () =>
   card.appendChild(head)
 
   const title = document.createElement('span')
+  title.className = 'whiteboard-settings-brush-title'
   title.textContent = BRUSH_LABELS[brushId]
   head.appendChild(title)
 
@@ -376,6 +378,48 @@ function renderThemeSection(): Section {
   }
 }
 
+function renderInputSection(): Section {
+  const el = document.createElement('section')
+  el.appendChild(sectionLabel('Input'))
+
+  const row = document.createElement('div')
+  row.className = 'whiteboard-settings-pe-row'
+  el.appendChild(row)
+
+  const label = document.createElement('label')
+  label.className = 'whiteboard-settings-pe-label'
+  row.appendChild(label)
+
+  const title = document.createElement('span')
+  title.className = 'whiteboard-settings-pe-title'
+  title.textContent = 'Predicted events'
+  label.appendChild(title)
+
+  const help = document.createElement('span')
+  help.className = 'whiteboard-settings-pe-help'
+  help.textContent =
+    'Visual lookahead during drawing. Smoother on screen tablets (iPad, ' +
+    'Surface, MobileStudio); may flicker on indirect-input tablets like ' +
+    'Wacom Intuos. URL ?predict=1 forces on per-session.'
+  label.appendChild(help)
+
+  const input = document.createElement('input')
+  input.type = 'checkbox'
+  input.className = 'whiteboard-settings-pe-input'
+  input.checked = getSettings().predictedEvents
+  input.addEventListener('change', () => {
+    setPredictedEvents(input.checked)
+  })
+  row.appendChild(input)
+
+  return {
+    el,
+    update: () => {
+      input.checked = getSettings().predictedEvents
+    },
+  }
+}
+
 function renderAdvancedSection(): Section {
   const el = document.createElement('section')
   const header = document.createElement('button')
@@ -391,16 +435,12 @@ function renderAdvancedSection(): Section {
 
   let expanded = false
   let cardUpdaters: Array<() => void> = []
-  let peUpdate: (() => void) | null = null
 
   header.addEventListener('click', () => {
     expanded = !expanded
     header.textContent = expanded ? '▼ Hide advanced' : '▶ Show advanced'
     body.style.display = expanded ? '' : 'none'
     if (expanded && cardUpdaters.length === 0) {
-      // Predicted-events toggle goes first — it's board-level, the per-brush
-      // knobs are below. M2.
-      peUpdate = renderPredictedEventsToggle(body)
       cardUpdaters = renderAdvancedCards(body)
     }
   })
@@ -408,45 +448,8 @@ function renderAdvancedSection(): Section {
   return {
     el,
     update: () => {
-      peUpdate?.()
       for (const u of cardUpdaters) u()
     },
-  }
-}
-
-function renderPredictedEventsToggle(parent: HTMLElement): () => void {
-  const row = document.createElement('div')
-  row.className = 'whiteboard-settings-pe-row'
-  parent.appendChild(row)
-
-  const label = document.createElement('label')
-  label.className = 'whiteboard-settings-pe-label'
-  row.appendChild(label)
-
-  const title = document.createElement('span')
-  title.className = 'whiteboard-settings-pe-title'
-  title.textContent = 'Predicted events'
-  label.appendChild(title)
-
-  const help = document.createElement('span')
-  help.className = 'whiteboard-settings-pe-help'
-  help.textContent =
-    'Visual lookahead during drawing. Enable for screen tablets (iPad, ' +
-    'Surface, MobileStudio); leave off for indirect-input tablets like ' +
-    'Wacom Intuos.'
-  label.appendChild(help)
-
-  const input = document.createElement('input')
-  input.type = 'checkbox'
-  input.className = 'whiteboard-settings-pe-input'
-  input.checked = getSettings().predictedEvents
-  input.addEventListener('change', () => {
-    setPredictedEvents(input.checked)
-  })
-  row.appendChild(input)
-
-  return () => {
-    input.checked = getSettings().predictedEvents
   }
 }
 
