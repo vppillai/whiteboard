@@ -6,14 +6,50 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 ## [Unreleased]
 
+### Changed (sharing deferred — 2026-05-10)
+
+- **Live collaboration / sharing layer deferred from v1** per [ADR 0012](docs/decisions/0012-sharing-deferred.md). The original M3 milestone (Bun WebSocket relay, Y.Doc-backed shared rooms, Y.Awareness presence, SQLite snapshot persistence, owner-token-gated admin endpoints, share-gated UX, in-flight crash recovery) was fully brainstormed and designed on 2026-05-10 — all 16 prep-doc open decisions plus a 17th (undo-manager scope) were closed and captured. Hours later, the project owner reassessed the scope against the SPEC § 0 tenets ("snappy, sleek, user-friendly are paramount") and chose to defer the entire feature. Sharing is the heaviest feature on the v1 roadmap; deferring it dramatically shrinks v1's surface (no server-side state, no runtime service, no WebSocket, no ~75 KB sync chunk, no operator complexity around `OWNER_TOKEN` / `DATA_DIR` / backup volumes). The full design is preserved at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](docs/superpowers/specs/2026-05-10-m3-sync-design.md) with a `DEFERRED` status header — it is the starting point for a future implementation when sharing returns, not a fresh brainstorm.
+- **v1 path becomes M2.1 → M4 (deployment polish) → M4.5 (PWA install + offline) → tag `v1.0.0`.** v1 ships as "a fast offline whiteboard with installable PWA," sized for the single-user, single-device Wacom Intuos case the project was built for.
+- **`StrokeStore` interface seam (M2.1) kept in place.** The abstraction costs nothing (one interface, one concrete implementation) and preserves the future-sharing option. Forward-looking comments in `strokestore.ts`, `storage.ts`, `main.ts`, `tools/eraser.ts`, and `packages/shared/src/types.ts` were reworded from "M3 will..." to "future sync work will..." / "deferred per ADR 0012" — no behavior change.
+- **CRDT-friendly schema decisions stay**: `Stroke.startedAt` wall-clock, `Stroke.id` ULID, op-pipeline-routed mutations, `erasedStamps` append-only. These are good designs on their own merits and preserve the option to wrap strokes as `Y.Map` later without a schema break.
+- **`apps/server/src/index.ts`** no longer reads `OWNER_TOKEN`. The server boots stateless at v1.
+- **`.env.example`** drops `OWNER_TOKEN`, `DATA_DIR`, `MAX_ROOMS`, `MAX_BOARD_BLOB_MB`. Only `PORT`, `PUBLIC_ORIGIN`, `BASE_PATH`, `LOG_LEVEL` remain. The deferred vars return when sharing returns.
+- **`deploy.sh`** drops the `OWNER_TOKEN` validation gate. The `.env` file is still required but now only sourced for `docker compose` substitution.
+- **`docs/deployment.md`** rewritten for the stateless v1 shape: no SQLite volume, no backup/restore procedure, simpler env vars table, smaller resource sizing, lighter troubleshooting.
+- **`SPEC.md`** updated: § 1 Goals revised (sharing line replaced with offline-first + deferred-sharing note), § 2 Architecture diagram simplified (no Y.Doc / WebSocket / SQLite), § 5 Collaboration converted to a "deferred — see ADR 0012" stub, § 6 Persistence rewritten (client IDB only, no server), § 8 Deployment `.env.example` simplified, § 9 Milestones table reflects the new v1 path, § 10 Backlog gains the detailed sharing entry pointing to the design archive.
+- **`docs/architecture.md`** updated: § 1 diagram simplified, § 2.1 `sync/` row marked deferred, § 2.2 server responsibilities reduced to M0 entries, § 2.3 shared types stripped of WebSocket envelope mention, § 2.4 server persistence subsection rewritten as "deferred", § 3 protocol table trimmed (REST: `/`, `/assets/*`, `/health` only; WS removed), § 4 stroke model footnote updated, § 5 deployment topology reflects stateless container, § 6 as-built rows marked 🟡 Deferred for live collaboration / room URLs / server SQLite / crash recovery; `StrokeStore` seam + IDB compaction added as ✅ Complete (M2.1).
+- **`docs/milestones.md`** M3 row marked 🟡 Deferred with link to ADR 0012 + archive; M3 milestone-definition block replaced with a deferral stub; M4 scope updated for stateless shape (no SQLite backup, simplified env, WebSocket-through-proxy moved to forward-compat note).
+- **ADR 0003** (Y.js for collaboration) status updated to "Accepted — implementation deferred from v1 per ADR 0012." The technology choice itself stands when sharing returns.
+- **`docs/decisions/README.md`** ADR index brought up to date (entries 0008–0012 added; 0008 marked superseded by 0009).
+- **`README.md`** updated: tagline changed from "Live collaboration via shareable room links" to "Offline-first"; Status section updated to reflect M2.1-shipped state and v1 path; "Today" feature list updated through M2.1; "Coming up" split into pre-v1 (M4 / M4.5) and post-v1 (sharing / AI); Y.js acknowledgment removed; layout description updated; deploy quick-start no longer mentions `OWNER_TOKEN`; **new "Deploy to GitHub Pages" quick-start section** added (the stateless v1 fits cleanly on any static host).
+
+### Added (release readiness — 2026-05-10)
+
+- **GitHub Pages deploy workflow** (`.github/workflows/pages.yml`). Builds the web bundle with `BASE_PATH=/whiteboard/`, writes `.nojekyll`, publishes via `actions/deploy-pages@v4`. Triggers on push to `main` or manual dispatch. Enables zero-server deployment for the v1 stateless shape; documented in `docs/deployment.md` § "GitHub Pages (zero-server deploy)".
+- **CI now runs the test suite** (`.github/workflows/ci.yml`). The check job previously ran lint + typecheck + build only. Added `bun test` step between typecheck and build — the 92-test suite now blocks merges on regression. The docker smoke-test step also dropped its `OWNER_TOKEN` env injection (no longer needed at v1).
+
+### Fixed (release readiness — 2026-05-10)
+
+- **SPEC.md opening sentence** no longer claims live collaboration (was the first thing a new reader saw — directly contradicted the deferral narrative below it).
+- **SPEC § 3.4 `Stroke` type** updated to match the actual M2.1 schema (`brush: BrushConfig`, `startedAt`, `erasedStamps`) — was stale since M1.7 / M2.1 schema changes and showed pre-CRDT-hardening fields (`brushId` / `color` / `size` / `authorId` / `createdAt`).
+- **SPEC § 3.4 storage line** "Stored in Y.js as `Y.Array<Y.Map>`" replaced with the accurate "Stored locally in IndexedDB as one row per stroke" + CRDT-compatibility note pointing to ADR 0012.
+- **`docs/architecture.md` § 4** inline comment for `startedAt` corrected: was `performance.now()`, actually `Date.now()` (M2.1 cross-peer-sort hardening).
+- **`docs/architecture.md` § 2.2** "Responsibilities 3–5..." reworded to list the active 1–2 explicitly without dangling reference to nonexistent prior numbering.
+- **`docs/development.md` Testing section** rewritten — was claiming "tests not yet present, `bun run test` is a no-op" while 92 tests pass. Now describes the actual Bun-test setup, file co-location pattern, and CI hook.
+- **`docs/development.md` project layout** server description corrected from "(Bun, WebSocket, SQLite)" to "(Bun, static file serving; stateless at v1)".
+- **`apps/server/src/index.ts`** `/health` endpoint reports `stage: 'M2.1'` (was stuck at `'M0'` since the M0 stub).
+- **ADR 0012 § Status** citation corrected: "SPEC § 0 Goal" → "SPEC § 1 Goals" (Goals live in § 1; § 0 is the Tenets section).
+- **CHANGELOG M2.1 entries** reworded to remove "M3 will add..." forward references that contradicted the deferral entry's claim that all such language was cleaned up; now phrased as "future sync work would..." with links to ADR 0012, consistent with the code comments.
+
 ### Added (M2.1 — pre-M3 hardening)
 
 - **`StrokeStore` interface seam** (`apps/web/src/strokestore.ts`). `main.ts`
   now talks to a `StrokeStore` (load / save / delete / clear + an
-  `onRemoteChange` stub) instead of calling `storage.ts` directly. M3 will
-  add a Y.Doc-backed implementation with the same surface — sync becomes
+  `onRemoteChange` stub) instead of calling `storage.ts` directly. A future
+  sync implementation (deferred per [ADR 0012](docs/decisions/0012-sharing-deferred.md))
+  would add a Y.Doc-backed store with the same surface — sync would become
   a single-line factory swap at startup rather than a refactor of
-  `main.ts`'s 1067-line closure.
+  `main.ts`.
 - **IDB compaction on load.** Strokes loaded with `deleted === true` have
   no undo path (undo stack is empty on startup) — hard-delete them in a
   background fire-and-forget after load. `partitionForCompaction` is the
@@ -27,16 +63,19 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
   (no history rewrite).
 - **`Stroke.startedAt` is now `Date.now()`** (wall-clock ms) instead of
   `performance.now()` (tab-relative). Required for cross-peer chronological
-  z-order at M3 — performance.now's tab-origin epoch would have interleaved
-  two peers' strokes non-chronologically when sorted into the render order.
+  z-order if/when sharing returns ([ADR 0012](docs/decisions/0012-sharing-deferred.md))
+  — performance.now's tab-origin epoch would have interleaved two peers'
+  strokes non-chronologically when sorted into the render order.
 - **`Sample.t` is now elapsed ms from pointerdown** (`t = 0` at first
   sample). Epoch-independent; survives page reloads and is comparable
   across peers. Pre-#11 it was an absolute `performance.now()` value that
   carried stale navigation-epoch timestamps across reloads.
 - **Object-eraser no longer mutates `stroke.deleted` directly.** The
   deletion path is now exclusive to the op pipeline (`applyOp →
-  flipDeleted`), which makes it CRDT-compatible when M3 wraps `Stroke`
-  as `Y.Map` (direct field assignment doesn't propagate through Y.js).
+  flipDeleted`), which keeps it CRDT-compatible for the deferred future
+  sharing layer ([ADR 0012](docs/decisions/0012-sharing-deferred.md))
+  where strokes would wrap as `Y.Map` (direct field assignment doesn't
+  propagate through Y.js).
   Collapsed the unused multi-id `objectDeleted: Set<string>` machinery
   to a single `objectDeletedId: string | null` — object mode only ever
   deletes one stroke per tap.

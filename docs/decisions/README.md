@@ -6,13 +6,18 @@ ADRs document non-obvious architectural choices. See [process.md](../process.md)
 
 | #     | Title                                              | Status     |
 |-------|----------------------------------------------------|------------|
-| [0001](0001-greenfield-canvas.md) | Greenfield canvas, not a tldraw / excalidraw fork | Accepted |
-| [0002](0002-bun-runtime.md)        | Bun as the server runtime                          | Accepted |
-| [0003](0003-yjs-collaboration.md)  | Y.js for collaboration                             | Accepted |
+| [0001](0001-greenfield-canvas.md)     | Greenfield canvas, not a tldraw / excalidraw fork   | Accepted |
+| [0002](0002-bun-runtime.md)           | Bun as the server runtime                           | Accepted |
+| [0003](0003-yjs-collaboration.md)     | Y.js for collaboration                              | Accepted (implementation deferred per [0012](0012-sharing-deferred.md)) |
 | [0004](0004-input-pipeline-tuning.md) | Input pipeline tuned for indirect-input pen tablets | Accepted |
 | [0005](0005-tool-abstraction.md)      | Tool abstraction (pointer router + Tool interface)  | Accepted |
 | [0006](0006-op-based-undo.md)         | Operation-based undo + soft-delete strokes          | Accepted |
 | [0007](0007-tool-surface.md)          | Tool surface — cursor + contextual menu owned by tools | Accepted |
+| [0008](0008-segment-eraser.md)        | Segment-level eraser (per-sample mask)              | Superseded by [0009](0009-pixel-mask-eraser.md) |
+| [0009](0009-pixel-mask-eraser.md)     | Pixel-mask eraser (cursor-disk stamps)              | Accepted |
+| [0010](0010-settings-data-model.md)   | Settings data model — versioned, sparse, sync-ready | Accepted |
+| [0011](0011-toolbar-deferred.md)      | Floating toolbar deferred from v1                   | Accepted |
+| [0012](0012-sharing-deferred.md)      | Sharing / live collaboration deferred from v1       | Accepted |
 
 ## Format
 

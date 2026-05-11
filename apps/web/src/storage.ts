@@ -1,6 +1,9 @@
 /**
- * Local persistence via IndexedDB. v1 of the local store; replaced / extended
- * once Y.js + server sync ships at M3.
+ * Local persistence via IndexedDB. The only persistence backend at v1.
+ * Wrapped behind the `StrokeStore` interface (strokestore.ts) so a future
+ * sync implementation can plug in without touching the orchestrator
+ * (sharing is deferred per ADR 0012; design archive at
+ * docs/superpowers/specs/2026-05-10-m3-sync-design.md).
  *
  * Single object store keyed on stroke id. Each stroke is written individually
  * on commit so a power-loss event at most loses the in-flight stroke.

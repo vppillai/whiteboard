@@ -1,8 +1,13 @@
 # Deployment
 
-How to deploy Whiteboard to a server you own. The target is a single Docker container running on a single host. There is no horizontal-scale story.
+How to deploy Whiteboard. **v1 is stateless** (live collaboration is post-v1 per [ADR 0012](decisions/0012-sharing-deferred.md)) — no volumes, no backups, no migrations, no runtime dependencies beyond a static file host. That gives you two deploy shapes:
 
-## Quick deploy
+1. **Docker** — single container, host you own (this is what `deploy.sh` does).
+2. **Static host** — any service that serves files: GitHub Pages, Cloudflare Pages, Netlify, S3 + CloudFront, plain Nginx.
+
+Pick whichever fits. They serve the same `apps/web/dist/` bundle.
+
+## Quick deploy (Docker)
 
 On the target host (Linux, with Docker and the Compose plugin installed):
 
@@ -11,12 +16,14 @@ git clone https://github.com/vppillai/whiteboard.git
 cd whiteboard
 
 cp .env.example .env
-# Edit .env — at minimum, set OWNER_TOKEN and PUBLIC_ORIGIN
+# Edit .env — at minimum, set PUBLIC_ORIGIN if you're using a public domain.
 
 ./deploy.sh
 ```
 
-The script validates `.env`, builds the image, brings the stack up in detached mode, and prints the URL.
+The script sources `.env`, builds the image, brings the stack up in detached mode, and prints the URL.
+
+> **Note on sharing-related env vars.** Live collaboration (the original M3 milestone) is deferred from v1 per [ADR 0012](decisions/0012-sharing-deferred.md). The `OWNER_TOKEN`, `DATA_DIR`, `MAX_ROOMS`, and `MAX_BOARD_BLOB_MB` env vars return when sharing returns. The v1 container has no admin endpoints and no server-side state.
 
 To stop:
 
@@ -31,24 +38,43 @@ git pull
 ./deploy.sh   # rebuilds and restarts
 ```
 
+## GitHub Pages (zero-server deploy)
+
+Because v1 has no runtime backend, the built SPA can be hosted on GitHub Pages directly from the repo. A workflow ([`.github/workflows/pages.yml`](../.github/workflows/pages.yml)) is included that:
+
+1. Builds the web bundle with `BASE_PATH=/whiteboard/` (matches the default repo name; edit if you renamed the repo or want a user/org site rooted at `/`).
+2. Disables Jekyll on the artifact (writes `.nojekyll`).
+3. Publishes via the official `actions/deploy-pages` action.
+
+**One-time setup in your fork:**
+
+1. Go to *Settings → Pages*.
+2. Under **Source**, choose **"GitHub Actions"** (not "Deploy from a branch").
+
+Then push to `main`. The `pages` workflow runs on every push to main and on manual dispatch. The site is at `https://<your-username>.github.io/whiteboard/` after the first successful deploy.
+
+**Custom domain:** add a `CNAME` record at your domain registrar pointing to `<your-username>.github.io`, then set the custom domain in *Settings → Pages*. Update the workflow's `BASE_PATH` env to `/` (the workflow is the place to keep this — the runtime knows nothing about the host).
+
+**Caveats / what doesn't work on Pages:**
+
+- No `/health` endpoint (it's served by `apps/server`, not by GitHub Pages). This is fine — `/health` exists for Docker healthchecks, which Pages doesn't run.
+- No reverse-proxy `BASE_PATH` injection at runtime — the base is baked into the bundle at build time. Re-build to change it.
+- No future sharing (obviously) — when live collaboration returns per ADR 0012, Pages deploys lose access to that feature; users who want sharing run the Docker container.
+
 ## Environment variables
 
-Configured via `.env` (next to `docker-compose.yml`). All variables have defaults except `OWNER_TOKEN`, which is required.
+Configured via `.env` (next to `docker-compose.yml`). All variables have defaults.
 
-| Variable             | Default                  | Purpose                                                     |
-|----------------------|--------------------------|-------------------------------------------------------------|
-| `PORT`               | `8787`                   | Host port to publish. Container always listens on 8787.     |
-| `PUBLIC_ORIGIN`      | `http://localhost:8787`  | Public URL. Used for share-link generation, CORS, CSP.      |
-| `OWNER_TOKEN`        | *(required)*             | Bearer token for admin actions. `openssl rand -hex 32`.     |
-| `BASE_PATH`          | `/`                      | Sub-path for reverse-proxy mount (e.g. `/whiteboard`).      |
-| `DATA_DIR`           | `/data`                  | Inside container; mapped to a Docker volume.                |
-| `MAX_ROOMS`          | `500`                    | Soft cap on total rooms.                                    |
-| `MAX_BOARD_BLOB_MB`  | `50`                     | Soft cap on snapshot blob size per room.                    |
-| `LOG_LEVEL`          | `info`                   | `trace` \| `debug` \| `info` \| `warn` \| `error`.          |
+| Variable        | Default                  | Purpose                                                     |
+|-----------------|--------------------------|-------------------------------------------------------------|
+| `PORT`          | `8787`                   | Host port to publish. Container always listens on 8787.     |
+| `PUBLIC_ORIGIN` | `http://localhost:8787`  | Public URL. Used for CORS, CSP.                             |
+| `BASE_PATH`     | `/`                      | Sub-path for reverse-proxy mount (e.g. `/whiteboard`).      |
+| `LOG_LEVEL`     | `info`                   | `trace` \| `debug` \| `info` \| `warn` \| `error`.          |
 
 ## Reverse-proxy setups
 
-Mount Whiteboard behind your existing reverse proxy. Both the SPA and the WebSocket endpoint live on the same port; the proxy needs to forward both HTTP and WebSocket upgrades.
+Mount Whiteboard behind your existing reverse proxy. At v1 the container serves only HTTP (no WebSocket); the proxy needs to forward HTTP only. (When sharing returns, the WebSocket `Upgrade` header forwarding shown in the Nginx snippet below is what's needed — left in place as a no-op for forward-compat.)
 
 ### Caddy
 
@@ -99,51 +125,15 @@ This project does not terminate TLS. Run a reverse proxy (Caddy is the lowest-ef
 
 ## Persistence and backups
 
-All durable state lives in a single SQLite database inside the `whiteboard-data` Docker volume.
+**v1 has no server-side state.** Each user's strokes live in their browser's IndexedDB; the container can be destroyed and recreated freely. There is nothing to back up.
 
-Inspect:
-
-```bash
-docker volume inspect whiteboard-data
-```
-
-### Backup
-
-```bash
-docker run --rm \
-  -v whiteboard-data:/data:ro \
-  -v "$PWD":/backup \
-  alpine \
-  tar czf /backup/whiteboard-$(date +%Y%m%d-%H%M%S).tgz -C /data .
-```
-
-For a hot backup (consistent SQLite snapshot while the server is running):
-
-```bash
-docker exec whiteboard sqlite3 /data/whiteboard.db ".backup /data/whiteboard-backup.db"
-docker cp whiteboard:/data/whiteboard-backup.db ./whiteboard-$(date +%Y%m%d).db
-docker exec whiteboard rm /data/whiteboard-backup.db
-```
-
-### Restore
-
-```bash
-docker compose down
-docker run --rm \
-  -v whiteboard-data:/data \
-  -v "$PWD":/backup \
-  alpine \
-  sh -c "cd /data && tar xzf /backup/whiteboard-YYYYMMDD-HHMMSS.tgz"
-docker compose up -d
-```
+When live collaboration returns per [ADR 0012](decisions/0012-sharing-deferred.md), the container will grow a SQLite volume and the backup/restore procedure preserved in the [M3 design archive](superpowers/specs/2026-05-10-m3-sync-design.md) (§ 11 deployment.md update) returns alongside it.
 
 ## Resource sizing
 
-A single container with no active boards uses ~50 MiB RSS. Each active room with peers connected adds ~10–50 MiB depending on board size. For typical personal / small-team use a 512 MiB instance is sufficient.
+A single stateless container uses ~30–50 MiB RSS. There is no per-room overhead at v1. CPU is negligible — the server only serves static files.
 
-CPU is dominated by Y.js merge work during high-rate concurrent edits and by SQLite snapshot writes. A single shared core suffices for ≤ 16 concurrent peers per room.
-
-Disk: SQLite file scales with total stroke count across all boards. ~1 KiB per stroke is a reasonable upper-bound estimate.
+A 256 MiB instance is more than enough.
 
 ## Updating
 
@@ -151,8 +141,6 @@ Disk: SQLite file scales with total stroke count across all boards. ~1 KiB per s
 git pull
 ./deploy.sh
 ```
-
-The volume persists across rebuilds. Database migrations (when introduced) run automatically on server start.
 
 ## Health and observability
 
@@ -162,7 +150,6 @@ The volume persists across rebuilds. Database migrations (when introduced) run a
 
 ## Troubleshooting
 
-- **Container won't start, "OWNER_TOKEN is required"**: set it in `.env`.
-- **404 on WebSocket upgrade behind Nginx**: ensure `proxy_set_header Upgrade` and `Connection "upgrade"` are present.
-- **Strokes don't persist after container restart**: confirm the `whiteboard-data` volume is mounted (`docker volume ls`).
-- **Slow boards**: drawing performance is client-side; server CPU on the host is likely not the cause. Open dev tools, look for layout thrash or 60-fps drops on the canvas layer.
+- **Container won't start**: check `docker compose logs` for the error. Most issues at v1 are network or filesystem misconfigurations (port already in use, `.env` not present in working directory).
+- **Strokes don't persist after browser restart**: per-browser IndexedDB persists strokes across reloads. If they're vanishing, check the browser hasn't cleared site data, or use the export-to-PNG/SVG/PDF surface (`Cmd/Ctrl+E`) to preserve a copy. (Cross-device persistence requires the deferred sharing layer.)
+- **Slow boards**: drawing performance is client-side; server CPU on the host is not the cause. Open dev tools, look for layout thrash or 60-fps drops on the canvas layer.

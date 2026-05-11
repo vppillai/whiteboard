@@ -4,7 +4,7 @@ Date: 2026-05-09
 
 ## Status
 
-Accepted
+Accepted — **implementation deferred from v1 per [ADR 0012](0012-sharing-deferred.md)** (sharing deferred). The technology choice itself stands when sharing returns: Y.js + custom relay + `y-indexeddb` is the design-of-record, captured in the M3 design archive at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](../superpowers/specs/2026-05-10-m3-sync-design.md). Revisit *this* decision only if Y.js or the CRDT-over-relay shape itself proves unsuitable when sharing returns.
 
 ## Context
 

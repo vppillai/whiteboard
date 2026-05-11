@@ -91,7 +91,7 @@ whiteboard/
 │   │   ├── src/
 │   │   ├── tsconfig.json
 │   │   └── vite.config.ts
-│   └── server/                 # Backend (Bun, WebSocket, SQLite)
+│   └── server/                 # Backend (Bun, static file serving; stateless at v1)
 │       ├── src/
 │       └── tsconfig.json
 ├── packages/
@@ -138,11 +138,18 @@ VS Code recommended. Install the [Biome extension](https://marketplace.visualstu
 
 ## Testing
 
-Tests are scaffolded but not yet present. Test framework choice (Vitest vs Bun's built-in test runner) is finalized at M2. Until then, `bun run test` is a no-op.
+Tests use **Bun's built-in test runner** — no extra framework. Run with:
+
+```bash
+bun test          # runs every workspace's test suite (currently 92 tests / 191 expect() calls)
+bun run test      # equivalent; uses the workspace script
+```
+
+Tests live next to the code they cover (e.g., `settings.test.ts` alongside `settings.ts`, `partitioncompaction.test.ts` alongside `storage.ts`, export module tests under `export/`). The pattern is **pure-helper-first**: DOM-touching modules expose a pure core that's testable without a DOM polyfill, with DOM-gated wrappers guarded by `typeof document !== 'undefined'`. CI runs the suite on every push.
 
 ## Troubleshooting
 
 - **`bun install` fails on first run**: ensure you're on Bun ≥ 1.1. Check with `bun --version`.
 - **Pre-commit hook isn't firing**: re-run `bun run install-hooks`.
 - **Docker build OOMs**: the multi-stage build is memory-hungry during `bun install`. Increase Docker's memory limit (Settings → Resources) to ≥ 4 GiB.
-- **`docker compose up` says `OWNER_TOKEN is required`**: copy `.env.example` to `.env` and set `OWNER_TOKEN` to a real secret (`openssl rand -hex 32`).
+- **`.env` missing**: copy `.env.example` to `.env`. The defaults work for local dev; only `PUBLIC_ORIGIN` and `BASE_PATH` need editing for non-localhost deployments.

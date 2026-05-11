@@ -124,10 +124,11 @@ let perfRecording: number[] | null = null
 async function main(): Promise<void> {
   initTheme()
 
-  // M3 sync seam: main.ts talks to a `StrokeStore` interface rather than
-  // calling storage.ts directly. M2.1 wires up the local IDB-backed
-  // implementation; M3 will swap in a Y.Doc-backed store with the same
-  // surface (load / save / delete / clear + onRemoteChange).
+  // StrokeStore seam: main.ts talks to a `StrokeStore` interface rather than
+  // calling storage.ts directly. v1 wires the local IDB-backed implementation.
+  // The seam preserves the future-sharing option per ADR 0012 — when sharing
+  // returns (design archive at docs/superpowers/specs/2026-05-10-m3-sync-design.md),
+  // a Y.Doc-backed store with the same surface plugs in here.
   const strokeStore: StrokeStore = createLocalStrokeStore()
 
   const root = document.getElementById('app')

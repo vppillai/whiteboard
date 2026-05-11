@@ -170,8 +170,8 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
 
   /** Object-mode hit: identify the topmost whole stroke under the cursor.
    *  Returns the matched id (or null). Pure read — the op pipeline owns
-   *  the deletion via `applyOp({ kind: 'delete' })` so the mutation is
-   *  CRDT-friendly when M3 wraps strokes as Y.Map. */
+   *  the deletion via `applyOp({ kind: 'delete' })` so the mutation stays
+   *  CRDT-friendly for the deferred future sharing layer (ADR 0012). */
   const objectHit = (px: number, py: number): string | null => {
     const r = radius()
     const strokes = opts.callbacks.getStrokes()

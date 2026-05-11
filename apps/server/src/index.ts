@@ -1,17 +1,18 @@
 /**
- * Whiteboard server.
+ * Whiteboard server. Stateless at v1.
  *
- * M0 scope:
  *   - GET /health     → liveness probe.
  *   - GET *           → static files from `${DIST_DIR}` (the built web app),
  *                       with index.html fallback for client-side routing.
  *
- * The Y.js / WebSocket / SQLite stack lands at milestone M3.
+ * Live collaboration (the Y.js / WebSocket / SQLite stack originally
+ * scoped for M3) is deferred per ADR 0012. The design is preserved at
+ * docs/superpowers/specs/2026-05-10-m3-sync-design.md and returns when
+ * sharing returns.
  */
 
 const port = Number(process.env.PORT ?? 8787)
 const distDir = process.env.DIST_DIR ?? './apps/web/dist'
-const ownerToken = process.env.OWNER_TOKEN ?? ''
 
 const server = Bun.serve({
   port,
@@ -19,7 +20,7 @@ const server = Bun.serve({
     const url = new URL(req.url)
 
     if (url.pathname === '/health') {
-      return Response.json({ status: 'ok', stage: 'M0' })
+      return Response.json({ status: 'ok', stage: 'M2.1' })
     }
 
     // Try to serve a literal file first.
@@ -46,7 +47,6 @@ const server = Bun.serve({
 
 console.info(`whiteboard/server: listening on http://localhost:${server.port}`)
 console.info(`  serving static from: ${distDir}`)
-console.info(`  owner token:         ${ownerToken ? '(set)' : '(unset — admin disabled)'}`)
 
 function cacheHeaders(path: string): Record<string, string> {
   // Hashed assets under /assets/* are immutable; everything else stays revalidated.

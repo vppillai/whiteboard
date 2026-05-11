@@ -1,6 +1,6 @@
 # Whiteboard — Spec v0.1
 
-A low-latency, browser-based whiteboard tuned for Wacom Intuos (indirect input), with link-based live collaboration and a single-Docker deployment story. AI features (shape recognition, handwriting → text, math/LaTeX) are scoped to v2 after the drawing core is proven.
+A low-latency, browser-based whiteboard tuned for Wacom Intuos (indirect input). Offline-first, with single-Docker (or GitHub Pages) deployment. AI features (shape recognition, handwriting → text, math/LaTeX) are scoped to v2 after the drawing core is proven. Live collaboration is post-v1 — see § 5 and [ADR 0012](docs/decisions/0012-sharing-deferred.md).
 
 > This document is the **product spec**. For "as-built" architecture, see [docs/architecture.md](docs/architecture.md). For milestones and exit criteria, see [docs/milestones.md](docs/milestones.md).
 
@@ -25,16 +25,17 @@ These aren't aspirational bullets. They are the test every design decision in th
 
 - Lowest pen-to-photon latency achievable in a browser, tuned for Wacom Intuos (indirect input).
 - Drawing-first UX: instant tool/color/size changes via right-click menu + dense keyboard shortcuts. No persistent chrome above the canvas (per [ADR 0011](docs/decisions/0011-toolbar-deferred.md)).
-- Live multi-user collaboration with link-based sharing, owner-token-gated admin actions.
-- Single-command Docker deploy, `.env`-configured.
+- Fast offline-first: local IndexedDB persistence; PWA-installable at M4.5; no server-side state required at v1.
+- Single-command Docker deploy, `.env`-configured. The v1 container is a stateless static file server.
 - AI as v2: shape recognition, handwriting → text, math / LaTeX. v1 ships without AI.
+- **Live collaboration is post-v1 (deferred per [ADR 0012](docs/decisions/0012-sharing-deferred.md)).** The design is preserved at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](docs/superpowers/specs/2026-05-10-m3-sync-design.md) and listed in § 10 Backlog. Schema and abstraction choices through M2.1 (CRDT-safe `Stroke.startedAt`, ULID IDs, op-pipeline-routed mutations, `StrokeStore` interface seam) keep the future-sharing door open.
 
 ### Non-goals
 
 - Procreate / OneNote-grade *feel* — physically impossible on a screenless Intuos. We aim for "best-in-class indirect-input browser drawing."
 - Mobile / touch-first design. Drawing on touchscreens works; not optimized for.
 - Heavyweight feature set: no layers, no shape libraries, no slide decks, no presentations. This is a whiteboard.
-- Per-user accounts, SSO, RBAC. Trust = owner token + room URL.
+- Per-user accounts, SSO, RBAC. (For the deferred sharing layer, trust is "owner token gates admin REST + URL is the room capability" — see [the M3 design archive](docs/superpowers/specs/2026-05-10-m3-sync-design.md). At v1 there are no accounts and no rooms.)
 
 ## 2. Architecture overview
 
@@ -44,37 +45,28 @@ These aren't aspirational bullets. They are the test every design decision in th
 │  ┌────────────────┐  ┌──────────────────┐  ┌──────────────┐ │
 │  │ Pointer        │→ │ Stroke engine    │→ │ Canvas       │ │
 │  │ pipeline       │  │ (perfect-        │  │ render       │ │
-│  │ (coalesced +   │  │  freehand)       │  │ (2-layer)    │ │
+│  │ (coalesced +   │  │  freehand)       │  │ (3-layer)    │ │
 │  │  predicted)    │  └──────────────────┘  └──────────────┘ │
 │  │                │           │                              │
 │  │                │           ▼                              │
 │  │                │  ┌──────────────────┐                    │
-│  │                │  │ Y.Doc (CRDT)     │                    │
+│  │                │  │ StrokeStore      │ ← interface seam   │
+│  │                │  │ (local IDB)      │   for future sync  │
 │  │                │  └──────────────────┘                    │
-│  │                │           │                              │
-│  └────────────────┘           ▼ (stroke-commit boundary)     │
-│                       ┌──────────────────┐                   │
-│                       │ y-websocket      │                   │
-│                       └──────────────────┘                   │
+│  └────────────────┘                                          │
 └─────────────────────────────────────────────────────────────┘
                                 │
-                                ▼ ws
+                                ▼ https
 ┌─────────────────────────────────────────────────────────────┐
-│ Server (Bun, single process)                                │
-│  ┌──────────────────┐  ┌──────────────────────────────┐     │
-│  │ y-websocket      │← │ Auth (owner token, room id)  │     │
-│  │ relay            │  └──────────────────────────────┘     │
-│  └──────────────────┘                                       │
-│           │                                                 │
-│           ▼ (snapshot every 30s idle / on disconnect)       │
+│ Server (Bun, single process, stateless)                     │
 │  ┌──────────────────┐                                       │
-│  │ SQLite           │  rooms(id, name, created_at)          │
-│  │ (bun:sqlite)     │  snapshots(room_id, ydoc_blob, ts)    │
+│  │ Static files +   │  /, /assets/*, /health                │
+│  │ SPA fallback     │                                       │
 │  └──────────────────┘                                       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-One container. One process. One SQLite file. Static files served from the same process.
+One container. One stateless process. Static files served from the same process. No server-side persistence; no auth; no WebSocket at v1. Live collaboration (the prior Y.js + WebSocket + SQLite layer) is deferred to post-v1 per [ADR 0012](docs/decisions/0012-sharing-deferred.md).
 
 ## 3. Drawing core
 
@@ -138,18 +130,18 @@ Measured, not vibes. A `?perftest=1` mode runs an automated synthetic-stroke har
 type Sample = { x: number; y: number; p: number; tx?: number; ty?: number; t: number }
 
 type Stroke = {
-  id: string                // ULID
-  brushId: 'pen' | 'marker' | 'pencil' | 'highlighter' | 'brush'
-  color: string             // #rrggbb or #rrggbbaa
-  size: number              // base px at zoom 1
+  id: string                       // ULID
+  brush: BrushConfig               // snapshot at pointerdown — color may be 'ink' token
   samples: Sample[]
-  deleted?: boolean         // soft delete for CRDT-friendly undo
-  authorId: string          // ephemeral peer id
-  createdAt: number
+  startedAt: number                // Date.now() (wall-clock ms) — cross-peer sort key
+  deleted?: boolean                // soft delete; flag flip, not row removal
+  erasedStamps?: {                 // pixel-mask eraser stamps (ADR 0009)
+    x: number; y: number; r: number
+  }[]
 }
 ```
 
-Stored in Y.js as `Y.Array<Y.Map>`. Soft-deletes (not removals) so undo across collaborators is sane.
+Stored locally in IndexedDB as one row per stroke. The schema is CRDT-compatible (see § 6 Persistence), preserving the future option to wrap strokes as `Y.Map` when sharing returns per [ADR 0012](docs/decisions/0012-sharing-deferred.md).
 
 ## 4. Tools & UX
 
@@ -210,17 +202,15 @@ The thumbnail itself is the override-presence indicator: γ-shape vs bent. Chang
 
 ## 5. Collaboration
 
-- **Room URL**: `/b/<uuid-base32>`. UUIDv7 → unguessable, sortable.
-- **Trust**: anyone with the URL can draw + view. `?token=<OWNER_TOKEN>` (constant-time-compared on the server) unlocks: rename, delete, export-all, settings.
-- **Sync**: Y.js doc per room. Per-sample updates stay local; a stroke is added to the Y.Array on `pointerup` only.
-- **Presence**: ephemeral — peer cursors, name, color. Not persisted. Names: random "Adjective-Animal" by default, editable.
-- **Capacity target**: 16 concurrent peers per room. Beyond, perf likely fine but UX (cursor crowd) degrades.
+**Deferred to post-v1 per [ADR 0012](docs/decisions/0012-sharing-deferred.md).**
+
+The v1 ship is single-user, single-device — no rooms, no shared URLs, no presence, no server-side state. The complete sharing design (custom y-protocols relay, Y.Doc schema with nested `Y.Array` for `erasedStamps`, server-issued identity hello message, join dialog, lazy-loaded sync chunk, snapshot persistence, owner-token gating) is preserved at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](docs/superpowers/specs/2026-05-10-m3-sync-design.md) as the starting point for a future implementation. The M2.1 schema and abstraction work (`Stroke.startedAt` wall-clock, ULID IDs, op-pipeline-routed mutations, `StrokeStore` interface seam) was made with future sharing in mind and carries forward. See § 10 Backlog for the entry.
 
 ## 6. Persistence
 
-- **Server**: SQLite. Snapshot the Y.doc to a blob column every 30 s of idle or on last-disconnect. On room load, hydrate from latest snapshot, then apply ws updates.
-- **Client**: IndexedDB caches the Y.doc via `y-indexeddb`. Offline = keep drawing; reconnect = CRDT merges.
-- **Export**: PNG (detached canvas + `canvas.toBlob`), SVG (custom serializer with mask-based erasure for `erasedStamps`), PDF (`jsPDF` wrapping a rasterized PNG; SVG-vector PDF deferred). Triggered via right-click → EXPORT or `Cmd/Ctrl+E`. Filename: `whiteboard-YYYY-MM-DD-HHMM.{ext}`. Empty board no-ops with a console warn (M2 future-work: surface "Nothing to export" toast).
+- **Client**: IndexedDB. One database (`whiteboard-local`), one object store (`strokes`), keyed on stroke id. Strokes are persisted on `pointerup` so a power-loss event at most loses the in-flight stroke. Reads on app boot hydrate the committed canvas. Wrapped behind the `StrokeStore` interface seam (M2.1) so the persistence backend can be swapped without touching the orchestrator.
+- **Server**: None at v1. The Bun process is stateless — it serves static files and a `/health` endpoint. No SQLite, no `DATA_DIR` volume. (Server-side snapshot persistence is part of the deferred sharing design — see § 10 Backlog and [ADR 0012](docs/decisions/0012-sharing-deferred.md).)
+- **Export**: PNG (detached canvas + `canvas.toBlob`), SVG (custom serializer with mask-based erasure for `erasedStamps`), PDF (`jsPDF` wrapping a rasterized PNG; SVG-vector PDF deferred). Triggered via right-click → EXPORT or `Cmd/Ctrl+E`. Filename: `whiteboard-YYYY-MM-DD-HHMM.{ext}`. Empty board no-ops with a console warn.
 - **Import**: PNG/SVG drop onto canvas places it as a non-editable image layer (read-only in v1).
 
 ## 7. AI roadmap (v2)
@@ -239,7 +229,7 @@ All three: lasso → invoke → streamed result → accept/replace or reject. No
 whiteboard/
 ├── apps/
 │   ├── web/            # Vite + TS, vanilla canvas
-│   └── server/         # Bun, y-websocket, SQLite
+│   └── server/         # Bun, static file serving (stateless at v1)
 ├── packages/
 │   └── shared/         # types, stroke serialization
 ├── Dockerfile          # multi-stage: build web → copy into server image
@@ -249,36 +239,38 @@ whiteboard/
 └── .env.example
 ```
 
-`.env.example`:
+`.env.example` at v1:
 
 ```
 PORT=8787
 PUBLIC_ORIGIN=https://draw.example.com
-OWNER_TOKEN=replace-me-with-openssl-rand-hex-32
-DATA_DIR=/data
 BASE_PATH=/                   # set to /whiteboard for a sub-path mount
-MAX_ROOMS=500
-MAX_BOARD_BLOB_MB=50
 LOG_LEVEL=info
 ```
 
 `deploy.sh` validates `.env`, then runs `docker compose up -d --build`.
 
-The `BASE_PATH` env lets the app live behind a reverse proxy at e.g. `/whiteboard`. Web app and ws endpoint both honor it.
+The `BASE_PATH` env lets the app live behind a reverse proxy at e.g. `/whiteboard`.
+
+The sharing-related env vars (`OWNER_TOKEN`, `DATA_DIR`, `MAX_ROOMS`, `MAX_BOARD_BLOB_MB`) are deferred along with the sharing feature itself; they return when sharing returns (see [ADR 0012](docs/decisions/0012-sharing-deferred.md) and § 10 Backlog).
 
 ## 9. Milestones
 
-| M  | Scope                                                                 | Days |
-|----|-----------------------------------------------------------------------|------|
-| M0 | Skeleton; canvas + perfect-freehand + coalesced events. **Latency-validate on Intuos before doing anything else.** | 1 |
-| M1 | Predicted events, two-canvas split, pressure curve, 5 brushes, undo/redo, pan/zoom, eraser, lasso | 3 |
-| M2 | Toolbar UI, keyboard shortcuts, palette, presets, IndexedDB local persistence, PNG/SVG/PDF export | 3 |
-| M3 | Bun server, y-websocket, room URLs, owner token, SQLite snapshots | 3 |
-| M4 | Dockerfile + compose + deploy.sh + sub-path mount | 1 |
-| **v1 ship** | | **~11 days focused** |
-| M5 | AI v2-a: shape recognition | 2 |
-| M6 | AI v2-b: HTR | 3 |
-| M7 | AI v2-c: math/LaTeX | 2 |
+| M    | Scope                                                                 | Status |
+|------|-----------------------------------------------------------------------|--------|
+| M0   | Skeleton; canvas + perfect-freehand + coalesced events. **Latency-validated on Intuos.** | ✅ |
+| M1   | Predicted events, three-layer render, pressure curve, 5 brushes, undo/redo, pan/zoom, eraser (pixel-mask + object), lasso | ✅ |
+| M1.7 | Settings side panel + sync-ready schema (brush presets, custom swatches) | ✅ |
+| M2   | Export (PNG/SVG/PDF), distraction-free, palette cycle, pressure-curve UI, first-run hint, predicted-events toggle | ✅ |
+| M2.1 | Pre-sharing hardening; `StrokeStore` interface seam; CRDT-safe schema choices; identity scrub | ✅ |
+| M4   | Deployment polish: clean-host validation, reverse-proxy paths, release notes | ⬜ |
+| M4.5 | PWA install + offline (manifest, service worker, install affordance)  | ⬜ |
+| **v1 ship** | tag `v1.0.0` after M4.5 |  |
+| M5   | AI v2-a: shape recognition                                            | ⬜ |
+| M6   | AI v2-b: HTR                                                          | ⬜ |
+| M7   | AI v2-c: math/LaTeX                                                   | ⬜ |
+
+The original M3 (live collaboration) is deferred to the post-v1 backlog (§ 10) per [ADR 0012](docs/decisions/0012-sharing-deferred.md). The design archive is preserved at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](docs/superpowers/specs/2026-05-10-m3-sync-design.md).
 
 Each milestone closes only after: feature complete, doc-update reviewed, lint + typecheck clean, perf budget verified where applicable, and a tagged commit.
 
@@ -296,16 +288,18 @@ Each milestone closes only after: feature complete, doc-update reviewed, lint + 
 ### Still open
 
 - ~~**Toolbar UI framework**~~: dropped — toolbar deferred from v1 per [ADR 0011](docs/decisions/0011-toolbar-deferred.md). The settings panel + right-click + keyboard surfaces cover the discovery and one-click paths.
-- **Anonymous user names**: server-issued vs client-generated. Decide at M3.
+- ~~**Anonymous user names**: server-issued vs client-generated~~: resolved in the deferred sharing archive — server-issued from an "Adjective-Animal" corpus via a pre-protocol hello frame, user-editable in the join dialog. Re-confirm when sharing returns. See [the M3 design archive](docs/superpowers/specs/2026-05-10-m3-sync-design.md) and [ADR 0012](docs/decisions/0012-sharing-deferred.md).
 
 ### Backlog (post-v1; tracked, not committed)
 
+- **Live collaboration (the deferred M3).** Multi-user shared boards over WebSocket with CRDT semantics, link-based sharing, ephemeral presence (cursors + names), and SQLite snapshot persistence. Deferred from v1 per [ADR 0012](docs/decisions/0012-sharing-deferred.md). **Full design preserved** at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](docs/superpowers/specs/2026-05-10-m3-sync-design.md) — 17 locked decisions covering: custom y-protocols relay (vs y-websocket server util), Y.Doc schema (nested `Y.Array<Y.Map>` for `erasedStamps`), Y.Awareness presence on `/yjs/<room-id>` (single WS, no separate `/presence` channel), URL-as-capability auth with single global `OWNER_TOKEN` gating REST admin only, ULID room IDs (not UUIDv7), share-gated entry with lazy sync chunk (~75 KB gz), pre-protocol hello-frame for server-issued identity proposal, join dialog (name + color + "bring N strokes" toggle for room creator), server-side snapshots (30 s idle + last-disconnect; keep latest 3), `MAX_ROOMS=500` cap with 429 on overflow, hybrid undo (local Op-stack + `Y.UndoManager` in shared mode behind same `Op` interface), reconnect toasts, `whiteboard:share-pending` interrupt-safety flag, and a five-phase implementation plan (M3-A through M3-E). **v1 schema and abstraction choices already preserve the future-sharing door** — `Stroke.startedAt` is wall-clock (M2.1), `Stroke.id` is ULID (M0), object-erase routes through the op pipeline (M2.1), `erasedStamps` are append-only (ready to wrap as `Y.Array`), and the `StrokeStore` interface seam (M2.1) is the single integration point for the future Y.Doc-backed implementation. Trigger: real user demand for multi-user editing, or a contributor with the capacity to implement and operate the stateful server runtime.
+- **In-flight stroke crash recovery.** Bundled into the deferred M3 design (Decision 9 in the archive): ~2 s autosave of the active stroke to a localStorage slot, with a restore-on-boot prompt. Tenet-aligned, ~50 LOC, works in both modes. Held back from v1 to keep the surface tight; ship as a small standalone milestone if a user-facing pain emerges. Implementation hook: `stroke.ts` + `tools/pen.ts` `pointerdown`/`pointerup` hooks.
 - **Screen-tablet support.** Re-enable predicted events for direct-input devices (iPad Pencil, Wacom MobileStudio, Surface Pro pen) where prediction is a clear win. Likely shape: a per-device-class preference exposed via the M2 settings panel, defaulting to off for indirect input and on for direct input. Trigger: a user with a screen tablet asks.
 - **Performance under stroke count.** The current 2D-canvas + perfect-freehand rasterizes each stroke on the CPU (~1 ms each). Pan / zoom redraws all committed strokes; at ~500+ strokes this is the WebGL trigger. Track in `?perftest=scale` (planned at M1).
-- **Paste image, draw on top.** User intent: `Cmd/Ctrl+V` a screenshot or image into the board; image appears as a non-editable layer; pen strokes draw on top. Implications: a new object kind in the data model (image vs stroke), an image rendering layer between the grid and the strokes, Blob persistence in IndexedDB, and at M3 a binary-data sync story (likely out-of-band via the WebSocket relay rather than encoded into the Y.Doc to avoid bloating CRDT updates). Likely lands as a discrete milestone post-v1 ship; placeholder name **M5.1: image-paste**. The current `Stroke` type doesn't accommodate this — when we get here, an ADR formalizes a `BoardObject = Stroke | ImageObject` discriminated union and rerouting through that.
+- **Paste image, draw on top.** User intent: `Cmd/Ctrl+V` a screenshot or image into the board; image appears as a non-editable layer; pen strokes draw on top. Implications: a new object kind in the data model (image vs stroke), an image rendering layer between the grid and the strokes, Blob persistence in IndexedDB, and (if/when the deferred sharing layer returns) a binary-data sync story — likely out-of-band via the WebSocket relay rather than encoded into the Y.Doc to avoid bloating CRDT updates. Likely lands as a discrete milestone post-v1 ship; placeholder name **M5.1: image-paste**. The current `Stroke` type doesn't accommodate this — when we get here, an ADR formalizes a `BoardObject = Stroke | ImageObject` discriminated union and rerouting through that.
 - **Backend sync of user settings.** M1.7 (see milestones) establishes a sync-ready settings schema (versioned, ID-keyed, with reserved `syncedAt` / `remoteId` fields) but no backend. After v1 ship, when there's a notion of "user login" and the server gains a settings store, the local settings layer gets a sync delegate that pushes / pulls without changing the schema. Conflict policy is out of scope until the feature is staffed.
 - **iPad / Apple Pencil first-class.** Touch input works today via Pointer Events; pinch-zoom does too. A polished iPad experience — palm rejection, larger pen-friendly hit targets in popovers, prediction enabled for direct-input devices (per ADR 0004), Pencil-specific tilt and barrel-roll where supported — would be a meaningful audience expansion. Not on the v1 critical path; pick it up if there's user demand or iPad-specific quirks surface during v1 dogfooding.
-- **Multi-board / boards list.** Currently the app holds a single board in IDB. Multiple named boards with switcher UI, rename, delete, last-modified timestamps — useful, but a real scope addition: new data model, new persistence boundary, future sync implications at M3. Defer until single-board usage proves the limit.
+- **Multi-board / boards list.** Currently the app holds a single board in IDB. Multiple named boards with switcher UI, rename, delete, last-modified timestamps — useful, but a real scope addition: new data model, new persistence boundary, future implications if the deferred sharing layer returns (each board would map to its own room). Defer until single-board usage proves the limit.
 - **Mini-map.** A small overview of all strokes on the infinite canvas with a viewport indicator. Helps the "I scrolled and can't find my stuff" problem; partially mitigated by zoom-to-fit at M1. Reassess if zoom-to-fit doesn't cover the use case.
 - **Mobile / touch UX.** Currently a non-goal. Touch *works* (pointer events handle it) but is not optimized. Reassess if a use case emerges or once the iPad / Apple Pencil item lands.
 - **Accessibility.** Currently silent. Keyboard-only navigation is largely covered (every action has a shortcut), but ARIA / focus management for the eventual toolbar is not. Address as part of M2's UI work.

@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   check:
-    name: Lint, typecheck, build
+    name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +29,9 @@ jobs:
 
       - name: Type-check
         run: bun run typecheck
+
+      - name: Test
+        run: bun test
 
       - name: Build web
         run: bun run --filter @whiteboard/web build
@@ -53,9 +56,9 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Smoke-test image
+        # v1 is stateless — no OWNER_TOKEN env needed (deferred per ADR 0012).
         run: |
           docker run --rm -d \
-            -e OWNER_TOKEN=ci-test-token-$(openssl rand -hex 16) \
             -p 8787:8787 \
             --name whiteboard-ci \
             whiteboard:ci

@@ -14,11 +14,11 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | M1 | Tool surface refactor + eraser (pixel-mask wipe + object) + brush presets + lasso | ✅ *(closed 2026-05-09; tagged `m1-eraser-lasso`)* |
 | M1.7 | Settings side panel + sync-ready schema (brush presets, fonts, swatches) | ✅ *(closed 2026-05-09; tagged `m1.7-settings-panel`)* |
 | M2 | Export, settings polish, eyedropper, distraction-free                    | ✅ *(closed 2026-05-10; tagged `m2-export-polish`)* |
-| M2.1 | Pre-M3 hardening — review-driven fixes; StrokeStore seam; identity scrub | ✅ *(closed 2026-05-10; tagged `m2.1-pre-m3-hardening`)* |
-| M3 | Server, sync, room URLs                                                  | ⬜     |
-| M4 | Production deployment polish                                             | ⬜     |
+| M2.1 | Pre-sharing hardening — review-driven fixes; StrokeStore seam; identity scrub | ✅ *(closed 2026-05-10; tagged `m2.1-pre-m3-hardening`)* |
+| M3 | Server, sync, room URLs                                                  | 🟡 **Deferred from v1** *(see [ADR 0012](decisions/0012-sharing-deferred.md); design archive at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](superpowers/specs/2026-05-10-m3-sync-design.md))* |
+| M4 | Production deployment polish                                             | ⬜ **next** |
 | M4.5 | PWA install + offline (manifest, service worker)                       | ⬜     |
-| **v1 ship** |                                                                 | **—**  |
+| **v1 ship** | tag `v1.0.0` after M4.5                                          | **—**  |
 | M5 | AI: shape recognition                                                    | ⬜     |
 | M6 | AI: handwriting → text                                                   | ⬜     |
 | M7 | AI: math / LaTeX                                                         | ⬜     |
@@ -221,32 +221,23 @@ Mid-milestone, a perceived drawing-latency drift triggered a defensive **Option 
 - [ ] **Feel-test gate** on Wacom Intuos: all M2 surfaces feel right (pending).
 - [ ] Tag `m2-export-polish` after feel-test signoff.
 
-### M3 — Server, sync, room URLs ⬜
+### M3 — Server, sync, room URLs 🟡 Deferred from v1
 
-**Scope.** Bun server with y-websocket relay, room creation, owner-token auth, SQLite snapshot persistence, peer presence, IndexedDB ↔ server reconciliation.
+**Status:** Deferred per [ADR 0012](decisions/0012-sharing-deferred.md). The M3 brainstorm (2026-05-10) closed all 16 prep-doc open decisions plus a 17th (undo-manager scope); the full design is preserved at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](superpowers/specs/2026-05-10-m3-sync-design.md). That spec is the starting point for a future implementation — it covers the relay protocol, Y.Doc schema, presence model, share gate UX, migration flow, undo backend, snapshot policy, and a five-phase implementation plan (M3-A through M3-E). M2.1 schema and seam decisions (CRDT-safe `Stroke.startedAt`, ULID IDs, op-pipeline-routed mutations, `StrokeStore` interface) carry forward and preserve the option.
 
-**Exit criteria.**
-
-- Two browsers in the same `/b/<id>` see each other's strokes and cursors.
-- Disconnect / reconnect: late peer hydrates from SQLite, then merges live updates.
-- `OWNER_TOKEN` gates rename / delete / export-all.
-- Snapshots written every 30 s idle and on last-disconnect.
-- 16 concurrent peers in one room, no dropped updates over 5 minutes of mixed editing.
-- **In-flight stroke crash recovery**: client auto-saves the in-flight stroke every ~2 s during long strokes, so a tab crash mid-stroke loses at most a couple of seconds of pen movement.
-- `docs/architecture.md` § 6 updated; deployment doc cross-checked; CHANGELOG entry; ADR if the protocol or auth design materially changed from spec.
+The original v1-blocking exit criteria (two browsers shared state, owner-token, 30 s snapshots, 16-peer capacity, in-flight crash recovery) are preserved in the design archive. **None of them gate the v1 ship.** Re-open this milestone only on a deliberate trigger — real user demand for multi-user editing, or a contributor with the capacity to implement and operate the stateful server runtime.
 
 ### M4 — v1 deployment polish ⬜
 
-**Scope (revised — much shipped early).** Most of the original M4 scope landed at M0 (multi-stage Dockerfile, static-file serving with SPA fallback, immutable-asset caching, healthcheck, `deploy.sh` with `.env` validation). M4 is now the v1-ship gate: validate end-to-end on a clean host, exercise the reverse-proxy paths against real proxies, and write release notes.
+**Scope (revised — sharing-deferred shape).** Most of the original M4 scope landed at M0 (multi-stage Dockerfile, static-file serving with SPA fallback, immutable-asset caching, healthcheck, `deploy.sh` with `.env` validation). With sharing deferred per [ADR 0012](decisions/0012-sharing-deferred.md), M4 is now a lighter pre-ship gate: validate end-to-end on a clean host, exercise reverse-proxy paths against real proxies, simplify `.env.example` (drop the sharing-related vars), and write release notes.
 
 **Exit criteria.**
 
 - `./deploy.sh` produces a working production stack on a clean host given only Docker (validated by re-pulling on a fresh VM).
 - `BASE_PATH=/whiteboard` works behind a real reverse proxy (Caddy and Nginx, both tested against the provided snippets).
-- WebSocket upgrade works through the proxy (relevant once M3 ships sync).
-- Backup / restore procedure in `docs/deployment.md` exercised end-to-end at least once.
-- v1.0.0 release notes drafted from the `[Unreleased]` section of `CHANGELOG.md`.
-- Tag `v1.0.0`.
+- `.env.example` reflects the v1-stateless shape (no `OWNER_TOKEN` / `DATA_DIR` / `MAX_ROOMS` / `MAX_BOARD_BLOB_MB`).
+- No backup / restore procedure needed at v1 (no server-side state); the deployment doc is updated accordingly.
+- `docs/deployment.md` updated; CHANGELOG entry; tag `m4-deploy-polish`. v1.0.0 release notes drafted from the `[Unreleased]` section of `CHANGELOG.md` and finalized at M4.5 tagging.
 
 ### M4.5 — PWA install + offline ⬜
 

@@ -1,0 +1,70 @@
+# Deploy the static SPA to GitHub Pages.
+#
+# Whiteboard's v1 server is stateless — it serves static files only. That makes
+# GitHub Pages a clean alternative to the Docker deploy: same dist, different
+# host. The live-collaboration features that would need a runtime backend are
+# deferred per ADR 0012 (docs/decisions/0012-sharing-deferred.md).
+#
+# Triggers: push to main, or manual dispatch. The repo's Pages settings must
+# select "GitHub Actions" as the source (Settings -> Pages -> Source).
+#
+# The BASE_PATH env is what Vite's `base` reads (apps/web/vite.config.ts:14).
+# It's set to "/whiteboard/" to match the repo name -- adjust if the repo is
+# renamed or if a user/org Pages site (rooted at /) is preferred.
+
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build for Pages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build web (with Pages base path)
+        env:
+          BASE_PATH: /whiteboard/
+        run: bun run --filter @whiteboard/web build
+
+      - name: Disable Jekyll processing
+        # GitHub Pages defaults to running Jekyll, which ignores files/dirs
+        # starting with "_". An empty .nojekyll file opts out.
+        run: touch apps/web/dist/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist
+
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

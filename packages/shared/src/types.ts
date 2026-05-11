@@ -16,7 +16,7 @@ export interface Sample {
   ty?: number
   /** Elapsed milliseconds since the stroke's pointerdown (t = 0 at start).
    *  Epoch-independent so the value survives page reloads and is comparable
-   *  across peers under M3 sync. */
+   *  across peers if/when the deferred sharing layer returns (ADR 0012). */
   t: number
 }
 
@@ -59,8 +59,8 @@ export interface Stroke {
    * Soft-delete flag. The renderer filters strokes with `deleted === true`;
    * undo of a stroke creation flips this to `true`; redo flips it back to
    * `false`. The stroke is never removed from the in-memory array or from
-   * IndexedDB, which keeps undo / redo cheap and CRDT-friendly when M3
-   * sync lands.
+   * IndexedDB, which keeps undo / redo cheap and preserves CRDT-friendliness
+   * for the deferred future sharing layer (ADR 0012).
    */
   deleted?: boolean
   /**

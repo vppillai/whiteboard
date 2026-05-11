@@ -11,28 +11,26 @@ When you change the system, update both.
 
 ## 1. System overview
 
-Whiteboard is a single-process web application: a Bun-based HTTP + WebSocket server serves a static SPA and relays Y.js (CRDT) updates between browser peers. Persistence is local SQLite.
+Whiteboard is a single-process web application: a Bun-based HTTP server serves a static SPA. Persistence is local IndexedDB in the browser. The v1 server is stateless.
 
 ```
    Browser                                    Container
   ┌──────────────────────────┐              ┌──────────────────────────┐
-  │  SPA (web)               │   HTTPS/WS   │  Bun server              │
+  │  SPA (web)               │   HTTPS      │  Bun server (stateless)  │
   │  ┌───────────┐           │ ────────────►│  ┌──────────┐            │
   │  │ Drawing   │           │              │  │ Static   │            │
-  │  │ canvas    │           │              │  │ files    │            │
-  │  └───────────┘           │              │  └──────────┘            │
-  │  ┌───────────┐           │              │  ┌──────────┐            │
-  │  │ Y.Doc     │ ◄─────────┼──── y-ws ────┼─►│ y-ws     │            │
-  │  └───────────┘           │              │  │ relay    │            │
-  │  ┌───────────┐           │              │  └────┬─────┘            │
-  │  │ IndexedDB │           │              │       ▼                  │
-  │  │ (offline) │           │              │  ┌──────────┐            │
-  │  └───────────┘           │              │  │ SQLite   │            │
-  └──────────────────────────┘              │  └──────────┘            │
-                                            └──────────────────────────┘
+  │  │ canvas    │           │              │  │ files +  │            │
+  │  └───────────┘           │              │  │ /health  │            │
+  │  ┌───────────┐           │              │  └──────────┘            │
+  │  │ StrokeStore│  ← seam for future sync                            │
+  │  │ (local IDB)│                                                    │
+  │  └───────────┘                                                     │
+  └──────────────────────────┘              └──────────────────────────┘
 ```
 
-There are no other services. No queue, no Redis, no separate database, no separate static-file CDN. Scaling beyond one box is out of scope.
+There are no other services. No queue, no Redis, no separate database, no separate static-file CDN. The server holds no state — restarts are free; backups are unnecessary; scaling beyond one box is out of scope.
+
+The Y.js + WebSocket + SQLite layer that originally formed the M3 (live collaboration) plan is **deferred to post-v1** per [ADR 0012](decisions/0012-sharing-deferred.md). The design is preserved at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](superpowers/specs/2026-05-10-m3-sync-design.md). v1 schema and abstraction choices (M2.1) keep the future-sharing door open without paying the cost today.
 
 ## 2. Components
 
@@ -87,29 +85,27 @@ Key submodules:
 | `export/svg.ts`   | M2 ✅    | Custom SVG serializer; mask-based `erasedStamps` subtraction. |
 | `export/pdf.ts`   | M2 ✅    | PDF export — lazy `jspdf`, PNG embed.                   |
 | `export/index.ts` | M2 ✅    | Export dispatcher + filename + download trigger.         |
-| `sync/`         | M3 ⬜    | Y.Doc binding; WebSocket transport; presence.            |
+| `sync/`         | 🟡 Deferred | Live collaboration (Y.Doc binding, WebSocket transport, presence) dropped from v1 per ADR 0012. Full design preserved at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](superpowers/specs/2026-05-10-m3-sync-design.md). |
 | `ui/`           | 🟡 Deferred | Floating toolbar dropped from v1 per ADR 0011 — right-click + keyboard + side panel cover discovery. |
 | `ai/`           | v2 ⬜    | Shape recognition, HTR, math — `transformers.js`.        |
 
 ### 2.2 Server (`apps/server`)
 
-Single Bun process. Responsibilities:
+Single Bun process. **Stateless at v1.** Two responsibilities:
 
 1. **M0 ✅** Serve static files from `apps/web/dist` with SPA fallback to `index.html`. Hashed assets get `Cache-Control: immutable`.
 2. **M0 ✅** Expose `/health` for the container healthcheck.
-3. **M3 ⬜** Handle WebSocket upgrades for `/yjs/<room-id>`; forward Y.js updates between peers in the same room.
-4. **M3 ⬜** Snapshot each room's Y.Doc to SQLite on idle / disconnect.
-5. **M3 ⬜** Validate `OWNER_TOKEN` for admin actions (rename, delete, export-all).
 
-The server holds Y.Docs in-memory only as long as a room has active peers. Cold rooms are evicted and rehydrated from SQLite on the next connect.
+The originally-planned WebSocket relay, Y.Doc snapshot persistence, and `OWNER_TOKEN` admin gating are **deferred to post-v1** per [ADR 0012](decisions/0012-sharing-deferred.md). The full server-side design is preserved in the [M3 archive](superpowers/specs/2026-05-10-m3-sync-design.md). At v1, the server has no long-lived state — restarts are free, no data volume is required, and the same dist can also be served directly from a static host (e.g., GitHub Pages — see [deployment.md](deployment.md)).
 
 ### 2.3 Shared (`packages/shared`)
 
-Types and protocol shared between web and server. Includes:
+Types shared between web and server. Includes:
 
-- `Stroke`, `Sample` types.
-- WebSocket message envelope types (auth, presence, room-meta — outside of the Y.js protocol itself, which is binary).
-- Constants: limits, format versions.
+- `Stroke`, `Sample`, `BrushConfig` types.
+- Constants: format versions.
+
+(WebSocket message envelope types for the deferred sharing layer are not shipped in v1; they're part of the M3 archive design.)
 
 ### 2.4 Persistence
 
@@ -117,51 +113,24 @@ Types and protocol shared between web and server. Includes:
 
 `apps/web/src/storage.ts` wraps IndexedDB. One database (`whiteboard-local`), one object store (`strokes`), keyed on stroke id. Strokes are written individually on `pointerup` so a power-loss event at most loses the in-flight stroke. Reads on app boot hydrate the committed canvas.
 
-This is intentionally a thin wrapper, not a CRDT-aware persistence layer — that swaps in at M3 (`y-indexeddb`).
+Wrapped behind the `StrokeStore` interface seam (M2.1, `apps/web/src/strokestore.ts`) so the persistence backend can be swapped without touching the orchestrator — preserving the option to attach a future Y.Doc-backed implementation when sharing returns.
 
-#### Server (M3 ⬜)
+#### Server (deferred)
 
-SQLite via `bun:sqlite`. Schema (planned):
-
-```sql
-CREATE TABLE rooms (
-  id          TEXT PRIMARY KEY,        -- UUIDv7 base32
-  name        TEXT NOT NULL,
-  created_at  INTEGER NOT NULL,
-  updated_at  INTEGER NOT NULL
-);
-
-CREATE TABLE snapshots (
-  room_id     TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-  ydoc_blob   BLOB NOT NULL,
-  ts          INTEGER NOT NULL,
-  PRIMARY KEY (room_id, ts)
-);
-
-CREATE INDEX snapshots_room_ts ON snapshots(room_id, ts DESC);
-```
-
-Snapshots are full doc states (`Y.encodeStateAsUpdate`). Old snapshots are pruned on a schedule (keep latest N, delete older).
+No server-side persistence at v1. The SQLite schema designed for the (deferred) sharing layer — `rooms(id, name, created_at, updated_at)` + `snapshots(room_id, ydoc_blob, ts)` keyed PK with `(room_id, ts DESC)` index — is preserved in the [M3 design archive](superpowers/specs/2026-05-10-m3-sync-design.md) and returns when sharing returns per [ADR 0012](decisions/0012-sharing-deferred.md).
 
 ## 3. Network protocol
 
 ### 3.1 Static + REST
 
-| Path                       | Method | Purpose                          |
-|----------------------------|--------|----------------------------------|
-| `/`, `/b/<id>`, `/assets/*`| GET    | Static SPA assets.               |
-| `/health`                  | GET    | Liveness probe (returns 200).    |
-| `/api/rooms`               | POST   | Create room (returns id).        |
-| `/api/rooms/:id`           | DELETE | Delete room. Owner-token required. |
+| Path             | Method | Purpose                          |
+|------------------|--------|----------------------------------|
+| `/`, `/assets/*` | GET    | Static SPA assets.               |
+| `/health`        | GET    | Liveness probe (returns 200).    |
 
 ### 3.2 WebSocket
 
-| Path                | Purpose                                              |
-|---------------------|------------------------------------------------------|
-| `/yjs/<room-id>`    | Y.js sync; binary protocol (`y-protocols/sync`).     |
-| `/presence/<room-id>`| Cursor / selection presence; JSON.                   |
-
-The Y.js binary protocol is consumed unchanged. Owner-token, if present in the query string, gates admin operations server-side.
+No WebSocket endpoints at v1. The `/yjs/<room-id>` (Y.js sync) and `/presence/<room-id>` (cursor presence) endpoints are part of the deferred sharing design — see the [M3 archive](superpowers/specs/2026-05-10-m3-sync-design.md) and [ADR 0012](decisions/0012-sharing-deferred.md).
 
 ## 4. Stroke data model
 
@@ -179,7 +148,7 @@ type Stroke = {
   id: string                // ULID
   brush: BrushConfig         // snapshot at pointerdown — color may be the 'ink' token
   samples: Sample[]
-  startedAt: number          // performance.now() at pointerdown
+  startedAt: number          // Date.now() (wall-clock ms) — cross-peer sort key (M2.1)
   deleted?: boolean          // whole-stroke soft-delete (lasso, object-mode eraser)
   erasedStamps?: { x: number; y: number; r: number }[]
                               // pixel-mask eraser (ADR 0009): cursor disks subtracted
@@ -188,17 +157,17 @@ type Stroke = {
 }
 ```
 
-Stored locally as one IDB row per stroke. M3+ also represents this in Y.js as `Y.Array<Y.Map>` for sync. Both `deleted` and `erasedStamps` are append-only-friendly (a flag flip and a list extension, respectively) — CRDT-friendly when sync lands.
+Stored locally as one IDB row per stroke. The schema is CRDT-friendly by design — `deleted` is an append-only flip (M2.1: routed exclusively through the op pipeline), and `erasedStamps` is an append-only list. Both shapes are ready to wrap as `Y.Map` + nested `Y.Array<Y.Map>` if and when sharing returns per [ADR 0012](decisions/0012-sharing-deferred.md).
 
 Coordinates are in **board space** (infinite, unitless), translated to screen space at render time via the camera transform. `erasedStamps` are in board coords too; they re-rasterize correctly through pan / zoom / theme changes alongside the stroke they belong to.
 
 ## 5. Deployment topology
 
-One container, one process, one SQLite file mounted on a Docker volume. The server listens on `${PORT}` (default 8787) and serves both static and WebSocket from the same port.
+One container, one **stateless** process. No volume required at v1. The server listens on `${PORT}` (default 8787) and serves static files.
 
-Sub-path mounting (`BASE_PATH=/whiteboard`) is supported for reverse-proxy deployments. Both the SPA and the WebSocket endpoints honor this. See [deployment.md](deployment.md).
+Sub-path mounting (`BASE_PATH=/whiteboard`) is supported for reverse-proxy deployments. The SPA honors this. See [deployment.md](deployment.md).
 
-There is no horizontal-scale story. A single container is the unit; if you need more, run more (one per tenancy) behind a router.
+There is no horizontal-scale story. A single container is the unit; restarts are free; backups are unnecessary (no server-side state). When sharing returns post-v1, the container gains a SQLite volume and the WebSocket-through-proxy story per the [M3 archive](superpowers/specs/2026-05-10-m3-sync-design.md).
 
 ---
 
@@ -247,7 +216,10 @@ This section reflects what is *actually in the code right now*. It is updated at
 | **Palette cycle (`Shift+[/]`)**   | ✅ Complete    | M2; cycles 10 curated colors with wraparound. |
 | **Export PNG / SVG / PDF**        | ✅ Complete    | M2; right-click EXPORT row + `Cmd/Ctrl+E` popover; mask-based SVG erasure; lazy `jspdf`. |
 | **Bounded undo / redo + listener cleanup** | ✅ Complete    | M2 (Option C); undoStack capped at 500 with FIFO eviction; modules return cleanup functions; HMR dispose + beforeunload run all teardowns. |
-| Live collaboration                | ❌ Not started | M3.                                                      |
-| Room URLs / owner token           | ❌ Not started | M3.                                                      |
-| Server-side SQLite snapshots      | ❌ Not started | M3.                                                      |
+| **`StrokeStore` interface seam**  | ✅ Complete    | M2.1; abstracts stroke persistence behind `load/save/delete/clear/onRemoteChange`. Local IDB is the only concrete implementation at v1; preserved as the integration point for a future Y.Doc-backed implementation. |
+| **IDB compaction on load**        | ✅ Complete    | M2.1; hard-deletes orphaned tombstones on app boot so deleted strokes don't accumulate. |
+| Live collaboration                | 🟡 Deferred    | Dropped from v1 per [ADR 0012](decisions/0012-sharing-deferred.md); full design preserved at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](superpowers/specs/2026-05-10-m3-sync-design.md). |
+| Room URLs / owner token           | 🟡 Deferred    | Part of the deferred sharing scope per ADR 0012.        |
+| Server-side SQLite snapshots      | 🟡 Deferred    | Part of the deferred sharing scope per ADR 0012.        |
+| In-flight stroke crash recovery   | 🟡 Deferred    | Bundled with the deferred sharing scope (M3 archive Decision 9); ships as a small post-v1 milestone if user demand emerges. |
 | AI features                       | ❌ Not started | v2 (M5–M7).                                              |

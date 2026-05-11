@@ -20,23 +20,15 @@ EOF
   exit 1
 fi
 
-# 2. Source .env to validate critical vars
+# 2. Source .env to make vars available to docker compose
 set -a
 # shellcheck disable=SC1091
 . .env
 set +a
 
-if [ -z "${OWNER_TOKEN:-}" ] || [ "${OWNER_TOKEN}" = "replace-me-with-openssl-rand-hex-32" ]; then
-  cat >&2 <<'EOF'
-Error: OWNER_TOKEN must be set in .env to a real secret.
-
-Generate one with:
-  openssl rand -hex 32
-
-Then put it in your .env file.
-EOF
-  exit 1
-fi
+# (v1 is stateless; OWNER_TOKEN / DATA_DIR / MAX_ROOMS / MAX_BOARD_BLOB_MB
+#  are not validated here — they return when live collaboration returns
+#  per ADR 0012. See docs/decisions/0012-sharing-deferred.md.)
 
 # 3. Verify docker is available
 if ! command -v docker >/dev/null 2>&1; then
