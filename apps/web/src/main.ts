@@ -43,7 +43,7 @@ import { exitDistractionFree, isDistractionFree, toggleDistractionFree } from '.
 import { attachEraserHold } from './eraserhold'
 import { openExportPopover } from './exportpopover'
 import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
-import { drawGrid } from './grid'
+import { drawGrid, invalidateGridColors } from './grid'
 import { createHelpOverlay } from './helpoverlay'
 import { attachKeymap } from './keymap'
 import { MetricsCollector, bindHudToggle, createHud } from './metrics'
@@ -486,6 +486,7 @@ async function main(): Promise<void> {
   //  Theme + settings change hooks
   // ---------------------------------------------------------------------
   const onThemechange = (): void => {
+    invalidateGridColors()
     committedDirty = true
   }
   document.documentElement.addEventListener('themechange', onThemechange)
