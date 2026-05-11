@@ -154,6 +154,21 @@ describe('export/svg', () => {
     expect(text).toContain('M 0 0 L 24 0 M 0 0 L 0 24')
   })
 
+  test('stroke path uses quadratic curves (Q) to match canvas hull', async () => {
+    const s = mkStroke([
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ])
+    const blob = exportSVG([s], { x: -10, y: -10, width: 40, height: 40 }, baseSettings)
+    const text = await blob.text()
+    // SVG `Q` quadratic-curve command — matches the canvas
+    // `quadraticCurveTo(x0, y0, midX, midY)` hull in stroke.ts. Was a
+    // straight-line `L` polyline pre-#10, producing sharp corners.
+    expect(text).toMatch(/<path d="M[^"]* Q /)
+  })
+
   test('deleted strokes are excluded', async () => {
     const s = mkStroke(
       [
