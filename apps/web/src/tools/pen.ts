@@ -296,11 +296,6 @@ export function createPenTool(opts: PenToolOptions): Tool {
   }
 }
 
-function applyGamma(p: number, gamma: number): number {
-  if (p <= 0 || gamma === 1) return p
-  return p ** gamma
-}
-
 function makeId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
   return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
