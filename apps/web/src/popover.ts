@@ -130,6 +130,46 @@ export function showPopover(opts: PopoverOptions): Popover {
   })
   closeBtn.addEventListener('click', dismiss)
 
+  // Drag-to-move via the header. Click on title / empty header area starts
+  // a drag; clicks on the pin/close buttons don't (they're tested first via
+  // closest() check). Position is clamped to the viewport. M2 feel-test add.
+  let drag: { dx: number; dy: number; pointerId: number } | null = null
+  header.style.cursor = 'grab'
+  header.addEventListener('pointerdown', (e: PointerEvent) => {
+    // Skip drags initiated on the action buttons — they have their own handlers.
+    if ((e.target as HTMLElement).closest('.whiteboard-popover-icon-btn')) return
+    const rect = el.getBoundingClientRect()
+    drag = { dx: e.clientX - rect.left, dy: e.clientY - rect.top, pointerId: e.pointerId }
+    header.setPointerCapture(e.pointerId)
+    header.style.cursor = 'grabbing'
+    // Once user drags, become pinned — they want to keep this popover open
+    // to interact with it from a new position.
+    if (!pinned) {
+      pinned = true
+      syncPinUI()
+    }
+  })
+  header.addEventListener('pointermove', (e: PointerEvent) => {
+    if (!drag || e.pointerId !== drag.pointerId) return
+    const margin = 8
+    const w = el.offsetWidth
+    const h = el.offsetHeight
+    let x = e.clientX - drag.dx
+    let y = e.clientY - drag.dy
+    x = Math.max(margin, Math.min(x, window.innerWidth - w - margin))
+    y = Math.max(margin, Math.min(y, window.innerHeight - h - margin))
+    el.style.left = `${x}px`
+    el.style.top = `${y}px`
+  })
+  const endDrag = (e: PointerEvent): void => {
+    if (!drag || e.pointerId !== drag.pointerId) return
+    if (header.hasPointerCapture(drag.pointerId)) header.releasePointerCapture(drag.pointerId)
+    drag = null
+    header.style.cursor = 'grab'
+  }
+  header.addEventListener('pointerup', endDrag)
+  header.addEventListener('pointercancel', endDrag)
+
   // Capture-phase so we see clicks before stroke handlers do.
   document.addEventListener('keydown', onKey, true)
   document.addEventListener('pointerdown', onOutsidePointer, true)
