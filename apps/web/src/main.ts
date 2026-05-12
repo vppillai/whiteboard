@@ -90,6 +90,7 @@ import {
   type ToolContext,
   type ToolId,
   createEraserTool,
+  createLaserTool,
   createLassoTool,
   createPenTool,
   createSelectTool,
@@ -432,11 +433,14 @@ async function main(): Promise<void> {
     },
   })
 
-  const allTools: Record<'pen' | 'eraser' | 'lasso' | 'select', Tool> = {
+  const laserTool = createLaserTool()
+
+  const allTools: Record<'pen' | 'eraser' | 'lasso' | 'select' | 'laser', Tool> = {
     pen: penTool,
     eraser: eraserTool,
     lasso: lassoTool,
     select: selectTool,
+    laser: laserTool,
   }
   const tool: { current: Tool } = { current: penTool }
   // Apply the initial tool's cursor — `setTool` only fires on changes, so
@@ -487,7 +491,8 @@ async function main(): Promise<void> {
   document.body.appendChild(toolPill.el)
   const setTool = (id: ToolId): void => {
     if (tool.current.id === id) return
-    if (id !== 'pen' && id !== 'eraser' && id !== 'lasso' && id !== 'select') return
+    if (id !== 'pen' && id !== 'eraser' && id !== 'lasso' && id !== 'select' && id !== 'laser')
+      return
     tool.current.cleanup?.()
     tool.current = allTools[id]
     root.style.cursor = tool.current.cursor ?? ''
@@ -865,6 +870,7 @@ async function main(): Promise<void> {
       selectEraserSticky: () => setTool('eraser'),
       selectLassoTool: () => setTool('lasso'),
       selectSelectTool: () => setTool('select'),
+      selectLaserTool: () => setTool('laser'),
       deleteSelection: () => {
         // Cmd+A also marks images for batch delete. Drain that set first
         // (independent of which tool is active) so the user can hit

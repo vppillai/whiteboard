@@ -27,7 +27,7 @@ const TOOL_LABELS: Record<ToolId, string> = {
 }
 
 /** Enabled tools, in cycle order. Mirror of `toolmenu.ts` TOOLS-with-enabled. */
-const CYCLE: readonly ToolId[] = ['pen', 'eraser', 'lasso', 'select']
+const CYCLE: readonly ToolId[] = ['pen', 'eraser', 'lasso', 'select', 'laser']
 
 export interface ToolPillOptions {
   initial: ToolId

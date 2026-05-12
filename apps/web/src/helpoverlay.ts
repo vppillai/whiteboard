@@ -18,6 +18,7 @@ const SHORTCUTS = [
   'Shift + erase      object mode (single stroke per click)',
   'S                  tool: lasso',
   'V                  tool: select  (move/resize/rotate image)',
+  'L                  tool: laser  (fading pointer trail)',
   'Esc Esc            toggle Draw ↔ Select',
   '⌘/Ctrl + A         select all  (strokes + images)',
   '⌘/Ctrl + C / X     copy / cut selected image',

@@ -77,6 +77,10 @@ export interface SettingsV1 {
    *  Fast = thinner, slow = thicker — gives mouse-drawn strokes some shape
    *  variation instead of the dead 0.5-flat default. v1.2. */
   mouseSyntheticPressure: boolean
+  /** Color of the laser pointer trail. Stored separately from `color` so
+   *  picking laser-red doesn't carry over when switching to pen. Default
+   *  is the curated palette's red, matching real laser pointers. v1.2. */
+  laserColor: string
   syncedAt?: number
   remoteId?: string
 }
@@ -106,6 +110,7 @@ function defaultV1(): SettingsV1 {
     recentColors: [],
     predictedEvents: false, // NEW (M2; ADR 0004)
     mouseSyntheticPressure: true, // NEW (v1.2): mouse strokes get velocity-shaped pressure
+    laserColor: '#ef4444', // NEW (v1.2): curated red, matches real laser pointer
   }
 }
 
@@ -166,6 +171,7 @@ export function migrate(input: unknown): SettingsV1 {
       typeof v.mouseSyntheticPressure === 'boolean'
         ? v.mouseSyntheticPressure
         : DEFAULTS.mouseSyntheticPressure,
+    laserColor: typeof v.laserColor === 'string' ? v.laserColor : DEFAULTS.laserColor,
     syncedAt: typeof v.syncedAt === 'number' ? v.syncedAt : undefined,
     remoteId: typeof v.remoteId === 'string' ? v.remoteId : undefined,
   }
@@ -353,6 +359,20 @@ export function setPredictedEvents(value: boolean): void {
 export function setMouseSyntheticPressure(value: boolean): void {
   if (state.mouseSyntheticPressure === value) return
   state.mouseSyntheticPressure = value
+  persist()
+  emit()
+}
+
+/** Get the laser pointer trail color. v1.2. */
+export function getLaserColor(): string {
+  return state.laserColor
+}
+
+/** Set the laser pointer trail color. v1.2. Stored separately from pen
+ *  `color` so the laser-red doesn't carry over to drawing. */
+export function setLaserColor(value: string): void {
+  if (state.laserColor === value) return
+  state.laserColor = value
   persist()
   emit()
 }

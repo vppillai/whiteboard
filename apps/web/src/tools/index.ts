@@ -15,4 +15,5 @@ export {
   type LassoToolCallbacks,
   type LassoToolOptions,
 } from './lasso'
+export { createLaserTool } from './laser'
 export { createSelectTool, type SelectTool } from './select'

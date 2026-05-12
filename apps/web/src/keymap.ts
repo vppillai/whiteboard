@@ -43,6 +43,9 @@ export interface KeyHandlers {
    *  the Figma / Sketch / Excalidraw convention for the pointer/select
    *  tool. */
   selectSelectTool: () => void
+  /** Activate the laser pointer tool. Bound to `L`. Ephemeral fading
+   *  trail for presentations; nothing persisted. */
+  selectLaserTool: () => void
   /** Delete the active selection (lasso). Returns `true` if anything was
    *  actually deleted; the dispatcher uses this to decide whether to
    *  preventDefault (so Backspace doesn't trigger browser history-back). */
@@ -177,6 +180,11 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       // V — Select tool (image manipulation). Figma/Sketch convention.
       if (k === 'v') {
         handlers.selectSelectTool()
+        return
+      }
+      // L — Laser pointer (ephemeral fading trail).
+      if (k === 'l') {
+        handlers.selectLaserTool()
         return
       }
       // F — toggle distraction-free mode (hides chrome). M2.

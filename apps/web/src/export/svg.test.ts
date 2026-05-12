@@ -36,6 +36,7 @@ const baseSettings: SettingsV1 = {
   recentColors: [],
   predictedEvents: false,
   mouseSyntheticPressure: false,
+  laserColor: '#ef4444',
 }
 
 describe('export/svg', () => {
