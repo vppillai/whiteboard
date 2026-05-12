@@ -63,6 +63,18 @@ const HANDLE_HIT_PX = 10
 /** Selection outline + handle stroke color. Matches the existing UI accent. */
 const ACCENT = 'var(--whiteboard-accent, #2563eb)'
 
+/**
+ * Custom rotation cursor — a circular arrow drawn inline as an SVG data URL.
+ * CSS doesn't have a built-in "rotate" cursor and `grab` reads as "I'm
+ * holding something" rather than "I'm spinning something", which was the
+ * specific UX complaint. The 24×24 SVG has a black stroke with a white
+ * halo for visibility on both light and dark backgrounds. Hot-spot at the
+ * center (12,12). The trailing `grab` is the fallback if the browser can't
+ * load the data URL (very old browsers / restrictive CSP).
+ */
+const ROTATE_CURSOR =
+  'url(\'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M 12 4 A 8 8 0 1 1 4 12" fill="none" stroke="white" stroke-width="4" stroke-linecap="round"/><path d="M 12 4 A 8 8 0 1 1 4 12" fill="none" stroke="black" stroke-width="2" stroke-linecap="round"/><polygon points="12,0 18,6 12,10" fill="black" stroke="white" stroke-width="1"/></svg>\') 12 12, grab'
+
 export interface SelectTool extends Tool {
   /** Currently-selected image id, or null. Read by main.ts for the
    *  Delete-key handler since image-delete is a tool-state action,
@@ -167,21 +179,44 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     }
   }
 
-  function cursorFor(handle: HandleId): string {
-    switch (handle) {
-      case 'nw':
-      case 'se':
-        return 'nwse-resize'
-      case 'ne':
-      case 'sw':
-        return 'nesw-resize'
-      case 'n':
-      case 's':
-        return 'ns-resize'
-      case 'e':
-      case 'w':
-        return 'ew-resize'
+  /**
+   * Resize cursor that matches the handle's *effective* on-screen direction,
+   * accounting for image rotation. Without this, the cursor stays
+   * "↖↘ nwse-resize" even after the image is rotated 90°, where the NW
+   * handle visually points up/down — bad UX feedback.
+   *
+   * The 4 built-in CSS resize cursors are at 45° increments; we bucket the
+   * effective angle to the nearest one.
+   */
+  function cursorFor(handle: HandleId, rotationRad: number): string {
+    // Base "outward" angle from image center to each handle, in degrees,
+    // with 0° = north and increasing clockwise (matches CSS convention).
+    const baseDeg: Record<HandleId, number> = {
+      n: 0,
+      ne: 45,
+      e: 90,
+      se: 135,
+      s: 180,
+      sw: 225,
+      w: 270,
+      nw: 315,
     }
+    const effective = baseDeg[handle] + (rotationRad * 180) / Math.PI
+    // Normalize to [0, 360) then bucket to nearest 45°. Opposite pairs
+    // share a cursor (nw/se → nwse, etc.), so we take bucket mod 4.
+    const normalized = ((effective % 360) + 360) % 360
+    const bucket = Math.round(normalized / 45) % 4
+    switch (bucket) {
+      case 0:
+        return 'ns-resize'
+      case 1:
+        return 'nesw-resize'
+      case 2:
+        return 'ew-resize'
+      case 3:
+        return 'nwse-resize'
+    }
+    return 'default'
   }
 
   /** Hit-test against the selected image's handles (board coords). Returns
@@ -222,12 +257,12 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
 
     if (sel) {
       if (isOverRotationHandle(boardX, boardY, sel, ctx.camera.scale)) {
-        ctx.setCursor('grab')
+        ctx.setCursor(ROTATE_CURSOR)
         return
       }
       const handle = handleAt(boardX, boardY, sel, ctx.camera.scale)
       if (handle) {
-        ctx.setCursor(cursorFor(handle))
+        ctx.setCursor(cursorFor(handle, sel.rotation ?? 0))
         return
       }
     }
@@ -330,7 +365,9 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
           startBoard: { x: bx, y: by },
         }
         ;(e.target as Element).setPointerCapture?.(e.pointerId)
-        ctx.setCursor('grabbing')
+        // Keep the rotate cursor through the drag so the gesture reads as
+        // continuous (vs flipping to a generic grabbing).
+        ctx.setCursor(ROTATE_CURSOR)
         return
       }
 

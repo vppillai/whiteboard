@@ -239,6 +239,18 @@ async function main(): Promise<void> {
     return max + 1
   }
 
+  // Images marked for batch delete via Cmd/Ctrl+A. Distinct from the Select
+  // tool's single-image selection (which carries handles + transform UX);
+  // this is just a "next Delete press also removes these" flag. Cleared on
+  // pointerdown / tool change / Esc / after delete. Visualized as a thin
+  // outline in the per-frame image render pass below.
+  const imagesMarkedForBatchDelete = new Set<string>()
+  const clearImageBatchSelection = (): void => {
+    if (imagesMarkedForBatchDelete.size === 0) return
+    imagesMarkedForBatchDelete.clear()
+    committedDirty = true
+  }
+
   try {
     const persistedImages = await imageStore.load()
     images.push(...persistedImages)
@@ -461,6 +473,10 @@ async function main(): Promise<void> {
     tool.current = allTools[id]
     root.style.cursor = tool.current.cursor ?? ''
     toolPill.setActiveTool(id)
+    // Tool change drops Cmd+A image-batch marks. (Pen/Eraser etc. won't
+    // surface a "Delete deletes the marked images" affordance, so leaving
+    // them marked is misleading.)
+    clearImageBatchSelection()
     committedDirty = true // active tool changed; selection halos may toggle
   }
 
@@ -520,6 +536,18 @@ async function main(): Promise<void> {
   //  cleanly regardless).
   // ---------------------------------------------------------------------
   root.addEventListener('contextmenu', (e) => e.preventDefault())
+
+  // Any pointer-down on the canvas drops a pending Cmd+A image-batch
+  // selection. The marks are a transient "press Delete next" affordance;
+  // continuing into any other gesture (drawing, lasso, select) means the
+  // user moved on.
+  root.addEventListener(
+    'pointerdown',
+    () => {
+      clearImageBatchSelection()
+    },
+    { capture: true },
+  )
 
   // ---------------------------------------------------------------------
   //  Image paste — three input paths feeding one PasteImage op (see
@@ -746,13 +774,39 @@ async function main(): Promise<void> {
       selectLassoTool: () => setTool('lasso'),
       selectSelectTool: () => setTool('select'),
       deleteSelection: () => {
-        if (tool.current === selectTool) return selectTool.deleteSelected()
-        if (tool.current === lassoTool) return lassoTool.deleteSelection()
-        return false
+        // Cmd+A also marks images for batch delete. Drain that set first
+        // (independent of which tool is active) so the user can hit
+        // Cmd+A → Delete from any tool to remove all images.
+        let didDelete = false
+        if (imagesMarkedForBatchDelete.size > 0) {
+          for (const id of imagesMarkedForBatchDelete) {
+            const img = images.find((i) => i.id === id)
+            if (!img || img.deleted) continue
+            img.deleted = true
+            void imageStore.updateMeta(img).catch((err) => {
+              console.warn('whiteboard/web: failed to persist image delete:', err)
+            })
+            pushUndoOp({ kind: 'delete-image', imageId: id })
+            didDelete = true
+          }
+          imagesMarkedForBatchDelete.clear()
+          committedDirty = true
+        }
+        if (tool.current === selectTool && selectTool.deleteSelected()) didDelete = true
+        if (tool.current === lassoTool && lassoTool.deleteSelection()) didDelete = true
+        return didDelete
       },
       selectAll: () => {
+        // Strokes via the existing lasso path …
         setTool('lasso')
         lassoTool.selectAll()
+        // … plus images via the batch-mark set so the next Delete removes
+        // them too. Visually a thin outline appears around each image (see
+        // the per-frame image render pass).
+        imagesMarkedForBatchDelete.clear()
+        for (const img of images) {
+          if (!img.deleted) imagesMarkedForBatchDelete.add(img.id)
+        }
         committedDirty = true
       },
       togglePanel,
@@ -767,6 +821,13 @@ async function main(): Promise<void> {
         }
         if (clearFlow.cancel()) handled = true
         if (dismissAllPopovers()) handled = true
+        // Esc also drops any Cmd+A image-batch marks before falling back
+        // to a tool switch — same semantic as Esc in lasso (clear the
+        // pending selection).
+        if (imagesMarkedForBatchDelete.size > 0) {
+          clearImageBatchSelection()
+          handled = true
+        }
         // Esc in lasso mode falls back to the pen tool. The lasso's `cleanup`
         // hook (called from `setTool`) clears any in-progress polygon and
         // selection state, so switching is a clean reset.
@@ -890,13 +951,30 @@ async function main(): Promise<void> {
         if (bb.maxY < viewBBox.minY || bb.minY > viewBBox.maxY) continue
         const { x, y, w, h } = img.transform
         const r = img.rotation ?? 0
+        const isMarked = imagesMarkedForBatchDelete.has(img.id)
         if (r === 0) {
           cCtx.drawImage(el, x, y, w, h)
+          if (isMarked) {
+            // Thin dashed outline so the batch-marked state reads as
+            // "selected for delete" vs the Select tool's solid handles.
+            cCtx.save()
+            cCtx.strokeStyle = '#2563eb'
+            cCtx.lineWidth = 2 / camera.scale
+            cCtx.setLineDash([6 / camera.scale, 4 / camera.scale])
+            cCtx.strokeRect(x, y, w, h)
+            cCtx.restore()
+          }
         } else {
           cCtx.save()
           cCtx.translate(x + w / 2, y + h / 2)
           cCtx.rotate(r)
           cCtx.drawImage(el, -w / 2, -h / 2, w, h)
+          if (isMarked) {
+            cCtx.strokeStyle = '#2563eb'
+            cCtx.lineWidth = 2 / camera.scale
+            cCtx.setLineDash([6 / camera.scale, 4 / camera.scale])
+            cCtx.strokeRect(-w / 2, -h / 2, w, h)
+          }
           cCtx.restore()
         }
       }
