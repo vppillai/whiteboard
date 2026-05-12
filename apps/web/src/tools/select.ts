@@ -29,7 +29,13 @@ import type { Tool, ToolContext } from './types'
 type HandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 type DragKind =
   | 'move'
-  | { resize: HandleId; anchor: { x: number; y: number } }
+  /** Resize via a handle. `anchorBoard` is the OPPOSITE corner / edge midpoint
+   *  in BOARD space, computed once at drag-start and invariant for the rest
+   *  of the drag. Picking board-space (not local) makes the anchor stay at
+   *  the same screen position throughout — which is the user-expected
+   *  behavior on rotated images, where local-space drift previously
+   *  showed up as the image "wandering" mid-resize. */
+  | { resize: HandleId; anchorBoard: { x: number; y: number } }
   | { rotate: true; startRotation: number; startAngleFromCenter: number }
 
 interface DragState {
@@ -90,8 +96,11 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
   let drag: DragState | null = null
   // Timestamp of the most recent pointerdown on the rotation handle.
   // A second pointerdown on the same handle within DBLCLICK_MS resets
-  // the image's rotation to 0 (and does NOT start a drag).
-  let lastRotateHandleDownAt = 0
+  // the image's rotation to 0 (and does NOT start a drag). Sentinel
+  // `-Infinity` ensures the very first click after page load never trips
+  // the double-click branch by virtue of `performance.now()` returning
+  // a small value (a few hundred ms) early in the session.
+  let lastRotateHandleDownAt = Number.NEGATIVE_INFINITY
   const ROTATE_DBLCLICK_MS = 350
 
   /** Top-most non-deleted image whose rotated rect contains the board-space
@@ -148,40 +157,59 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     return r === 0 ? local : rotateAroundPoint(local, { x: cx, y: cy }, r)
   }
 
-  /** The anchor (opposite handle) for resize math, in image-local
-   *  (un-rotated) coordinates. Resize math always happens in local
-   *  space; rotation is reapplied when drawing / persisting. */
-  function anchorForLocal(handle: HandleId, t: ImageObject['transform']): { x: number; y: number } {
+  /** Compute the anchor (opposite handle's position) in BOARD space at
+   *  drag-start, accounting for rotation. The anchor stays fixed in board
+   *  space throughout the resize drag — that invariance is what lets the
+   *  resize feel correct on rotated images. */
+  function anchorBoardFor(
+    handle: HandleId,
+    t: ImageObject['transform'],
+    rotation: number,
+  ): { x: number; y: number } {
     const cx = t.x + t.w / 2
     const cy = t.y + t.h / 2
-    const local: Record<HandleId, { x: number; y: number }> = {
-      nw: { x: t.x, y: t.y },
-      n: { x: cx, y: t.y },
-      ne: { x: t.x + t.w, y: t.y },
-      e: { x: t.x + t.w, y: cy },
-      se: { x: t.x + t.w, y: t.y + t.h },
-      s: { x: cx, y: t.y + t.h },
-      sw: { x: t.x, y: t.y + t.h },
-      w: { x: t.x, y: cy },
-    }
+    // Local offset of the anchor from the image center, where +x is the
+    // image's right and +y is its down (pre-rotation). Anchor is the
+    // OPPOSITE of the dragged handle.
+    let ox = 0
+    let oy = 0
     switch (handle) {
       case 'nw':
-        return local.se
+        ox = +t.w / 2
+        oy = +t.h / 2
+        break // anchor = SE corner
       case 'n':
-        return local.s
+        ox = 0
+        oy = +t.h / 2
+        break // anchor = S edge mid
       case 'ne':
-        return local.sw
+        ox = -t.w / 2
+        oy = +t.h / 2
+        break // anchor = SW corner
       case 'e':
-        return local.w
+        ox = -t.w / 2
+        oy = 0
+        break // anchor = W edge mid
       case 'se':
-        return local.nw
+        ox = -t.w / 2
+        oy = -t.h / 2
+        break // anchor = NW corner
       case 's':
-        return local.n
+        ox = 0
+        oy = -t.h / 2
+        break // anchor = N edge mid
       case 'sw':
-        return local.ne
+        ox = +t.w / 2
+        oy = -t.h / 2
+        break // anchor = NE corner
       case 'w':
-        return local.e
+        ox = +t.w / 2
+        oy = 0
+        break // anchor = E edge mid
     }
+    const cos = Math.cos(rotation)
+    const sin = Math.sin(rotation)
+    return { x: cx + ox * cos - oy * sin, y: cy + ox * sin + oy * cos }
   }
 
   /**
@@ -256,6 +284,44 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     return Math.abs(p.x - boardX) <= tol && Math.abs(p.y - boardY) <= tol
   }
 
+  /**
+   * Finalize the current drag — push the appropriate op (or skip if the
+   * live state is identical to the snapshot) and clear `drag`. Called from
+   * both onPointerUp (normal release) and pointercancel-style entry paths
+   * (browser revoked the pointer mid-drag, window blur, OS gesture steal).
+   * Without this shared path, a pointercancel left `drag` non-null and
+   * the live transform mutations un-recorded in undo.
+   */
+  function commitDrag(e: PointerEvent | null): void {
+    if (!drag) return
+    const img = deps.getImages().find((i) => i.id === drag?.imageId)
+    if (e) {
+      ;(e.target as Element | null)?.releasePointerCapture?.(e.pointerId)
+    }
+    if (img) {
+      const isRotation = typeof drag.kind === 'object' && 'rotate' in drag.kind
+      if (isRotation) {
+        const beforeR = drag.beforeRotation
+        const afterR = img.rotation ?? 0
+        if (beforeR !== afterR) {
+          deps.pushOp({ kind: 'rotate-image', imageId: img.id, before: beforeR, after: afterR })
+        }
+      } else {
+        const before = drag.before
+        const after = { ...img.transform }
+        if (
+          before.x !== after.x ||
+          before.y !== after.y ||
+          before.w !== after.w ||
+          before.h !== after.h
+        ) {
+          deps.pushOp({ kind: 'transform-image', imageId: img.id, before, after })
+        }
+      }
+    }
+    drag = null
+  }
+
   function updateHoverCursor(ctx: ToolContext, boardX: number, boardY: number): void {
     const imgs = deps.getImages()
     const sel = selectedImageId ? imgs.find((i) => i.id === selectedImageId) : null
@@ -276,72 +342,123 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     ctx.setCursor(hit ? 'move' : 'default')
   }
 
+  /** Resize the image in place. Keeps `anchorBoard` fixed in board space
+   *  regardless of rotation, derives new local dimensions by projecting
+   *  the pointer-vs-anchor delta onto the image's rotated axes, then
+   *  computes the new board-space center from anchor + signed half-diagonal.
+   *
+   *  This replaces the prior local-space-resize-then-fudge approach which
+   *  drifted on rotated images because the inverse-rotation pivot moved
+   *  each tick. The current model has *zero* drift across the drag; the
+   *  anchor stays put pixel-for-pixel.
+   */
   function applyResize(
-    t: ImageObject['transform'],
+    before: ImageObject['transform'],
+    rotation: number,
     handle: HandleId,
-    anchor: { x: number; y: number },
+    anchorBoard: { x: number; y: number },
     pointerBoard: { x: number; y: number },
     naturalAspect: number,
     shift: boolean,
-  ): void {
-    // Compute the new rect from anchor + opposite corner = pointer.
-    let nx = Math.min(anchor.x, pointerBoard.x)
-    let ny = Math.min(anchor.y, pointerBoard.y)
-    let nw = Math.abs(pointerBoard.x - anchor.x)
-    let nh = Math.abs(pointerBoard.y - anchor.y)
+  ): ImageObject['transform'] {
+    // Project (pointer - anchor) onto the image's local axes:
+    //   xAxis_board = (cos, sin), yAxis_board = (-sin, cos)
+    // localXDelta = projection onto xAxis; localYDelta = onto yAxis.
+    const cos = Math.cos(rotation)
+    const sin = Math.sin(rotation)
+    const vx = pointerBoard.x - anchorBoard.x
+    const vy = pointerBoard.y - anchorBoard.y
+    const localXDelta = vx * cos + vy * sin
+    const localYDelta = -vx * sin + vy * cos
 
-    // Edge handles lock one axis to the existing extent so resize is 1-axis.
-    const isVerticalEdge = handle === 'n' || handle === 's'
-    const isHorizontalEdge = handle === 'e' || handle === 'w'
-    if (isVerticalEdge) {
-      nx = t.x
-      nw = t.w
-    }
-    if (isHorizontalEdge) {
-      ny = t.y
-      nh = t.h
-    }
-
-    // Shift-constrain: corner handles preserve aspect ratio. Edge handles
-    // ignore Shift (1-axis resize doesn't have an aspect to preserve).
     const isCorner = handle === 'nw' || handle === 'ne' || handle === 'se' || handle === 'sw'
-    if (shift && isCorner) {
-      // Fit to the longer side. Aspect = w/h; preserve natural ratio.
-      const targetH = nw / naturalAspect
-      const targetW = nh * naturalAspect
-      if (targetH > nh) {
-        // Width is the limiting axis: keep nw, derive nh.
-        nh = targetH
-      } else {
-        nw = targetW
+    const isVerticalEdge = handle === 'n' || handle === 's' // height changes; width preserved
+    const isHorizontalEdge = handle === 'e' || handle === 'w' // width changes; height preserved
+
+    let newW: number
+    let newH: number
+    if (isCorner) {
+      newW = Math.abs(localXDelta)
+      newH = Math.abs(localYDelta)
+      if (shift) {
+        // Aspect-ratio constrain. Use the larger side (in aspect-normalized
+        // units) to scale up the smaller — Figma-like "extend, don't shrink".
+        if (newW > newH * naturalAspect) {
+          newH = newW / naturalAspect
+        } else {
+          newW = newH * naturalAspect
+        }
       }
-      // Re-anchor the constrained rect to the anchor corner.
-      if (handle === 'nw') {
-        nx = anchor.x - nw
-        ny = anchor.y - nh
-      } else if (handle === 'ne') {
-        nx = anchor.x
-        ny = anchor.y - nh
-      } else if (handle === 'sw') {
-        nx = anchor.x - nw
-        ny = anchor.y
-      } else {
-        // 'se'
-        nx = anchor.x
-        ny = anchor.y
-      }
+    } else if (isVerticalEdge) {
+      newH = Math.abs(localYDelta)
+      newW = before.w
+    } else if (isHorizontalEdge) {
+      newW = Math.abs(localXDelta)
+      newH = before.h
+    } else {
+      // Defensive — unreachable.
+      newW = before.w
+      newH = before.h
     }
 
-    // Minimum size — 16 board-px in either axis. Prevents zero-sized
-    // images that disappear and can't be hit-tested.
+    // Minimum side — 16 board-px. Prevents zero-sized images that
+    // disappear and can't be hit-tested.
     const MIN_SIDE = 16
-    if (nw < MIN_SIDE) nw = MIN_SIDE
-    if (nh < MIN_SIDE) nh = MIN_SIDE
+    if (newW < MIN_SIDE) newW = MIN_SIDE
+    if (newH < MIN_SIDE) newH = MIN_SIDE
 
-    t.x = nx
-    t.y = ny
-    t.w = nw
-    t.h = nh
+    // Direction signs in image-local coords for each handle. The dragged
+    // corner / edge midpoint sits at (sx*newW/2, sy*newH/2) relative to
+    // the new center. The anchor is the opposite, so the new center is
+    // at anchor + (sx*newW/2, sy*newH/2) — rotated into board space.
+    let sx = 0
+    let sy = 0
+    switch (handle) {
+      case 'nw':
+        sx = -1
+        sy = -1
+        break
+      case 'n':
+        sx = 0
+        sy = -1
+        break
+      case 'ne':
+        sx = +1
+        sy = -1
+        break
+      case 'e':
+        sx = +1
+        sy = 0
+        break
+      case 'se':
+        sx = +1
+        sy = +1
+        break
+      case 's':
+        sx = 0
+        sy = +1
+        break
+      case 'sw':
+        sx = -1
+        sy = +1
+        break
+      case 'w':
+        sx = -1
+        sy = 0
+        break
+    }
+
+    const halfX = (sx * newW) / 2
+    const halfY = (sy * newH) / 2
+    const centerX = anchorBoard.x + halfX * cos - halfY * sin
+    const centerY = anchorBoard.y + halfX * sin + halfY * cos
+
+    return {
+      x: centerX - newW / 2,
+      y: centerY - newH / 2,
+      w: newW,
+      h: newH,
+    }
   }
 
   return {
@@ -349,6 +466,11 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     cursor: 'default',
 
     onPointerDown(e, ctx): void {
+      // Defensive cleanup: if a previous drag's pointerup/cancel was
+      // never delivered (window blur, OS gesture steal, missed event),
+      // close it out properly so its op lands in undo before the next
+      // gesture starts. commitDrag is a no-op if `drag` is null.
+      commitDrag(null)
       const { x: bx, y: by } = ctx.toBoard(e.clientX, e.clientY)
       const imgs = deps.getImages()
       const sel = selectedImageId ? imgs.find((i) => i.id === selectedImageId) : null
@@ -360,7 +482,12 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         // Doesn't start a drag — just snaps and pushes one op.
         const now = performance.now()
         const isDoubleClick = now - lastRotateHandleDownAt < ROTATE_DBLCLICK_MS
-        lastRotateHandleDownAt = isDoubleClick ? 0 : now
+        // Always record the click timestamp. Setting to -Infinity after a
+        // double-click would let a third quick click trip the branch
+        // again (because `now - (-Infinity)` is Infinity, > threshold —
+        // so paradoxically setting it to 0 is what would re-trigger).
+        // Recording the actual `now` is correct in both cases.
+        lastRotateHandleDownAt = now
         if (isDoubleClick) {
           const before = sel.rotation ?? 0
           if (before !== 0) {
@@ -397,7 +524,10 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         if (handle) {
           drag = {
             imageId: sel.id,
-            kind: { resize: handle, anchor: anchorForLocal(handle, sel.transform) },
+            kind: {
+              resize: handle,
+              anchorBoard: anchorBoardFor(handle, sel.transform, sel.rotation ?? 0),
+            },
             before: { ...sel.transform },
             beforeRotation: sel.rotation ?? 0,
             startBoard: { x: bx, y: by },
@@ -456,26 +586,22 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         const delta = angle - drag.kind.startAngleFromCenter
         img.rotation = normalizeRotation(drag.kind.startRotation + delta)
       } else {
-        // Resize. If the image is rotated, project the board pointer into
-        // the image's local (un-rotated) frame by inverse-rotating around
-        // its center. The resize math then runs in local space identically
-        // to the no-rotation case. Side effect: the image's apparent
-        // center can drift slightly on resize-while-rotated because the
-        // local rect's top-left changes; we accept this for v1 (most use
-        // is resize-then-rotate, not rotate-then-resize).
-        const r = drag.beforeRotation
-        const center = imageCenter(drag.before)
-        const localPointer =
-          r === 0 ? { x: bx, y: by } : rotateAroundPoint({ x: bx, y: by }, center, -r)
+        // Resize. The anchor (opposite corner / edge midpoint) is in BOARD
+        // space and was captured at drag-start, so rotation-aware resize
+        // math can keep that point pinned pixel-for-pixel throughout the
+        // drag (vs the prior local-pivot approach which drifted across
+        // ticks because the local pivot moved with the rect each tick).
         const naturalAspect = img.natural.w / img.natural.h
-        applyResize(
-          img.transform,
+        const next = applyResize(
+          drag.before,
+          drag.beforeRotation,
           drag.kind.resize,
-          drag.kind.anchor,
-          localPointer,
+          drag.kind.anchorBoard,
+          { x: bx, y: by },
           naturalAspect,
           e.shiftKey,
         )
+        img.transform = next
       }
 
       // Live-render: mutating the in-memory transform; mark dirty so the
@@ -485,31 +611,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     },
 
     onPointerUp(e, ctx): void {
-      if (!drag) return
-      const img = deps.getImages().find((i) => i.id === drag?.imageId)
-      ;(e.target as Element).releasePointerCapture?.(e.pointerId)
-      if (img) {
-        const isRotation = typeof drag.kind === 'object' && 'rotate' in drag.kind
-        if (isRotation) {
-          const beforeR = drag.beforeRotation
-          const afterR = img.rotation ?? 0
-          if (beforeR !== afterR) {
-            deps.pushOp({ kind: 'rotate-image', imageId: img.id, before: beforeR, after: afterR })
-          }
-        } else {
-          const before = drag.before
-          const after = { ...img.transform }
-          if (
-            before.x !== after.x ||
-            before.y !== after.y ||
-            before.w !== after.w ||
-            before.h !== after.h
-          ) {
-            deps.pushOp({ kind: 'transform-image', imageId: img.id, before, after })
-          }
-        }
-      }
-      drag = null
+      commitDrag(e)
       ctx.markCommittedDirty()
     },
 
@@ -594,7 +696,11 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       if (!selectedImageId) return false
       const id = selectedImageId
       const img = deps.getImages().find((i) => i.id === id)
-      if (!img) {
+      // Guard against double-delete: if the image was already removed
+      // (e.g. by the Cmd+A batch path running first, or by remote undo /
+      // future sync), don't fire a second delete-image op against it —
+      // that would push a redundant op and corrupt the undo sequence.
+      if (!img || img.deleted) {
         selectedImageId = null
         return false
       }

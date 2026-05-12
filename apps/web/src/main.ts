@@ -45,7 +45,7 @@ import { openExportPopover } from './exportpopover'
 import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid, invalidateGridColors } from './grid'
 import { createHelpOverlay } from './helpoverlay'
-import { getImageElement, loadImageElement } from './imagecache'
+import { _clearImageCache, getImageElement, loadImageElement } from './imagecache'
 import { imageAABB } from './imagegeom'
 import {
   type ImagePasteContext,
@@ -687,9 +687,11 @@ async function main(): Promise<void> {
     refocusOnClose: root,
     onPerformClear: () => {
       // Destructive boundary by design — undo/redo stacks reset alongside
-      // the in-memory strokes and the IDB store. See ops.ts (clear is *not*
-      // an Op).
+      // the in-memory strokes, images, and the IDB stores. See ops.ts
+      // (clear is *not* an Op).
       strokes.length = 0
+      images.length = 0
+      imagesMarkedForBatchDelete.clear()
       undoStack.length = 0
       redoStack.length = 0
       camera.x = 0
@@ -698,8 +700,12 @@ async function main(): Promise<void> {
       committedDirty = true
       clearView()
       void strokeStore.clear().catch((err) => {
-        console.warn('whiteboard/web: clear failed:', err)
+        console.warn('whiteboard/web: stroke clear failed:', err)
       })
+      void imageStore.clear().catch((err) => {
+        console.warn('whiteboard/web: image clear failed:', err)
+      })
+      _clearImageCache()
     },
   })
 
