@@ -35,6 +35,7 @@ const baseSettings: SettingsV1 = {
   customSwatches: [],
   recentColors: [],
   predictedEvents: false,
+  mouseSyntheticPressure: false,
 }
 
 describe('export/svg', () => {

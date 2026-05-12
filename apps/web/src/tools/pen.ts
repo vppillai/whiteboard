@@ -23,8 +23,13 @@ import { BRUSH_IDS, BRUSH_LABELS, BRUSH_PRESETS } from '../brushes'
 import { boardToScreen } from '../camera'
 import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
 import { applyCamera, clearLayer, drawStrokePath } from '../render'
-import { getBrushId, getColor, setBrushId, setColor } from '../settings'
-import { applyPressure, effectiveOpacity, getStrokePath } from '../stroke'
+import { getBrushId, getColor, getSettings, setBrushId, setColor } from '../settings'
+import {
+  applyPressure,
+  effectiveOpacity,
+  getStrokePath,
+  synthesizePressureFromVelocity,
+} from '../stroke'
 import type { Tool, ToolContext } from './types'
 
 // Finder halo: constant screen-px ring drawn around the hover preview when
@@ -38,21 +43,43 @@ const HOVER_HALO_THRESHOLD_PX = 4
 const HOVER_HALO_ALPHA = 0.35
 
 /**
- * Idle "fluorescent" promotion. After the cursor has been still for this
- * long, the finder halo brightens, widens, and gains a glow so the user
- * can locate the pointer at a glance — common scenario on Wacom Intuos
- * where the eye drifts to a reference document and back. The halo stays
- * gated by `screenRadius < HOVER_HALO_THRESHOLD_PX` while ACTIVE; when
- * idle it ALWAYS draws regardless of brush size, because "where is my
- * cursor" outranks "don't double up on a big visible brush". One
- * setTimeout dirties the canvas once at 5 s so the static state actually
- * paints; movement clears the timer and immediately demotes back.
+ * "Fluorescent" halo promotion — drawn instead of the faint gated halo
+ * when EITHER:
+ *   - the cursor has been still for IDLE_HALO_MS (user lost it; classic
+ *     Wacom Intuos scenario where eye drifts to a reference document),
+ *   - the cursor is being JIGGLED — wiggling back-and-forth indicates
+ *     the user is hunting for it. Detected by sliding-window path-length
+ *     to net-displacement ratio so it doesn't false-positive on fast
+ *     linear motion (cross-canvas sweep, fast scribble). Only checked
+ *     while HOVERING — an active stroke (`active !== null`) bypasses
+ *     the check entirely so high-speed scribbling never bloom-promotes.
+ *
+ * Both triggers paint the same visual state: wider radius, higher alpha,
+ * soft glow, drawn regardless of brush size. Jiggle keeps the halo lit
+ * for JIGGLE_HALO_LINGER_MS after the last detected jiggle so the user
+ * gets a moment to see it before it demotes back.
  */
 const IDLE_HALO_MS = 5000
 const IDLE_HALO_RADIUS_PX = 22
 const IDLE_HALO_ALPHA = 0.9
 const IDLE_HALO_LINE_WIDTH = 2
 const IDLE_HALO_GLOW_BLUR = 14
+/** Sliding-window length for the jiggle detector. ~300 ms captures 3-4
+ *  cycles of a typical hand wiggle without lagging into stale samples. */
+const JIGGLE_WINDOW_MS = 300
+/** Below this total path length (screen px) the motion is too small to
+ *  call a jiggle. Filters out micro-tremor. */
+const JIGGLE_MIN_PATH_PX = 60
+/** Below this denominator the displacement is treated as effectively
+ *  zero — protects the ratio from dividing by near-zero. */
+const JIGGLE_MIN_DISPLACEMENT_PX = 8
+/** Path-length / displacement ratio above which the motion is "windy"
+ *  enough to count. A fast straight sweep has ratio ~1; back-and-forth
+ *  jiggle climbs above 3 quickly. */
+const JIGGLE_RATIO_THRESHOLD = 3
+/** How long the bright halo lingers after the last jiggle-detect tick
+ *  before the timer demotes it back to the faint gated halo. */
+const JIGGLE_HALO_LINGER_MS = 1500
 
 export interface PenToolCallbacks {
   /** Stroke finalized at pointerup. Caller pushes it to the strokes array
@@ -113,19 +140,109 @@ export function createPenTool(opts: PenToolOptions): Tool {
       ctx.markCommittedDirty()
     }, IDLE_HALO_MS)
   }
+
+  // Jiggle-halo state. Sliding window of recent screen-space samples used
+  // to compute the path-length / displacement ratio. `jiggleHaloUntilT`
+  // is the wall-clock-future time at which the bright halo demotes — set
+  // forward on each detected jiggle so a sustained hunt keeps the halo lit.
+  // `jiggleDemoteTimer` schedules the demote redraw so the user sees the
+  // halo fade without needing to move the cursor.
+  const jiggleWindow: { x: number; y: number; t: number }[] = []
+  let jiggleHaloUntilT = 0
+  let jiggleDemoteTimer: ReturnType<typeof setTimeout> | null = null
+  const cancelJiggleTimer = (): void => {
+    if (jiggleDemoteTimer !== null) {
+      clearTimeout(jiggleDemoteTimer)
+      jiggleDemoteTimer = null
+    }
+  }
+  const detectJiggle = (clientX: number, clientY: number, ctx: ToolContext): void => {
+    const now = performance.now()
+    jiggleWindow.push({ x: clientX, y: clientY, t: now })
+    // Drop samples older than the window. Keep at least 2 so the ratio
+    // math has something to chew on.
+    while (jiggleWindow.length > 2) {
+      const head = jiggleWindow[0]
+      if (!head || now - head.t <= JIGGLE_WINDOW_MS) break
+      jiggleWindow.shift()
+    }
+    if (jiggleWindow.length < 3) return
+    let pathLen = 0
+    for (let i = 1; i < jiggleWindow.length; i++) {
+      const a = jiggleWindow[i - 1]
+      const b = jiggleWindow[i]
+      if (!a || !b) continue
+      pathLen += Math.hypot(b.x - a.x, b.y - a.y)
+    }
+    if (pathLen < JIGGLE_MIN_PATH_PX) return
+    const first = jiggleWindow[0]
+    const last = jiggleWindow[jiggleWindow.length - 1]
+    if (!first || !last) return
+    const displacement = Math.max(
+      JIGGLE_MIN_DISPLACEMENT_PX,
+      Math.hypot(last.x - first.x, last.y - first.y),
+    )
+    const ratio = pathLen / displacement
+    if (ratio < JIGGLE_RATIO_THRESHOLD) return
+    // Jiggle detected — promote halo and arm a demote redraw.
+    jiggleHaloUntilT = now + JIGGLE_HALO_LINGER_MS
+    cancelJiggleTimer()
+    jiggleDemoteTimer = setTimeout(() => {
+      jiggleDemoteTimer = null
+      ctx.markCommittedDirty()
+    }, JIGGLE_HALO_LINGER_MS)
+    // Force an immediate redraw so the bright halo paints on the current
+    // frame instead of waiting for the next idle/jiggle event.
+    ctx.markCommittedDirty()
+  }
   // Performance-clock origin captured at pointerdown. `Sample.t` is the
   // elapsed milliseconds since this origin (epoch-independent, survives
   // page reload, comparable across peers). `Stroke.startedAt` is a
   // separate wall-clock timestamp (Date.now) used as the render-order
   // sort key — it must come from the same time base on every peer.
   let strokeStartPerfTime = 0
+  // Last raw sample input (screen-space + timestamp). Tracked across the
+  // active stroke so the velocity-to-pressure synthesis path has a prior
+  // anchor for each consecutive sample (including coalesced events, which
+  // each define their own velocity segment). Cleared at stroke start /
+  // cancel — first sample of a stroke has no velocity and gets the
+  // "fully-pressed" synthesis fallback.
+  let lastSampleScreen: { x: number; y: number; t: number } | null = null
 
-  const sample = (e: SampleSource, brush: BrushConfig, ctx: ToolContext): Sample => {
+  /**
+   * Build a board-space Sample from a raw event. `pointerType` comes from
+   * the parent PointerEvent (coalesced sub-events inherit it), and gates
+   * the synthetic-pressure path: only mouse strokes get synthesis, and
+   * only when `settings.mouseSyntheticPressure` is on. Pen / touch always
+   * go through `applyPressure` on the real input pressure.
+   */
+  const sample = (
+    e: SampleSource,
+    brush: BrushConfig,
+    ctx: ToolContext,
+    pointerType: string,
+  ): Sample => {
     const { x, y } = ctx.toBoard(e.clientX, e.clientY)
+    let rawPressure = e.pressure
+    if (pointerType === 'mouse' && getSettings().mouseSyntheticPressure) {
+      // For mouse strokes the browser-reported pressure is the constant
+      // 0.5 — flat by design. Replace with a velocity-shaped value so
+      // the same `applyPressure` curve produces a stroke with feel.
+      if (lastSampleScreen) {
+        const dx = e.clientX - lastSampleScreen.x
+        const dy = e.clientY - lastSampleScreen.y
+        const dt = Math.max(1, e.timeStamp - lastSampleScreen.t)
+        rawPressure = synthesizePressureFromVelocity(Math.hypot(dx, dy) / dt)
+      } else {
+        // First sample of the stroke — no prior, treat as stationary.
+        rawPressure = synthesizePressureFromVelocity(0)
+      }
+    }
+    lastSampleScreen = { x: e.clientX, y: e.clientY, t: e.timeStamp }
     return {
       x,
       y,
-      p: applyPressure(e.pressure, brush),
+      p: applyPressure(rawPressure, brush),
       tx: e.tiltX,
       ty: e.tiltY,
       t: Math.max(0, e.timeStamp - strokeStartPerfTime),
@@ -195,19 +312,23 @@ export function createPenTool(opts: PenToolOptions): Tool {
     //     a wider radius, higher alpha, and a soft shadow glow for a
     //     "fluorescent" pop. Locating the pointer outranks not double-
     //     drawing the brush body.
-    const idleFor = performance.now() - lastMoveAt
+    const now = performance.now()
+    const idleFor = now - lastMoveAt
     const isIdle = lastHover !== null && idleFor >= IDLE_HALO_MS
+    const isJiggling = now < jiggleHaloUntilT
+    const isHiViz = isIdle || isJiggling
     const screenRadius = (preset.size / 2) * ctx.camera.scale
-    const showActiveHalo = !isIdle && screenRadius < HOVER_HALO_THRESHOLD_PX
-    if (showActiveHalo || isIdle) {
+    const showFaintHalo = !isHiViz && screenRadius < HOVER_HALO_THRESHOLD_PX
+    if (showFaintHalo || isHiViz) {
       const screen = boardToScreen(ctx.camera, boardX, boardY)
       const inkColor = ctx.resolveColor(getColor())
       c.save()
       c.setTransform(ctx.dpr, 0, 0, ctx.dpr, 0, 0)
       c.strokeStyle = inkColor
-      if (isIdle) {
+      if (isHiViz) {
         // Glow pass — shadowBlur on a wider semi-transparent stroke gives
-        // the bloom; the crisp ring lands on top.
+        // the bloom; the crisp ring lands on top. Same visual for both
+        // idle-hold and jiggle-hunt triggers.
         c.globalAlpha = 0.55
         c.lineWidth = IDLE_HALO_LINE_WIDTH
         c.shadowColor = inkColor
@@ -234,7 +355,11 @@ export function createPenTool(opts: PenToolOptions): Tool {
     predicted = []
     renderAsFinal = false
     lastHover = null
+    lastSampleScreen = null
     cancelIdleTimer()
+    cancelJiggleTimer()
+    jiggleWindow.length = 0
+    jiggleHaloUntilT = 0
   }
 
   return {
@@ -249,13 +374,21 @@ export function createPenTool(opts: PenToolOptions): Tool {
       strokeStartPerfTime = e.timeStamp
       // Active stroke counts as activity — reset the idle timer so the
       // halo doesn't bloom mid-stroke if the user pauses with the pen
-      // pressed down (e.g. between segments of a careful line).
+      // pressed down (e.g. between segments of a careful line). Also
+      // drops any in-flight jiggle state so the bright halo doesn't
+      // leak into the active-stroke render.
       lastMoveAt = performance.now()
       cancelIdleTimer()
+      cancelJiggleTimer()
+      jiggleWindow.length = 0
+      jiggleHaloUntilT = 0
+      // New stroke → no prior sample for velocity. `sample()` will treat
+      // the first call as zero-velocity (heaviest synthetic pressure).
+      lastSampleScreen = null
       active = {
         id: makeId(),
         brush,
-        samples: [sample(e, brush, ctx)],
+        samples: [sample(e, brush, ctx, e.pointerType)],
         startedAt: Date.now(),
       }
       predicted = []
@@ -269,6 +402,9 @@ export function createPenTool(opts: PenToolOptions): Tool {
       lastMoveAt = performance.now()
       armIdleTimer(ctx)
       if (!active) {
+        // Hover-only: feed the jiggle detector. Skipped when actively
+        // drawing so scribbling never bloom-promotes the halo.
+        detectJiggle(e.clientX, e.clientY, ctx)
         // Hover render — brush preview at cursor.
         renderHover(board.x, board.y, ctx)
         return
@@ -280,7 +416,7 @@ export function createPenTool(opts: PenToolOptions): Tool {
       if (e.shiftKey) {
         const first = active.samples[0]
         if (first) {
-          active.samples = [first, sample(e, brush, ctx)]
+          active.samples = [first, sample(e, brush, ctx, e.pointerType)]
           predicted = []
           renderAsFinal = true
           renderStroke(ctx)
@@ -290,9 +426,9 @@ export function createPenTool(opts: PenToolOptions): Tool {
 
       const coalesced = e.getCoalescedEvents?.() ?? []
       if (coalesced.length === 0) {
-        active.samples.push(sample(e, brush, ctx))
+        active.samples.push(sample(e, brush, ctx, e.pointerType))
       } else {
-        for (const ce of coalesced) active.samples.push(sample(ce, brush, ctx))
+        for (const ce of coalesced) active.samples.push(sample(ce, brush, ctx, e.pointerType))
       }
       // Cap predicted events at 2 to limit the "lead distance" of the
       // visual lookahead. Browsers typically return 4–6 predicted events,
@@ -300,12 +436,18 @@ export function createPenTool(opts: PenToolOptions): Tool {
       // replaced on the next frame — fewer predicted samples = less visible
       // "rubber band" glitch on direction changes. ADR 0004 documents the
       // smoothness/glitch trade-off; 2 was the M2 feel-test sweet spot.
+      //
+      // Predicted samples DON'T advance `lastSampleScreen` — they're
+      // discarded on the next real move, so feeding them into the velocity
+      // anchor would corrupt the synthesis for the next real sample.
       const PREDICTED_CAP = 2
+      const anchorBackup = lastSampleScreen
       predicted = opts.shouldUsePrediction?.()
         ? (e.getPredictedEvents?.() ?? [])
             .slice(0, PREDICTED_CAP)
-            .map((pe) => sample(pe, brush, ctx))
+            .map((pe) => sample(pe, brush, ctx, e.pointerType))
         : []
+      lastSampleScreen = anchorBackup
       renderAsFinal = false
       renderStroke(ctx)
     },

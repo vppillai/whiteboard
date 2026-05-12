@@ -72,6 +72,11 @@ export interface SettingsV1 {
   customSwatches: string[]
   recentColors: string[]
   predictedEvents: boolean // NEW (M2)
+  /** Synthesize stroke pressure from pointer velocity for `pointerType ===
+   *  'mouse'` strokes (pen / touch ignore this; they have real pressure).
+   *  Fast = thinner, slow = thicker — gives mouse-drawn strokes some shape
+   *  variation instead of the dead 0.5-flat default. v1.2. */
+  mouseSyntheticPressure: boolean
   syncedAt?: number
   remoteId?: string
 }
@@ -100,6 +105,7 @@ function defaultV1(): SettingsV1 {
     customSwatches: [],
     recentColors: [],
     predictedEvents: false, // NEW (M2; ADR 0004)
+    mouseSyntheticPressure: true, // NEW (v1.2): mouse strokes get velocity-shaped pressure
   }
 }
 
@@ -156,6 +162,10 @@ export function migrate(input: unknown): SettingsV1 {
       ? v.recentColors.filter(isValidHex).slice(0, RECENT_COLORS_CAP)
       : [],
     predictedEvents: typeof v.predictedEvents === 'boolean' ? v.predictedEvents : false,
+    mouseSyntheticPressure:
+      typeof v.mouseSyntheticPressure === 'boolean'
+        ? v.mouseSyntheticPressure
+        : DEFAULTS.mouseSyntheticPressure,
     syncedAt: typeof v.syncedAt === 'number' ? v.syncedAt : undefined,
     remoteId: typeof v.remoteId === 'string' ? v.remoteId : undefined,
   }
@@ -335,6 +345,14 @@ export function setBrushId(brush: BrushId): void {
 export function setPredictedEvents(value: boolean): void {
   if (state.predictedEvents === value) return
   state.predictedEvents = value
+  persist()
+  emit()
+}
+
+/** Toggle mouse synthetic pressure on/off. v1.2. Pen / touch unaffected. */
+export function setMouseSyntheticPressure(value: boolean): void {
+  if (state.mouseSyntheticPressure === value) return
+  state.mouseSyntheticPressure = value
   persist()
   emit()
 }
