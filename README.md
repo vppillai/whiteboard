@@ -13,6 +13,7 @@ A low-latency, browser-based whiteboard tuned for Wacom Intuos and other indirec
 - **Five brush presets** — pen, marker, pencil, highlighter, brush — each with an independently customizable pressure curve.
 - **Two eraser modes** — pixel-mask wipe ("cuts through" strokes, leaves disconnected runs alive) and object delete (whole stroke).
 - **Lasso select** — polygon or tap; drag-to-move, delete-selected, select-all.
+- **Image paste, draw on top** — `Ctrl/Cmd+V` or drag-drop a PNG / JPEG / WebP / GIF onto the canvas; the dedicated **Select tool** (`V`) provides move / resize (Shift = aspect-lock) / rotate (double-click handle to reset to 0°) / delete. Images live below strokes so pen-on-image is the natural workflow. Exports (PNG / SVG / PDF) include images in z-order.
 - **Pressure-curve editor** — per-brush bezier graph with a live test pad.
 - **Infinite canvas** — wheel-pan, `Cmd/Ctrl+wheel` zoom, `Cmd/Ctrl+0` reset, `Cmd/Ctrl+1` zoom-to-fit.
 - **Export** — PNG, SVG (mask-based erasure), PDF (lazy-loaded jsPDF).
@@ -92,7 +93,7 @@ Post-v1 work, tracked in [docs/milestones.md](docs/milestones.md) and [SPEC § 1
 
 ## Project status
 
-**v1.0.0** — single-user, offline-first, production-ready for the indirect-input drawing case the project was built for. Lint, typecheck, and 92 unit tests run on every push (`bun test`); latency budget (≤ 33 ms pen-to-photon) is feel-tested on Wacom Intuos at every milestone close.
+**v1.1.0** — single-user, offline-first, production-ready for the indirect-input drawing case the project was built for. Lint, typecheck, and 100 unit tests run on every push (`bun test`); latency budget (≤ 33 ms pen-to-photon) is feel-tested on Wacom Intuos at every milestone close.
 
 > **Authorship note.** This codebase is AI-generated under human direction: produced primarily by an AI coding assistant working from a human-authored spec, with design decisions, feel-test gates, and acceptance by a human. Published as OSS for anyone solving the same indirect-input drawing problem.
 
