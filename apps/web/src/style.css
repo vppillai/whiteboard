@@ -464,7 +464,7 @@ body {
 
 .whiteboard-tools {
   padding: 10px;
-  min-width: 250px;
+  min-width: 280px;
 }
 
 .whiteboard-tools-section-label {
@@ -482,10 +482,20 @@ body {
   gap: 6px;
 }
 
+/* Right-click menu swatch: fills its grid column (width: 100% over a
+ * `repeat(5, 1fr)` grid), with `aspect-ratio: 1` to stay square as the
+ * menu width grows. `min-width: 0` is the standard fix for letting a
+ * grid item shrink below its intrinsic content size (browsers default
+ * grid items to `min-width: auto`, which can break the 1fr math). The
+ * resulting swatches scale with the menu's `min-width` (currently 280
+ * px → ~47 px tall swatches) instead of being a fixed 26 px in a wider
+ * cell with wasted padding. */
 .whiteboard-color-swatch-small {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  min-width: 0;
+  border-radius: 8px;
 }
 
 .whiteboard-tools-row {
