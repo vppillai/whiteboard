@@ -20,7 +20,7 @@
  * when the user confirms a clear.
  */
 
-import type { Stroke } from '@whiteboard/shared'
+import type { ImageObject, Stroke } from '@whiteboard/shared'
 import { addErasedStamps, invalidateStrokeBBox, removeErasedStamps } from './stroke'
 
 export interface StampEdit {
@@ -35,12 +35,43 @@ export type Op =
   | { kind: 'delete'; strokeIds: string[] }
   | { kind: 'move'; strokeIds: string[]; dx: number; dy: number }
   | { kind: 'eraseStamps'; edits: StampEdit[] }
+  /**
+   * Paste an image. Mirrors stroke 'create': the paste handler has already
+   * inserted the ImageObject + Blob into IDB and added the metadata record
+   * to `ctx.images` with `deleted: false`. Apply (= redo) flips deleted back
+   * to false; unapply (= undo) sets deleted=true. Bytes stay in IDB across
+   * undo cycles so redo is cheap.
+   */
+  | { kind: 'paste-image'; imageId: string }
+  /**
+   * Soft-delete a pasted image. Symmetric to 'paste-image' — the act-now
+   * handler has already set deleted=true on the in-memory record and
+   * persisted; the op just gives undo a hook.
+   */
+  | { kind: 'delete-image'; imageId: string }
+  /**
+   * Move or resize an image: swap the transform rect. Move + resize are
+   * the same op kind because both ultimately overwrite the transform.
+   * Coalesced at drag-end (one op per drag, not per pointermove tick).
+   */
+  | {
+      kind: 'transform-image'
+      imageId: string
+      before: ImageObject['transform']
+      after: ImageObject['transform']
+    }
 
 export interface OpContext {
   /** All strokes (including soft-deleted ones). Mutated in place by ops. */
   strokes: Stroke[]
   /** Persist a single stroke. Called once per mutated stroke. */
   saveStroke: (s: Stroke) => void
+  /** All images (including soft-deleted ones). Mutated in place by image ops. */
+  images: ImageObject[]
+  /** Persist a single image's metadata (transform / deleted flag changes).
+   *  Bytes do not change after the initial paste, so this is the metadata-only
+   *  fast path, not the binary-carrying saveImage from storage.ts. */
+  saveImageMeta: (img: ImageObject) => void
   /** Mark the committed canvas dirty for the next render. */
   markDirty: () => void
 }
@@ -60,6 +91,15 @@ export function applyOp(op: Op, ctx: OpContext): void {
     case 'eraseStamps':
       applyStampEdits(ctx, op.edits, true)
       break
+    case 'paste-image':
+      flipImageDeleted(ctx, op.imageId, false)
+      break
+    case 'delete-image':
+      flipImageDeleted(ctx, op.imageId, true)
+      break
+    case 'transform-image':
+      setImageTransform(ctx, op.imageId, op.after)
+      break
   }
   ctx.markDirty()
 }
@@ -78,6 +118,15 @@ export function unapplyOp(op: Op, ctx: OpContext): void {
       break
     case 'eraseStamps':
       applyStampEdits(ctx, op.edits, false)
+      break
+    case 'paste-image':
+      flipImageDeleted(ctx, op.imageId, true)
+      break
+    case 'delete-image':
+      flipImageDeleted(ctx, op.imageId, false)
+      break
+    case 'transform-image':
+      setImageTransform(ctx, op.imageId, op.before)
       break
   }
   ctx.markDirty()
@@ -122,4 +171,18 @@ function applyStampEdits(ctx: OpContext, edits: readonly StampEdit[], add: boole
     else removeErasedStamps(stroke, edit.addedStamps)
     ctx.saveStroke(stroke)
   }
+}
+
+function flipImageDeleted(ctx: OpContext, id: string, deleted: boolean): void {
+  const img = ctx.images.find((i) => i.id === id)
+  if (!img) return
+  img.deleted = deleted || undefined
+  ctx.saveImageMeta(img)
+}
+
+function setImageTransform(ctx: OpContext, id: string, transform: ImageObject['transform']): void {
+  const img = ctx.images.find((i) => i.id === id)
+  if (!img) return
+  img.transform = { ...transform }
+  ctx.saveImageMeta(img)
 }

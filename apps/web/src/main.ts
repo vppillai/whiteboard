@@ -46,6 +46,13 @@ import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid, invalidateGridColors } from './grid'
 import { createHelpOverlay } from './helpoverlay'
 import { getImageElement, loadImageElement } from './imagecache'
+import {
+  type ImagePasteContext,
+  pasteImageFromBlob,
+  readImageFromClipboard,
+  readImageFromDataTransfer,
+  setupDragDropImagePaste,
+} from './imagepaste'
 import { type ImageStore, createLocalImageStore } from './imagestore'
 import { attachKeymap } from './keymap'
 import { MetricsCollector, bindHudToggle, createHud } from './metrics'
@@ -295,9 +302,31 @@ async function main(): Promise<void> {
         console.warn('whiteboard/web: failed to persist stroke:', err)
       })
     },
+    images,
+    saveImageMeta: (img) => {
+      void imageStore.updateMeta(img).catch((err) => {
+        console.warn('whiteboard/web: failed to persist image metadata:', err)
+      })
+    },
     markDirty: () => {
       committedDirty = true
     },
+  }
+
+  // Image-paste context. Three input paths converge through this object:
+  //   - Ctrl/Cmd+V → the document-level 'paste' event listener below
+  //   - Drag-drop file onto canvas → setupDragDropImagePaste below
+  // (Right-click → Paste image is deferred; see spec section 4. Browser
+  // paste-event covers >95% of the use case and is the conventional path.)
+  const imagePasteCtx: ImagePasteContext = {
+    imageStore,
+    images,
+    nextImageZ,
+    pushUndoOp,
+    markDirty: () => {
+      committedDirty = true
+    },
+    showInfoToast,
   }
 
   const penTool = createPenTool({
@@ -468,6 +497,59 @@ async function main(): Promise<void> {
   //  cleanly regardless).
   // ---------------------------------------------------------------------
   root.addEventListener('contextmenu', (e) => e.preventDefault())
+
+  // ---------------------------------------------------------------------
+  //  Image paste — three input paths feeding one PasteImage op (see
+  //  imagepaste.ts):
+  //    - 'paste' event on document (Ctrl/Cmd+V; standard browser flow)
+  //    - 'drop' + 'dragover' on canvas (filesystem file or in-browser
+  //      image drag)
+  //    - Async clipboard read as a fallback when 'paste' has no image
+  //      (some browsers route screenshot-tool clipboard data only
+  //      through the async API)
+  // ---------------------------------------------------------------------
+  const onPaste = (e: ClipboardEvent): void => {
+    // Don't hijack paste in text-editable contexts (settings inputs, etc.).
+    const targetEl = e.target as HTMLElement | null
+    if (
+      targetEl instanceof HTMLInputElement ||
+      targetEl instanceof HTMLTextAreaElement ||
+      targetEl?.isContentEditable
+    ) {
+      return
+    }
+    const dt = e.clipboardData
+    if (!dt) return
+    // Position uses the last known cursor location (in client coords →
+    // board coords). Keyboard-triggered paste with no prior mouse activity
+    // falls back to viewport center.
+    const pasteAt = (): { x: number; y: number } => toBoard(lastPointer.x, lastPointer.y)
+    void (async () => {
+      const blob = await readImageFromDataTransfer(dt)
+      if (blob) {
+        e.preventDefault()
+        await pasteImageFromBlob(blob, pasteAt(), imagePasteCtx)
+        return
+      }
+      // Fallback: async clipboard API. Some browsers (Safari with screen-
+      // capture tools, certain Linux DEs) only expose image data through
+      // the async API, not the synchronous ClipboardEvent.
+      const fallback = await readImageFromClipboard()
+      if (fallback) {
+        e.preventDefault()
+        await pasteImageFromBlob(fallback, pasteAt(), imagePasteCtx)
+      }
+    })()
+  }
+  document.addEventListener('paste', onPaste)
+  registerCleanup(() => document.removeEventListener('paste', onPaste))
+
+  // Drag-drop. Attached to the canvas root so it fires regardless of
+  // which child element receives the drop. preventDefault inside the
+  // handlers wins over the page-level no-op so the OS doesn't navigate
+  // to a file:// URL.
+  registerCleanup(setupDragDropImagePaste(root, toBoard, imagePasteCtx))
+
   root.addEventListener(
     'pointerdown',
     (e) => {
