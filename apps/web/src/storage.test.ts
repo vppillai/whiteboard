@@ -1,6 +1,19 @@
 import { describe, expect, test } from 'bun:test'
-import type { Stroke } from '@whiteboard/shared'
-import { partitionForCompaction } from './storage'
+import type { ImageObject, Stroke } from '@whiteboard/shared'
+import { partitionForCompaction, partitionImagesForCompaction } from './storage'
+
+function mkImage(id: string, opts: { z?: number; deleted?: boolean } = {}): ImageObject {
+  return {
+    id,
+    blobRef: id,
+    format: 'png',
+    natural: { w: 100, h: 100 },
+    transform: { x: 0, y: 0, w: 100, h: 100 },
+    z: opts.z ?? 1,
+    createdAt: 0,
+    ...(opts.deleted !== undefined ? { deleted: opts.deleted } : {}),
+  }
+}
 
 function mkStroke(id: string, deleted?: boolean): Stroke {
   return {
@@ -47,6 +60,40 @@ describe('storage/partitionForCompaction', () => {
 
   test('empty input → empty output', () => {
     const { kept, toCompact } = partitionForCompaction([])
+    expect(kept).toEqual([])
+    expect(toCompact).toEqual([])
+  })
+})
+
+describe('storage/partitionImagesForCompaction', () => {
+  test('keeps non-deleted images', () => {
+    const imgs = [mkImage('a'), mkImage('b'), mkImage('c')]
+    const { kept, toCompact } = partitionImagesForCompaction(imgs)
+    expect(kept.map((i) => i.id)).toEqual(['a', 'b', 'c'])
+    expect(toCompact).toEqual([])
+  })
+
+  test('moves deleted=true images to toCompact', () => {
+    const imgs = [
+      mkImage('a'),
+      mkImage('b', { deleted: true }),
+      mkImage('c'),
+      mkImage('d', { deleted: true }),
+    ]
+    const { kept, toCompact } = partitionImagesForCompaction(imgs)
+    expect(kept.map((i) => i.id)).toEqual(['a', 'c'])
+    expect(toCompact).toEqual(['b', 'd'])
+  })
+
+  test('treats deleted=false as kept', () => {
+    const i = mkImage('a', { deleted: false })
+    const { kept, toCompact } = partitionImagesForCompaction([i])
+    expect(kept).toHaveLength(1)
+    expect(toCompact).toEqual([])
+  })
+
+  test('empty input → empty output', () => {
+    const { kept, toCompact } = partitionImagesForCompaction([])
     expect(kept).toEqual([])
     expect(toCompact).toEqual([])
   })

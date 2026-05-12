@@ -34,7 +34,7 @@
  */
 
 import './style.css'
-import type { BrushConfig, Sample, Stroke } from '@whiteboard/shared'
+import type { BrushConfig, ImageObject, Sample, Stroke } from '@whiteboard/shared'
 import { BRUSH_IDS, BRUSH_PRESETS } from './brushes'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
 import { createClearFlow } from './clearflow'
@@ -45,6 +45,8 @@ import { openExportPopover } from './exportpopover'
 import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid, invalidateGridColors } from './grid'
 import { createHelpOverlay } from './helpoverlay'
+import { getImageElement, loadImageElement } from './imagecache'
+import { type ImageStore, createLocalImageStore } from './imagestore'
 import { attachKeymap } from './keymap'
 import { MetricsCollector, bindHudToggle, createHud } from './metrics'
 import { type Op, type OpContext, applyOp, unapplyOp } from './ops'
@@ -131,6 +133,13 @@ async function main(): Promise<void> {
   // a Y.Doc-backed store with the same surface plugs in here.
   const strokeStore: StrokeStore = createLocalStrokeStore()
 
+  // ImageStore — the equivalent seam for pasted images. Same shape as
+  // StrokeStore (load / insert / update / hard-delete / clear) but with
+  // a binary-blob side channel because images carry bytes that don't
+  // belong inside a small JSON record. v1 is local IDB-backed; sync of
+  // image binaries is deferred to M5.1 per ADR 0012.
+  const imageStore: ImageStore = createLocalImageStore()
+
   const root = document.getElementById('app')
   if (!root) throw new Error('#app not found')
   // Programmatically focusable (without joining the tab order) so dialogs
@@ -209,6 +218,38 @@ async function main(): Promise<void> {
     strokes.push(...persisted)
   } catch (err) {
     console.warn('whiteboard/web: failed to load persisted strokes:', err)
+  }
+
+  // Image state — parallel to strokes. Sorted by z (paste-time monotone)
+  // so iteration order is render order. nextImageZ() picks the next slot
+  // above the current max so newly-pasted images stack on top.
+  const images: ImageObject[] = []
+  const nextImageZ = (): number => {
+    let max = 0
+    for (const img of images) if (!img.deleted && img.z > max) max = img.z
+    return max + 1
+  }
+
+  try {
+    const persistedImages = await imageStore.load()
+    images.push(...persistedImages)
+    // Eagerly prefetch the HTMLImageElement for each persisted image
+    // so the first frame after startup renders them immediately
+    // instead of skipping (cache returns null while load is pending).
+    // Fire-and-forget — each completed load triggers committedDirty.
+    for (const img of persistedImages) {
+      void imageStore
+        .loadBlob(img.blobRef)
+        .then((blob) => (blob ? loadImageElement(img.blobRef, blob) : null))
+        .then(() => {
+          committedDirty = true
+        })
+        .catch((err) => {
+          console.warn(`whiteboard/web: failed to decode image ${img.id}:`, err)
+        })
+    }
+  } catch (err) {
+    console.warn('whiteboard/web: failed to load persisted images:', err)
   }
 
   // ---------------------------------------------------------------------
@@ -708,13 +749,38 @@ async function main(): Promise<void> {
         )
       }
 
-      // ----- Pass 3: committed layer (grid + composited strokes) -----
+      // ----- Pass 3: committed layer (grid + images + composited strokes) -----
       clearLayer(target.committed)
       applyCamera(target.committed, camera, target.dpr)
       drawGrid(target.committed, camera, target.width, target.height, getSettings().grid)
-      // Composite the offscreen onto committed in pixel space (identity
-      // transform) so the strokes pixel-for-pixel overlay the grid.
+
+      // Image layer — draws onto committed in board-space (camera transform
+      // is already applied above). Sorted by z so paste order = stacking
+      // order. Images that haven't finished decoding yet are skipped this
+      // frame; the cache's load Promise will set committedDirty when it
+      // resolves so they appear on the next frame.
+      //
+      // Layered BELOW the strokes composite (which happens in pixel space
+      // immediately after) so pen strokes always draw on top of images,
+      // which is the whole point of the "paste an image and draw on top"
+      // feature.
       const cCtx = target.committed.ctx
+      for (const img of images) {
+        if (img.deleted) continue
+        const el = getImageElement(img.blobRef)
+        if (!el) continue
+        // Viewport cull — skip images entirely off-screen. Bbox vs
+        // viewBBox; cheap and meaningful for many-image scenes.
+        const { x, y, w, h } = img.transform
+        if (x + w < viewBBox.minX || x > viewBBox.maxX) continue
+        if (y + h < viewBBox.minY || y > viewBBox.maxY) continue
+        cCtx.drawImage(el, x, y, w, h)
+      }
+
+      // Composite the strokes offscreen onto committed in pixel space
+      // (identity transform) so the strokes pixel-for-pixel overlay the
+      // grid + images. The strokes layer already has the camera transform
+      // baked into its content.
       cCtx.save()
       cCtx.setTransform(1, 0, 0, 1, 0, 0)
       cCtx.drawImage(target.strokes.el, 0, 0)

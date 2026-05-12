@@ -47,6 +47,35 @@ export interface BrushConfig {
   pressureCurve?: { mid: [number, number] }
 }
 
+/**
+ * Pasted image on the canvas — a first-class non-stroke object. Stored
+ * alongside strokes and rendered below the stroke layer so pen strokes
+ * draw on top naturally.
+ *
+ * Pen / Eraser tools treat images as inert (no hit-testing, no selection
+ * state). The dedicated Select tool drives move / resize / delete. Z-order
+ * is paste-time monotonic (no manual reordering at v1).
+ *
+ * The binary lives in a sibling IDB object store (`images-blob`) keyed by
+ * `blobRef`. v1: `blobRef === id`. Separate field is forward-compat for
+ * a future where the bytes live on a sync server (M5.1 per ADR 0012).
+ */
+export interface ImageObject {
+  id: string
+  blobRef: string
+  format: 'png' | 'jpeg' | 'webp' | 'gif'
+  /** Original pixel dimensions; preserved for aspect-ratio-constrained resize. */
+  natural: { w: number; h: number }
+  /** Canvas-space rect — (x, y) is the top-left. */
+  transform: { x: number; y: number; w: number; h: number }
+  /** Paste-order monotone increasing. Higher z renders later (on top of older images, below all strokes). */
+  z: number
+  /** Wall-clock ms; tie-breaker plus debug aid. */
+  createdAt: number
+  /** Soft-delete (matches Stroke pattern; preserves undo). */
+  deleted?: boolean
+}
+
 export interface Stroke {
   id: string
   brush: BrushConfig
