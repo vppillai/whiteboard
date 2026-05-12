@@ -45,13 +45,7 @@ import { openExportPopover } from './exportpopover'
 import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid, invalidateGridColors } from './grid'
 import { createHelpOverlay } from './helpoverlay'
-import {
-  _clearImageCache,
-  evictImageElement,
-  getImageElement,
-  loadImageElement,
-} from './imagecache'
-import { imageAABB } from './imagegeom'
+import { _clearImageCache, evictImageElement, loadImageElement } from './imagecache'
 import {
   type ImagePasteContext,
   pasteImageFromBlob,
@@ -70,6 +64,7 @@ import { createHelpPill } from './pill'
 import { attachPointer } from './pointer'
 import { dismissAllPopovers, getActiveTag } from './popover'
 import { applyCamera, clearLayer, drawStrokeOntoLayer, drawStrokePath, setupCanvas } from './render'
+import { renderImages } from './renderimages'
 import { createResetFlow } from './resetflow'
 import {
   getBrushId,
@@ -959,63 +954,24 @@ async function main(): Promise<void> {
       drawGrid(target.committed, camera, target.width, target.height, getSettings().grid)
 
       // Image layer — draws onto committed in board-space (camera transform
-      // is already applied above). Sorted by z so paste order = stacking
-      // order. Images that haven't finished decoding yet are skipped this
-      // frame; the cache's load Promise will set committedDirty when it
-      // resolves so they appear on the next frame.
-      //
-      // Layered BELOW the strokes composite (which happens in pixel space
-      // immediately after) so pen strokes always draw on top of images,
-      // which is the whole point of the "paste an image and draw on top"
-      // feature.
-      const cCtx = target.committed.ctx
-      for (const img of images) {
-        if (img.deleted) continue
-        const el = getImageElement(img.blobRef)
-        if (!el) continue
-        // Viewport cull uses the rotation-aware AABB so a rotated image
-        // poking into the viewport isn't culled when its un-rotated rect
-        // happens to be off-screen.
-        const bb = imageAABB(img)
-        if (bb.maxX < viewBBox.minX || bb.minX > viewBBox.maxX) continue
-        if (bb.maxY < viewBBox.minY || bb.minY > viewBBox.maxY) continue
-        const { x, y, w, h } = img.transform
-        const r = img.rotation ?? 0
-        const isMarked = imagesMarkedForBatchDelete.has(img.id)
-        // Treat near-zero rotation as zero so float drift (e.g. residual
-        // 1e-16 after rotate-to-zero reset) doesn't drop us into the
-        // slower save/translate/rotate path for no visible difference.
-        if (Math.abs(r) < 1e-9) {
-          cCtx.drawImage(el, x, y, w, h)
-          if (isMarked) {
-            // Thin dashed outline so the batch-marked state reads as
-            // "selected for delete" vs the Select tool's solid handles.
-            cCtx.save()
-            cCtx.strokeStyle = '#2563eb'
-            cCtx.lineWidth = 2 / camera.scale
-            cCtx.setLineDash([6 / camera.scale, 4 / camera.scale])
-            cCtx.strokeRect(x, y, w, h)
-            cCtx.restore()
-          }
-        } else {
-          cCtx.save()
-          cCtx.translate(x + w / 2, y + h / 2)
-          cCtx.rotate(r)
-          cCtx.drawImage(el, -w / 2, -h / 2, w, h)
-          if (isMarked) {
-            cCtx.strokeStyle = '#2563eb'
-            cCtx.lineWidth = 2 / camera.scale
-            cCtx.setLineDash([6 / camera.scale, 4 / camera.scale])
-            cCtx.strokeRect(-w / 2, -h / 2, w, h)
-          }
-          cCtx.restore()
-        }
-      }
+      // is already applied above). Layered BELOW the strokes composite so
+      // pen strokes always draw on top of images, which is the whole point
+      // of the "paste an image and draw on top" feature. See renderimages.ts
+      // for the per-image draw loop (viewport cull, rotation, batch-delete
+      // outline).
+      renderImages({
+        images,
+        layer: target.committed,
+        camera,
+        viewBBox,
+        isMarkedForBatchDelete: (id) => imagesMarkedForBatchDelete.has(id),
+      })
 
       // Composite the strokes offscreen onto committed in pixel space
       // (identity transform) so the strokes pixel-for-pixel overlay the
       // grid + images. The strokes layer already has the camera transform
       // baked into its content.
+      const cCtx = target.committed.ctx
       cCtx.save()
       cCtx.setTransform(1, 0, 0, 1, 0, 0)
       cCtx.drawImage(target.strokes.el, 0, 0)
