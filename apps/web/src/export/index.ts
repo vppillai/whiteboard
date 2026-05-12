@@ -110,7 +110,9 @@ function blobToDataURL(blob: Blob): Promise<string> {
 function filename(format: ExportFormat): string {
   const ts = new Date()
   const pad = (n: number): string => String(n).padStart(2, '0')
-  const stamp = `${ts.getFullYear()}-${pad(ts.getMonth() + 1)}-${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}`
+  // Include seconds so back-to-back exports within the same minute don't
+  // overwrite each other (or trigger the browser's "(1)" disambiguator).
+  const stamp = `${ts.getFullYear()}-${pad(ts.getMonth() + 1)}-${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`
   return `whiteboard-${stamp}.${format}`
 }
 
