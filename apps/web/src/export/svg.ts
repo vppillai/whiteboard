@@ -62,13 +62,21 @@ export function exportSVG(
   // whose data URI was prepared by the caller. Missing data URIs are
   // skipped silently — the export of that specific image fails open
   // rather than aborting the whole SVG.
+  //
+  // Rotation: SVG's `transform="rotate(deg cx cy)"` rotates around the
+  // image center. Radians → degrees because SVG takes degrees.
   const sortedImages = [...images].filter((i) => !i.deleted).sort((a, b) => a.z - b.z)
   for (const img of sortedImages) {
     const href = imageDataUris.get(img.id)
     if (!href) continue
     const { x, y, w, h } = img.transform
+    const r = img.rotation ?? 0
+    const cx = x + w / 2
+    const cy = y + h / 2
+    const transformAttr =
+      r === 0 ? '' : ` transform="rotate(${fmt((r * 180) / Math.PI)} ${fmt(cx)} ${fmt(cy)})"`
     parts.push(
-      `<image href="${escapeAttr(href)}" x="${fmt(x)}" y="${fmt(y)}" width="${fmt(w)}" height="${fmt(h)}" preserveAspectRatio="none"/>`,
+      `<image href="${escapeAttr(href)}" x="${fmt(x)}" y="${fmt(y)}" width="${fmt(w)}" height="${fmt(h)}" preserveAspectRatio="none"${transformAttr}/>`,
     )
   }
 

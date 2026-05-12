@@ -113,12 +113,23 @@ export async function exportPNG(
   applyCamera(committedLayer, camera, dpr)
   drawGrid(committedLayer, camera, bounds.width, bounds.height, settings.grid)
   // Images go between grid and strokes — they're "below" the strokes
-  // visually. drawImage uses the current board-space transform.
+  // visually. drawImage uses the current board-space transform; rotation
+  // is applied by translating to the image center, rotating, drawing
+  // centered, and restoring.
   for (const img of visibleImages) {
     const el = imageEls.get(img.id)
     if (!el) continue
     const { x, y, w: iw, h: ih } = img.transform
-    cCtx.drawImage(el, x, y, iw, ih)
+    const r = img.rotation ?? 0
+    if (r === 0) {
+      cCtx.drawImage(el, x, y, iw, ih)
+    } else {
+      cCtx.save()
+      cCtx.translate(x + iw / 2, y + ih / 2)
+      cCtx.rotate(r)
+      cCtx.drawImage(el, -iw / 2, -ih / 2, iw, ih)
+      cCtx.restore()
+    }
   }
   cCtx.save()
   cCtx.setTransform(1, 0, 0, 1, 0, 0)

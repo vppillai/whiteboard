@@ -46,6 +46,7 @@ import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid, invalidateGridColors } from './grid'
 import { createHelpOverlay } from './helpoverlay'
 import { getImageElement, loadImageElement } from './imagecache'
+import { imageAABB } from './imagegeom'
 import {
   type ImagePasteContext,
   pasteImageFromBlob,
@@ -477,6 +478,13 @@ async function main(): Promise<void> {
     markCommittedDirty: () => {
       committedDirty = true
     },
+    setCursor: (cursor) => {
+      // Set on root (which contains both canvas layers) so the cursor is
+      // visible regardless of which layer happens to be topmost or what
+      // the active tool's static `cursor` field is set to. Empty string
+      // restores the static tool cursor; useful when leaving a hit zone.
+      root.style.cursor = cursor || tool.current.cursor || ''
+    },
   }
 
   // ---------------------------------------------------------------------
@@ -602,6 +610,7 @@ async function main(): Promise<void> {
             viewportWidth: target.width,
             viewportHeight: target.height,
             onEmptyBoard: () => showInfoToast('Nothing to export'),
+            onSuccess: (fmt) => showInfoToast(`Exported ${fmt.toUpperCase()}`),
           })
         },
       })
@@ -793,6 +802,7 @@ async function main(): Promise<void> {
             viewportWidth: target.width,
             viewportHeight: target.height,
             onEmptyBoard: () => showInfoToast('Nothing to export'),
+            onSuccess: (fmt) => showInfoToast(`Exported ${fmt.toUpperCase()}`),
           })
       },
     }),
@@ -872,12 +882,23 @@ async function main(): Promise<void> {
         if (img.deleted) continue
         const el = getImageElement(img.blobRef)
         if (!el) continue
-        // Viewport cull — skip images entirely off-screen. Bbox vs
-        // viewBBox; cheap and meaningful for many-image scenes.
+        // Viewport cull uses the rotation-aware AABB so a rotated image
+        // poking into the viewport isn't culled when its un-rotated rect
+        // happens to be off-screen.
+        const bb = imageAABB(img)
+        if (bb.maxX < viewBBox.minX || bb.minX > viewBBox.maxX) continue
+        if (bb.maxY < viewBBox.minY || bb.minY > viewBBox.maxY) continue
         const { x, y, w, h } = img.transform
-        if (x + w < viewBBox.minX || x > viewBBox.maxX) continue
-        if (y + h < viewBBox.minY || y > viewBBox.maxY) continue
-        cCtx.drawImage(el, x, y, w, h)
+        const r = img.rotation ?? 0
+        if (r === 0) {
+          cCtx.drawImage(el, x, y, w, h)
+        } else {
+          cCtx.save()
+          cCtx.translate(x + w / 2, y + h / 2)
+          cCtx.rotate(r)
+          cCtx.drawImage(el, -w / 2, -h / 2, w, h)
+          cCtx.restore()
+        }
       }
 
       // Composite the strokes offscreen onto committed in pixel space

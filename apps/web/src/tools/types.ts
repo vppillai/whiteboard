@@ -37,6 +37,13 @@ export interface ToolContext {
    * own callback path.
    */
   markCommittedDirty(): void
+  /**
+   * Set the canvas cursor. Wraps the parent element's `style.cursor` so
+   * cursor changes work regardless of which canvas layer (committed vs live)
+   * is on top at the moment. Tools call this from pointermove handlers as
+   * the pointer enters / leaves hit zones.
+   */
+  setCursor(cursor: string): void
 }
 
 export type ToolId = 'pen' | 'eraser' | 'lasso' | 'laser' | 'text' | 'select'

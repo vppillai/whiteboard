@@ -21,21 +21,24 @@
  */
 
 import type { ImageObject } from '@whiteboard/shared'
-import { getImageElement } from '../imagecache'
+import { imageCenter, pointInImage, rotateAroundPoint } from '../imagegeom'
 import type { Op } from '../ops'
 import { applyCamera, clearLayer } from '../render'
 import type { Tool, ToolContext } from './types'
 
 type HandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
+type DragKind =
+  | 'move'
+  | { resize: HandleId; anchor: { x: number; y: number } }
+  | { rotate: true; startRotation: number; startAngleFromCenter: number }
 
 interface DragState {
   imageId: string
-  kind: 'move' | { resize: HandleId; anchor: { x: number; y: number } }
+  kind: DragKind
   before: ImageObject['transform']
+  beforeRotation: number
   /** Board-space coords of the pointer at pointerdown. */
   startBoard: { x: number; y: number }
-  /** Whether Shift is being held during a resize drag (proportional). */
-  shiftConstrained: boolean
 }
 
 interface SelectToolDeps {
@@ -48,6 +51,10 @@ interface SelectToolDeps {
   /** Mark the committed layer dirty so the next frame re-renders. */
   markCommittedDirty: () => void
 }
+
+/** Distance from the top-center handle to the rotation handle, in screen
+ *  pixels. Constant so it stays the same visual offset at every zoom. */
+const ROTATE_HANDLE_OFFSET_PX = 24
 
 /** Pixel size of selection handles (constant on screen, regardless of zoom). */
 const HANDLE_PX = 8
@@ -69,11 +76,9 @@ export interface SelectTool extends Tool {
 export function createSelectTool(deps: SelectToolDeps): SelectTool {
   let selectedImageId: string | null = null
   let drag: DragState | null = null
-  let hoveredHandle: HandleId | null = null
-  let hoveredImage: string | null = null
 
-  /** Top-most non-deleted image whose rect contains the board-space point.
-   *  Handles take priority — see hitTest. */
+  /** Top-most non-deleted image whose rotated rect contains the board-space
+   *  point. Handles take priority — see hitTest. */
   function imageAt(
     boardX: number,
     boardY: number,
@@ -82,19 +87,18 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     // Reverse iterate so paste-time-latest wins (it's on top visually).
     const sorted = [...imgs].filter((i) => !i.deleted).sort((a, b) => b.z - a.z)
     for (const img of sorted) {
-      const { x, y, w, h } = img.transform
-      if (boardX >= x && boardX <= x + w && boardY >= y && boardY <= y + h) return img
+      if (pointInImage({ x: boardX, y: boardY }, img)) return img
     }
     return null
   }
 
-  /** Returns the 8 handle positions in board space for a transform rect. */
-  function handlePositions(
-    t: ImageObject['transform'],
-  ): Record<HandleId, { x: number; y: number }> {
+  /** Returns the 8 handle positions in board space for a transform rect.
+   *  Already rotated around the image center when img has rotation set. */
+  function handlePositions(img: ImageObject): Record<HandleId, { x: number; y: number }> {
+    const t = img.transform
     const cx = t.x + t.w / 2
     const cy = t.y + t.h / 2
-    return {
+    const local: Record<HandleId, { x: number; y: number }> = {
       nw: { x: t.x, y: t.y },
       n: { x: cx, y: t.y },
       ne: { x: t.x + t.w, y: t.y },
@@ -104,28 +108,62 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       sw: { x: t.x, y: t.y + t.h },
       w: { x: t.x, y: cy },
     }
+    const r = img.rotation ?? 0
+    if (r === 0) return local
+    const c = { x: cx, y: cy }
+    const out = {} as Record<HandleId, { x: number; y: number }>
+    for (const id of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const) {
+      out[id] = rotateAroundPoint(local[id], c, r)
+    }
+    return out
   }
 
-  /** The anchor (opposite handle) for resize math. */
-  function anchorFor(handle: HandleId, t: ImageObject['transform']): { x: number; y: number } {
-    const p = handlePositions(t)
+  /** Rotation handle position in board space — `ROTATE_HANDLE_OFFSET_PX`
+   *  above the N handle, then rotated. Pass scale so the screen-space
+   *  offset stays constant regardless of zoom. */
+  function rotationHandlePos(img: ImageObject, scale: number): { x: number; y: number } {
+    const t = img.transform
+    const cx = t.x + t.w / 2
+    const cy = t.y + t.h / 2
+    const offsetBoard = ROTATE_HANDLE_OFFSET_PX / scale
+    const local = { x: cx, y: t.y - offsetBoard }
+    const r = img.rotation ?? 0
+    return r === 0 ? local : rotateAroundPoint(local, { x: cx, y: cy }, r)
+  }
+
+  /** The anchor (opposite handle) for resize math, in image-local
+   *  (un-rotated) coordinates. Resize math always happens in local
+   *  space; rotation is reapplied when drawing / persisting. */
+  function anchorForLocal(handle: HandleId, t: ImageObject['transform']): { x: number; y: number } {
+    const cx = t.x + t.w / 2
+    const cy = t.y + t.h / 2
+    const local: Record<HandleId, { x: number; y: number }> = {
+      nw: { x: t.x, y: t.y },
+      n: { x: cx, y: t.y },
+      ne: { x: t.x + t.w, y: t.y },
+      e: { x: t.x + t.w, y: cy },
+      se: { x: t.x + t.w, y: t.y + t.h },
+      s: { x: cx, y: t.y + t.h },
+      sw: { x: t.x, y: t.y + t.h },
+      w: { x: t.x, y: cy },
+    }
     switch (handle) {
       case 'nw':
-        return p.se
+        return local.se
       case 'n':
-        return p.s
+        return local.s
       case 'ne':
-        return p.sw
+        return local.sw
       case 'e':
-        return p.w
+        return local.w
       case 'se':
-        return p.nw
+        return local.nw
       case 's':
-        return p.n
+        return local.n
       case 'sw':
-        return p.ne
+        return local.ne
       case 'w':
-        return p.e
+        return local.e
     }
   }
 
@@ -146,14 +184,10 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     }
   }
 
-  /** Convert board distance to screen distance using the camera scale. */
-  function screenDistance(boardDelta: number, scale: number): number {
-    return boardDelta * scale
-  }
-
   /** Hit-test against the selected image's handles (board coords). Returns
    *  null if not over any handle. Considers an HANDLE_HIT_PX-radius hit
-   *  zone *in screen pixels* converted back to board space via scale. */
+   *  zone *in screen pixels* converted back to board space via scale.
+   *  Handles are already in rotated positions if the image is rotated. */
   function handleAt(
     boardX: number,
     boardY: number,
@@ -161,7 +195,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     scale: number,
   ): HandleId | null {
     const tol = HANDLE_HIT_PX / scale
-    const positions = handlePositions(sel.transform)
+    const positions = handlePositions(sel)
     for (const id of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const) {
       const p = positions[id]
       if (Math.abs(p.x - boardX) <= tol && Math.abs(p.y - boardY) <= tol) return id
@@ -169,24 +203,37 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     return null
   }
 
+  /** Hit-test the rotation handle. Returns true if board pointer is within
+   *  the rotation handle's hit zone. */
+  function isOverRotationHandle(
+    boardX: number,
+    boardY: number,
+    sel: ImageObject,
+    scale: number,
+  ): boolean {
+    const tol = HANDLE_HIT_PX / scale
+    const p = rotationHandlePos(sel, scale)
+    return Math.abs(p.x - boardX) <= tol && Math.abs(p.y - boardY) <= tol
+  }
+
   function updateHoverCursor(ctx: ToolContext, boardX: number, boardY: number): void {
     const imgs = deps.getImages()
     const sel = selectedImageId ? imgs.find((i) => i.id === selectedImageId) : null
 
     if (sel) {
+      if (isOverRotationHandle(boardX, boardY, sel, ctx.camera.scale)) {
+        ctx.setCursor('grab')
+        return
+      }
       const handle = handleAt(boardX, boardY, sel, ctx.camera.scale)
       if (handle) {
-        hoveredHandle = handle
-        hoveredImage = null
-        ctx.liveLayer.el.style.cursor = cursorFor(handle)
+        ctx.setCursor(cursorFor(handle))
         return
       }
     }
 
-    hoveredHandle = null
     const hit = imageAt(boardX, boardY, imgs)
-    hoveredImage = hit?.id ?? null
-    ctx.liveLayer.el.style.cursor = hit ? 'move' : 'default'
+    ctx.setCursor(hit ? 'move' : 'default')
   }
 
   function applyResize(
@@ -266,16 +313,37 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       const imgs = deps.getImages()
       const sel = selectedImageId ? imgs.find((i) => i.id === selectedImageId) : null
 
-      // Handle takes priority — only if there's a selection.
+      // Rotation handle takes top priority — sits above the image and could
+      // overlap a resize handle on a tiny image, so we check it first.
+      if (sel && isOverRotationHandle(bx, by, sel, ctx.camera.scale)) {
+        const center = imageCenter(sel.transform)
+        const startAngle = Math.atan2(by - center.y, bx - center.x)
+        drag = {
+          imageId: sel.id,
+          kind: {
+            rotate: true,
+            startRotation: sel.rotation ?? 0,
+            startAngleFromCenter: startAngle,
+          },
+          before: { ...sel.transform },
+          beforeRotation: sel.rotation ?? 0,
+          startBoard: { x: bx, y: by },
+        }
+        ;(e.target as Element).setPointerCapture?.(e.pointerId)
+        ctx.setCursor('grabbing')
+        return
+      }
+
+      // Resize handles next.
       if (sel) {
         const handle = handleAt(bx, by, sel, ctx.camera.scale)
         if (handle) {
           drag = {
             imageId: sel.id,
-            kind: { resize: handle, anchor: anchorFor(handle, sel.transform) },
+            kind: { resize: handle, anchor: anchorForLocal(handle, sel.transform) },
             before: { ...sel.transform },
+            beforeRotation: sel.rotation ?? 0,
             startBoard: { x: bx, y: by },
-            shiftConstrained: e.shiftKey,
           }
           ;(e.target as Element).setPointerCapture?.(e.pointerId)
           return
@@ -289,8 +357,8 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
           imageId: hit.id,
           kind: 'move',
           before: { ...hit.transform },
+          beforeRotation: hit.rotation ?? 0,
           startBoard: { x: bx, y: by },
-          shiftConstrained: false,
         }
         ;(e.target as Element).setPointerCapture?.(e.pointerId)
         ctx.markCommittedDirty()
@@ -315,19 +383,39 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       const img = deps.getImages().find((i) => i.id === drag?.imageId)
       if (!img) return
 
-      const dx = bx - drag.startBoard.x
-      const dy = by - drag.startBoard.y
-
       if (drag.kind === 'move') {
+        const dx = bx - drag.startBoard.x
+        const dy = by - drag.startBoard.y
         img.transform.x = drag.before.x + dx
         img.transform.y = drag.before.y + dy
+      } else if ('rotate' in drag.kind) {
+        // Rotation drag: angle is the polar angle from the image's *current*
+        // center to the pointer. Delta from the start angle is added to the
+        // start rotation. (Using current center means the image rotates
+        // around its own center even if it was moved during a previous
+        // drag — though we don't allow nested drags.)
+        const center = imageCenter(img.transform)
+        const angle = Math.atan2(by - center.y, bx - center.x)
+        const delta = angle - drag.kind.startAngleFromCenter
+        img.rotation = normalizeRotation(drag.kind.startRotation + delta)
       } else {
+        // Resize. If the image is rotated, project the board pointer into
+        // the image's local (un-rotated) frame by inverse-rotating around
+        // its center. The resize math then runs in local space identically
+        // to the no-rotation case. Side effect: the image's apparent
+        // center can drift slightly on resize-while-rotated because the
+        // local rect's top-left changes; we accept this for v1 (most use
+        // is resize-then-rotate, not rotate-then-resize).
+        const r = drag.beforeRotation
+        const center = imageCenter(drag.before)
+        const localPointer =
+          r === 0 ? { x: bx, y: by } : rotateAroundPoint({ x: bx, y: by }, center, -r)
         const naturalAspect = img.natural.w / img.natural.h
         applyResize(
           img.transform,
           drag.kind.resize,
           drag.kind.anchor,
-          { x: bx, y: by },
+          localPointer,
           naturalAspect,
           e.shiftKey,
         )
@@ -344,17 +432,24 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       const img = deps.getImages().find((i) => i.id === drag?.imageId)
       ;(e.target as Element).releasePointerCapture?.(e.pointerId)
       if (img) {
-        const before = drag.before
-        const after = { ...img.transform }
-        // Only push an op if the transform actually changed (a tap-and-
-        // release is a click, not a no-op drag).
-        if (
-          before.x !== after.x ||
-          before.y !== after.y ||
-          before.w !== after.w ||
-          before.h !== after.h
-        ) {
-          deps.pushOp({ kind: 'transform-image', imageId: img.id, before, after })
+        const isRotation = typeof drag.kind === 'object' && 'rotate' in drag.kind
+        if (isRotation) {
+          const beforeR = drag.beforeRotation
+          const afterR = img.rotation ?? 0
+          if (beforeR !== afterR) {
+            deps.pushOp({ kind: 'rotate-image', imageId: img.id, before: beforeR, after: afterR })
+          }
+        } else {
+          const before = drag.before
+          const after = { ...img.transform }
+          if (
+            before.x !== after.x ||
+            before.y !== after.y ||
+            before.w !== after.w ||
+            before.h !== after.h
+          ) {
+            deps.pushOp({ kind: 'transform-image', imageId: img.id, before, after })
+          }
         }
       }
       drag = null
@@ -368,41 +463,70 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       const img = deps.getImages().find((i) => i.id === id)
       if (!img || img.deleted) return
 
-      applyCamera(ctx.liveLayer, ctx.camera, ctx.dpr)
       const { x, y, w, h } = img.transform
+      const r = img.rotation ?? 0
       const c = ctx.liveLayer.ctx
+      const accent = resolveAccent(c)
 
-      // Outline in board space — scales with zoom for the rectangle, but
-      // we counter-scale the stroke width so it stays at 1 screen px.
+      // Outline — drawn rotated around image center. Use save/translate/
+      // rotate to keep the rect path in local coords while applying the
+      // image's rotation in board space. Stroke width is counter-scaled
+      // to stay 1 screen px regardless of zoom.
+      applyCamera(ctx.liveLayer, ctx.camera, ctx.dpr)
       c.save()
-      c.strokeStyle = resolveAccent(c)
+      if (r !== 0) {
+        c.translate(x + w / 2, y + h / 2)
+        c.rotate(r)
+        c.translate(-(x + w / 2), -(y + h / 2))
+      }
+      c.strokeStyle = accent
       c.lineWidth = 1 / ctx.camera.scale
       c.strokeRect(x, y, w, h)
       c.restore()
 
       // Handles in screen space — constant pixel size regardless of zoom.
-      // Switch to identity transform; compute handle screen positions from
-      // board → screen via camera.
+      // We use the already-rotated positions from handlePositions().
       c.save()
       c.setTransform(ctx.dpr, 0, 0, ctx.dpr, 0, 0)
-      const positions = handlePositions(img.transform)
+      const positions = handlePositions(img)
+      const boardToScreen = (p: { x: number; y: number }): { x: number; y: number } => ({
+        x: (p.x - ctx.camera.x) * ctx.camera.scale,
+        y: (p.y - ctx.camera.y) * ctx.camera.scale,
+      })
       for (const hid of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const) {
-        const p = positions[hid]
-        const sx = (p.x - ctx.camera.x) * ctx.camera.scale
-        const sy = (p.y - ctx.camera.y) * ctx.camera.scale
+        const s = boardToScreen(positions[hid])
         c.fillStyle = '#ffffff'
-        c.fillRect(sx - HANDLE_PX / 2 - 1, sy - HANDLE_PX / 2 - 1, HANDLE_PX + 2, HANDLE_PX + 2)
-        c.fillStyle = resolveAccent(c)
-        c.fillRect(sx - HANDLE_PX / 2, sy - HANDLE_PX / 2, HANDLE_PX, HANDLE_PX)
+        c.fillRect(s.x - HANDLE_PX / 2 - 1, s.y - HANDLE_PX / 2 - 1, HANDLE_PX + 2, HANDLE_PX + 2)
+        c.fillStyle = accent
+        c.fillRect(s.x - HANDLE_PX / 2, s.y - HANDLE_PX / 2, HANDLE_PX, HANDLE_PX)
       }
+
+      // Rotation handle + connecting line. The handle sits
+      // ROTATE_HANDLE_OFFSET_PX above the N handle (along the image's
+      // top-edge normal, which itself rotates with the image).
+      const rotPos = boardToScreen(rotationHandlePos(img, ctx.camera.scale))
+      const nPos = boardToScreen(positions.n)
+      c.strokeStyle = accent
+      c.lineWidth = 1
+      c.beginPath()
+      c.moveTo(nPos.x, nPos.y)
+      c.lineTo(rotPos.x, rotPos.y)
+      c.stroke()
+      // Round-ish rotation handle: filled circle with white outer ring.
+      c.fillStyle = '#ffffff'
+      c.beginPath()
+      c.arc(rotPos.x, rotPos.y, HANDLE_PX / 2 + 1.5, 0, Math.PI * 2)
+      c.fill()
+      c.fillStyle = accent
+      c.beginPath()
+      c.arc(rotPos.x, rotPos.y, HANDLE_PX / 2, 0, Math.PI * 2)
+      c.fill()
       c.restore()
     },
 
     cleanup(): void {
       selectedImageId = null
       drag = null
-      hoveredHandle = null
-      hoveredImage = null
     },
 
     getSelectedImageId(): string | null {
@@ -434,4 +558,14 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
 function resolveAccent(c: CanvasRenderingContext2D): string {
   const css = getComputedStyle(c.canvas).getPropertyValue('--whiteboard-accent').trim()
   return css || '#2563eb'
+}
+
+/** Normalize a rotation angle to (-π, π] so undo/redo records stay tidy
+ *  and accumulated drag deltas don't grow unbounded over many spins. */
+function normalizeRotation(r: number): number {
+  const TWO_PI = Math.PI * 2
+  let n = r % TWO_PI
+  if (n > Math.PI) n -= TWO_PI
+  if (n <= -Math.PI) n += TWO_PI
+  return n
 }

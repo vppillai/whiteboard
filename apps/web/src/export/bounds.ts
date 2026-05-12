@@ -8,6 +8,7 @@
 
 import type { ImageObject, Stroke } from '@whiteboard/shared'
 import type { Camera } from '../camera'
+import { imageAABB } from '../imagegeom'
 import { getStrokeBBox } from '../stroke'
 
 export interface Bounds {
@@ -40,11 +41,13 @@ export function computeBoardBounds(
   }
   for (const img of images) {
     if (img.deleted) continue
-    const { x, y, w, h } = img.transform
-    if (x < minX) minX = x
-    if (y < minY) minY = y
-    if (x + w > maxX) maxX = x + w
-    if (y + h > maxY) maxY = y + h
+    // Rotation-aware AABB so a rotated image's true on-screen extent
+    // contributes to the export bounds.
+    const bb = imageAABB(img)
+    if (bb.minX < minX) minX = bb.minX
+    if (bb.minY < minY) minY = bb.minY
+    if (bb.maxX > maxX) maxX = bb.maxX
+    if (bb.maxY > maxY) maxY = bb.maxY
     any = true
   }
   if (!any) return null

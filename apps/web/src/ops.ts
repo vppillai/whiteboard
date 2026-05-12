@@ -60,6 +60,17 @@ export type Op =
       before: ImageObject['transform']
       after: ImageObject['transform']
     }
+  /**
+   * Rotate an image in place. Stored as before/after radians so undo /
+   * redo can swap without recomputing. Coalesced at drag-end like
+   * transform-image — one op per rotation drag.
+   */
+  | {
+      kind: 'rotate-image'
+      imageId: string
+      before: number
+      after: number
+    }
 
 export interface OpContext {
   /** All strokes (including soft-deleted ones). Mutated in place by ops. */
@@ -100,6 +111,9 @@ export function applyOp(op: Op, ctx: OpContext): void {
     case 'transform-image':
       setImageTransform(ctx, op.imageId, op.after)
       break
+    case 'rotate-image':
+      setImageRotation(ctx, op.imageId, op.after)
+      break
   }
   ctx.markDirty()
 }
@@ -127,6 +141,9 @@ export function unapplyOp(op: Op, ctx: OpContext): void {
       break
     case 'transform-image':
       setImageTransform(ctx, op.imageId, op.before)
+      break
+    case 'rotate-image':
+      setImageRotation(ctx, op.imageId, op.before)
       break
   }
   ctx.markDirty()
@@ -184,5 +201,12 @@ function setImageTransform(ctx: OpContext, id: string, transform: ImageObject['t
   const img = ctx.images.find((i) => i.id === id)
   if (!img) return
   img.transform = { ...transform }
+  ctx.saveImageMeta(img)
+}
+
+function setImageRotation(ctx: OpContext, id: string, rotation: number): void {
+  const img = ctx.images.find((i) => i.id === id)
+  if (!img) return
+  img.rotation = rotation || undefined
   ctx.saveImageMeta(img)
 }

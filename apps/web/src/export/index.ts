@@ -32,6 +32,9 @@ export interface ExportOptions {
   viewportWidth: number
   viewportHeight: number
   onEmptyBoard?: () => void
+  /** Fired after the download has been triggered with the chosen format
+   *  ('png' | 'svg' | 'pdf') so callers can surface a confirmation toast. */
+  onSuccess?: (format: ExportFormat) => void
 }
 
 export async function exportBoard(
@@ -53,6 +56,7 @@ export async function exportBoard(
   const snap = getSettings()
   const blob = await renderFormat(format, strokes, images, opts.imageStore ?? null, bounds, snap)
   triggerDownload(blob, filename(format))
+  opts.onSuccess?.(format)
 }
 
 async function renderFormat(

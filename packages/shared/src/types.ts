@@ -68,6 +68,9 @@ export interface ImageObject {
   natural: { w: number; h: number }
   /** Canvas-space rect — (x, y) is the top-left. */
   transform: { x: number; y: number; w: number; h: number }
+  /** Rotation in radians around the rect center. Defaults to 0 when absent
+   *  (omitted on persisted records that pre-date rotation support). */
+  rotation?: number
   /** Paste-order monotone increasing. Higher z renders later (on top of older images, below all strokes). */
   z: number
   /** Wall-clock ms; tie-breaker plus debug aid. */
