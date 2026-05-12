@@ -43,7 +43,13 @@ describe('export/svg', () => {
       { x: 0, y: 0 },
       { x: 10, y: 10 },
     ])
-    const blob = exportSVG([s], { x: -10, y: -10, width: 30, height: 30 }, baseSettings)
+    const blob = exportSVG(
+      [s],
+      [],
+      new Map(),
+      { x: -10, y: -10, width: 30, height: 30 },
+      baseSettings,
+    )
     expect(blob.type).toBe('image/svg+xml')
   })
 
@@ -52,7 +58,13 @@ describe('export/svg', () => {
       { x: 0, y: 0 },
       { x: 10, y: 10 },
     ])
-    const blob = exportSVG([s], { x: -10, y: -10, width: 30, height: 30 }, baseSettings)
+    const blob = exportSVG(
+      [s],
+      [],
+      new Map(),
+      { x: -10, y: -10, width: 30, height: 30 },
+      baseSettings,
+    )
     const text = await blob.text()
     expect(text).toContain('<svg')
     expect(text).toContain('viewBox="-10.00 -10.00 30.00 30.00"')
@@ -81,7 +93,13 @@ describe('export/svg', () => {
         },
       },
     )
-    const blob = exportSVG([s], { x: -10, y: -10, width: 30, height: 30 }, baseSettings)
+    const blob = exportSVG(
+      [s],
+      [],
+      new Map(),
+      { x: -10, y: -10, width: 30, height: 30 },
+      baseSettings,
+    )
     const text = await blob.text()
     expect(text).toContain('mix-blend-mode:multiply')
   })
@@ -91,7 +109,13 @@ describe('export/svg', () => {
       { x: 0, y: 0 },
       { x: 10, y: 10 },
     ])
-    const blob = exportSVG([s], { x: -10, y: -10, width: 30, height: 30 }, baseSettings)
+    const blob = exportSVG(
+      [s],
+      [],
+      new Map(),
+      { x: -10, y: -10, width: 30, height: 30 },
+      baseSettings,
+    )
     const text = await blob.text()
     expect(text).not.toContain('mix-blend-mode')
   })
@@ -106,7 +130,13 @@ describe('export/svg', () => {
         erasedStamps: [{ x: 5, y: 5, r: 3 }],
       },
     )
-    const blob = exportSVG([s], { x: -10, y: -10, width: 30, height: 30 }, baseSettings)
+    const blob = exportSVG(
+      [s],
+      [],
+      new Map(),
+      { x: -10, y: -10, width: 30, height: 30 },
+      baseSettings,
+    )
     const text = await blob.text()
     expect(text).toContain('<mask')
     expect(text).toContain('<circle')
@@ -118,7 +148,13 @@ describe('export/svg', () => {
       { x: 0, y: 0 },
       { x: 10, y: 10 },
     ])
-    const blob = exportSVG([s], { x: -10, y: -10, width: 30, height: 30 }, baseSettings)
+    const blob = exportSVG(
+      [s],
+      [],
+      new Map(),
+      { x: -10, y: -10, width: 30, height: 30 },
+      baseSettings,
+    )
     const text = await blob.text()
     expect(text).not.toContain('<pattern')
   })
@@ -132,7 +168,7 @@ describe('export/svg', () => {
       ...baseSettings,
       grid: { type: 'dots', spacing: 24 },
     }
-    const blob = exportSVG([s], { x: -10, y: -10, width: 30, height: 30 }, dotted)
+    const blob = exportSVG([s], [], new Map(), { x: -10, y: -10, width: 30, height: 30 }, dotted)
     const text = await blob.text()
     expect(text).toContain('<pattern')
     expect(text).toContain('id="wb-grid"')
@@ -148,7 +184,7 @@ describe('export/svg', () => {
       ...baseSettings,
       grid: { type: 'lines', spacing: 24 },
     }
-    const blob = exportSVG([s], { x: -10, y: -10, width: 30, height: 30 }, lines)
+    const blob = exportSVG([s], [], new Map(), { x: -10, y: -10, width: 30, height: 30 }, lines)
     const text = await blob.text()
     expect(text).toContain('<pattern')
     expect(text).toContain('M 0 0 L 24 0 M 0 0 L 0 24')
@@ -161,7 +197,13 @@ describe('export/svg', () => {
       { x: 10, y: 10 },
       { x: 0, y: 10 },
     ])
-    const blob = exportSVG([s], { x: -10, y: -10, width: 40, height: 40 }, baseSettings)
+    const blob = exportSVG(
+      [s],
+      [],
+      new Map(),
+      { x: -10, y: -10, width: 40, height: 40 },
+      baseSettings,
+    )
     const text = await blob.text()
     // SVG `Q` quadratic-curve command — matches the canvas
     // `quadraticCurveTo(x0, y0, midX, midY)` hull in stroke.ts. Was a
@@ -177,7 +219,13 @@ describe('export/svg', () => {
       ],
       { deleted: true },
     )
-    const blob = exportSVG([s], { x: -10, y: -10, width: 30, height: 30 }, baseSettings)
+    const blob = exportSVG(
+      [s],
+      [],
+      new Map(),
+      { x: -10, y: -10, width: 30, height: 30 },
+      baseSettings,
+    )
     const text = await blob.text()
     expect(text).not.toContain('<path')
   })

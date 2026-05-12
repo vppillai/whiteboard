@@ -6,6 +6,68 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-05-12
+
+**Image paste and manipulation.** Pasted (or drag-dropped) raster images become first-class floating objects on the canvas, manipulable through a dedicated **Select tool** (`V`) — move, resize (corner + edge handles, Shift for aspect-lock), rotate (handle above top edge, double-click to reset to 0°), delete. PNG / SVG / PDF export include images in z-order with rotation preserved. Image bytes live in IndexedDB alongside strokes; v1.4.x users upgrade in place via a DB version bump (existing strokes preserved). Undo / redo cover paste / move / resize / rotate / delete. 100 unit tests at release (up from 92). Main bundle 34.65 KB gz (up from 28.70 KB gz; well within the 150 KB gz SPEC budget). Full design archive at [`docs/superpowers/specs/2026-05-12-image-paste-design.md`](docs/superpowers/specs/2026-05-12-image-paste-design.md).
+
+### Added
+
+- **Image paste — three input paths converging on one `paste-image` op:**
+  - `Ctrl/Cmd + V` paste via the document `paste` event (skips text-editable contexts like the settings panel inputs).
+  - Async clipboard API fallback for browsers and DEs where the synchronous event doesn't surface image data (Safari, some screenshot tools, several Linux desktops).
+  - Drag-drop a filesystem image onto the canvas — `dragover` / `drop` listeners with the `preventDefault` dance required for `drop` to actually fire.
+  - Accepted MIME types: PNG, JPEG, WebP, GIF. 25 MB blob cap; oversize attempts surface a toast and abort.
+  - Pasted image lands at natural pixel size with top-left at the cursor.
+- **Select tool (`V`).** Dedicated tool for floating-object manipulation (image — strokes still go through Lasso). Reachable from the bottom-right tool pill, right-click tool menu, or keyboard. Pointer-down on an image (reverse-z first-hit) selects it; pointer-down on empty space deselects. Hover cursor flips between `move`, the appropriate directional resize cursor per handle, and a custom rotate cursor (circular arrow with white halo for visibility on both themes).
+- **Move / resize / rotate.**
+  - Move: drag the body of a selected image. Drag emits one `transform-image` op at pointer-up so the whole drag is one undo step.
+  - Resize: drag any of the 8 handles (4 corners, 4 edge midpoints). Corner handles preserve the natural aspect ratio when **Shift** is held. Edge handles are 1-axis (Shift is ignored). Anchor stays pixel-fixed at the opposite corner / edge midpoint across the whole drag, including under rotation (resize-while-rotated has no drift).
+  - Rotate: 9th handle ~24 screen-px above the top-center edge with a connecting line. Drag rotates around the image center. **Double-click the rotate handle** (within 350 ms) snaps back to 0° as a single undoable op. Resize handles' cursors rotate with the image, bucketed to the nearest 45° so they match the visible handle direction at every rotation.
+- **`Cmd/Ctrl + A` includes images.** Existing select-all (switches to lasso, selects all strokes) now also marks all images with a dashed 2 px outline (visually distinct from the Select tool's solid handles so the two modes don't read as the same thing). The next Delete / Backspace soft-deletes all marked images alongside the lasso's stroke deletion. Marks clear on Esc, tool change, pointer-down on the canvas, or after a successful delete.
+- **Export filename now includes seconds** — `whiteboard-YYYY-MM-DD-HHMMSS.{png,svg,pdf}`. Back-to-back exports within the same minute no longer overwrite each other (or trigger the browser's `(1)` disambiguator). Fixed-width zero-padded fields keep file-manager lexical sort matching chronological order.
+- **Export-success toast.** PNG / SVG / PDF all surface a `Exported PNG/SVG/PDF` toast on download trigger so the empty-board / blank-area case is no longer silent.
+
+### Changed (schema + persistence — v1.0.x compatible)
+
+- **IDB schema bumped to `DB_VERSION = 2`** with two new object stores: `images` (cheap-to-scan metadata, keyed on `id`) and `images-blob` (raw `Blob`, keyed on `blobRef`). The metadata / binary split keeps the per-frame metadata scan light while bytes are paged independently. Existing `strokes` store is untouched — v1.0.x users upgrade in place; the `onupgradeneeded` handler only creates the missing stores. `saveImage` writes both stores in one transaction so a crash mid-paste can't leave half-state.
+- **Op-based undo extended** with four new op kinds: `paste-image`, `delete-image`, `transform-image` (move + resize), `rotate-image`. Mirrors the existing stroke ops (`create` / `delete` / `move` / `eraseStamps`). `OpContext` gains `images` and `saveImageMeta`. Undo / redo of any image action runs at the same op-pipeline depth as a stroke action.
+- **Export pipeline accepts images.** `computeBoardBounds(strokes, images)` includes image AABBs (rotation-aware) in the export bounding box. `exportPNG` decodes images via the runtime cache or `ImageStore.loadBlob` and draws them in z-order before compositing strokes on top. `exportSVG` accepts a pre-built data-URI map (kept pure-string-out; the dispatcher prepares URIs via `FileReader.readAsDataURL` before calling) and emits `<image href="data:…">` elements in z-order, with `transform="rotate(deg cx cy)"` for rotated entries. `exportPDF` passes through to PNG and inherits image support with no jspdf API change.
+- **Image render pass extracted to `apps/web/src/renderimages.ts`.** Single `renderImages({ images, layer, camera, viewBBox, isMarkedForBatchDelete })` entry point owns the per-image draw loop (viewport cull via rotation-aware AABB, rotation transform, batch-delete dashed outline). `main.ts` now describes the render pipeline at one level of abstraction (clear → grid → renderImages → composite strokes).
+- **`StrokeStore`-equivalent seam for images.** `ImageStore` interface in `apps/web/src/imagestore.ts` (load / insert / updateMeta / hardDelete / clear + `onRemoteChange` no-op for v1) preserves the future-sharing option per [ADR 0012](docs/decisions/0012-sharing-deferred.md) — image binaries are deferred to M5.1 when sharing returns. Local concrete impl wraps `storage.ts`.
+- **New helper modules.** `imagegeom.ts` (single source of truth for rotation math: `imageCenter`, `rotateAroundPoint`, `rectCorners`, `imageAABB`, `pointInImage`; uses an explicit `ROTATION_EPSILON = 1e-9` for float-drift-safe fast-paths). `imagepaste.ts` (the paste pipeline). `imagecache.ts` (HTMLImageElement cache with Blob URL lifecycle management — `URL.revokeObjectURL` fires the moment decode completes, with a cancellation flag so an evict-during-decode doesn't leave stale entries behind).
+
+### Fixed (review hardening — tier-A, [ea5c8d6](https://github.com/vppillai/whiteboard/commit/ea5c8d6))
+
+A 4-lane parallel code review surfaced eight correctness bugs in the in-progress image work; each one is a real behavior bug, not a code-smell complaint.
+
+- **Blob URL leak** (`imagecache.ts`). `URL.createObjectURL` was never revoked after `onload`, leaking one object URL per paste for the page lifetime. Now revoked the moment decode completes (the bitmap is owned by the `HTMLImageElement` at that point). Eviction also handles in-flight loads via a cancellation flag.
+- **Clear board didn't reset images** (`main.ts` onPerformClear). Strokes were cleared but `images` / `imagesMarkedForBatchDelete` / the IDB image store / the runtime cache all survived. After a clear there was no UI path to remove pasted images (undo stack wiped). Clear is now genuinely destructive across both object types.
+- **`escapeAttr` didn't escape `&`** (`svg.ts`). Image data-URI hrefs can contain `&` in charset / parameter positions; the prior color-string-only escape left them raw, producing malformed SVGs in edge cases. `&` is now escaped first so subsequent replacements don't double-encode.
+- **Pointer-cancel could leave drag state stuck** (`tools/select.ts`). Defense-in-depth: `onPointerDown` now commits any lingering drag before starting a new one, in case a prior pointerup / cancel was dropped by the browser (window blur, OS gesture steal, missed event).
+- **Resize-while-rotated drifted progressively** (`tools/select.ts`). The old math projected the pointer into local space using the rect's center captured at drag-start but mutated the rect's center each tick. Pivot vs target diverged; error compounded. New math captures the anchor (opposite corner / edge midpoint) in **board** space at drag-start, projects `(pointer - anchor)` onto the image's rotated x/y axes via dot products to derive local dimensions, and re-derives center from `anchor + signed half-diagonal`. Anchor stays pixel-fixed at any rotation.
+- **Triple-click rotation reset emitted spurious ops** (`tools/select.ts`). `lastRotateHandleDownAt` was initialized to `0`; the first click within 350 ms of page-load tripped the double-click branch via `performance.now() - 0 < 350`. Now initialized to `Number.NEGATIVE_INFINITY`; the timestamp is also always recorded (not zeroed on double-click) so a subsequent quick click doesn't trip again.
+- **`deleteSelected` didn't guard against already-deleted** (`tools/select.ts`). If a `Cmd+A` batch loop ran first and soft-deleted an image, then `selectTool.deleteSelected` fired again on the same image, two `delete-image` ops were pushed. Now guards and returns false if the image is already deleted.
+- **SVG `scope: 'visible'` included off-screen images** (`export/svg.ts`). The image loop emitted `<image>` elements unconditionally regardless of bounds intersection. Now uses the rotation-aware AABB to cull before emitting.
+
+### Changed (review hygiene — tier-B, [fbb97fb](https://github.com/vppillai/whiteboard/commit/fbb97fb))
+
+Tech-debt cleanup atop the tier-A bug fixes. All changes either tighten an invariant or harden a fast path; no user-visible behavior change.
+
+- **`deleteImage(id, blobRef)`** — `blobRef` now explicit so a future schema where the binary identifier differs from the record id (content-addressed dedupe, server URL) can't silently leak blob rows. v1 has `blobRef === id` but the abstraction is cheap to preserve.
+- **`partitionImagesForCompaction`** returns `{id, blobRef}` tuples for the same reason; `loadAllImages()` now returns `{images, compactedBlobRefs}` so callers can evict matching runtime cache entries when persistence compacts soft-deleted records.
+- **`saveImageMeta` gains an `onabort` handler** matching `saveImage` — silent transaction aborts no longer disappear.
+- **`Math.abs(r) < 1e-9`** everywhere instead of `r === 0`. Guards the fast unrotated path against float drift (rotate-to-zero overshoot, `-0`, accumulated 1e-15 error from repeated transforms).
+- **Single `persistImageMeta` closure** in `main.ts` replaces two identical inline closures (`opCtx` + `selectTool` deps). One source of truth for "how persistence errors surface" — future toast / retry policy edits touch one site.
+- **`pointerleave` on canvas root** drops the active hover cursor (resize / rotate) when the pointer exits, so a "ready to rotate" affordance doesn't linger while the user is over the gear menu or off-canvas.
+- **PNG export uses `Promise.allSettled`** instead of `Promise.all` so one bad image decode doesn't abort the whole export. Bad decodes log a warning and are silently dropped — matches the SVG path's "missing data URI = skip" semantics.
+- **Dead-code removal.** `SelectTool.getSelectedImageId()` removed (no callers; live-delete flows through `deleteSelected()` instead).
+
+### Notes
+
+- **Storage upgrade path.** Users on v1.0.x have only the `strokes` object store in their `whiteboard-local` IDB database. Opening v1.1.0 triggers an `onupgradeneeded` to version 2, which creates the missing `images` and `images-blob` stores. Existing stroke data is untouched. The upgrade is one-way (no `v2 → v1` downgrade); users who roll back will see their pasted images preserved in IDB but unused.
+- **Bundle size.** Main chunk grew from 28.70 KB gz (v1.0.0) to 34.65 KB gz (+5.95 KB gz) — well within the 150 KB gz SPEC budget. Growth attributable to the new modules (`imagepaste`, `imagecache`, `imagegeom`, `imagestore`, `renderimages`, `tools/select`, the rotation-aware AABB / hit-test helpers, and the four new op kinds).
+- **Sharing-deferred posture preserved.** Image binaries are explicitly tagged for M5.1 (deferred to when sharing returns; see [ADR 0012](docs/decisions/0012-sharing-deferred.md) and the `TODO(M5.1)` in `imagestore.ts`). The `ImageStore` interface is the seam.
+
 ## [1.0.0] — 2026-05-11
 
 **First production release** — single-user offline-first whiteboard for indirect-input pen tablets. Sub-33 ms pen-to-photon latency on Wacom Intuos. Five brush presets with per-brush pressure curves. Pixel-mask + object erasers. Lasso select / move / delete. Op-based undo / redo. PNG / SVG / PDF export. IndexedDB local persistence. Settings side panel with custom swatches and curve editor. Distraction-free mode. Comprehensive keyboard shortcuts. Live collaboration is deferred to post-v1 per [ADR 0012](docs/decisions/0012-sharing-deferred.md); the full design is archived at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](docs/superpowers/specs/2026-05-10-m3-sync-design.md). Deploys via Docker (`./deploy.sh`) or GitHub Pages (auto-deployed by [`.github/workflows/pages.yml`](.github/workflows/pages.yml)). 92 unit tests, 0 lint issues, 0 typecheck errors at release. Main bundle 28.70 KB gz (well under the 150 KB gz SPEC budget).

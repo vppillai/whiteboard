@@ -6,7 +6,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 
 ## Current state
 
-**v1.0.0 shipped 2026-05-11.** Single-user, offline-first whiteboard. Live collaboration deferred per [ADR 0012](decisions/0012-sharing-deferred.md). PWA install + deployment polish are post-v1 work tracked below.
+**v1.1.0 shipped 2026-05-12.** Single-user, offline-first whiteboard with image paste (move / resize / rotate via dedicated Select tool; included in PNG / SVG / PDF exports). Live collaboration deferred per [ADR 0012](decisions/0012-sharing-deferred.md). PWA install + deployment polish are post-v1 work tracked below.
 
 | M  | Title                                                                    | Status |
 |----|--------------------------------------------------------------------------|--------|
@@ -19,6 +19,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | M2.1 | Pre-sharing hardening — review-driven fixes; StrokeStore seam; identity scrub | ✅ *(2026-05-10; tag `m2.1-pre-m3-hardening`)* |
 | M3 | Server, sync, room URLs                                                  | 🟡 **Deferred from v1** *(see [ADR 0012](decisions/0012-sharing-deferred.md); design archive at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](superpowers/specs/2026-05-10-m3-sync-design.md))* |
 | **v1.0.0** | First production release (offline-first, pen-optimized)         | ✅ *(2026-05-11; tag `v1.0.0`)* |
+| **v1.1.0** | Image paste — Select tool, move / resize / rotate, export integration | ✅ *(2026-05-12; tag `v1.1.0`)* |
 | M4 | Deployment polish — clean-host validation, reverse-proxy paths           | ⬜ post-v1 |
 | M4.5 | PWA install + offline (manifest, service worker)                       | ⬜ post-v1 |
 | M5 | AI: shape recognition                                                    | ⬜ v2 |
@@ -229,6 +230,25 @@ Mid-milestone, a perceived drawing-latency drift triggered a defensive **Option 
 
 The original v1-blocking exit criteria (two browsers shared state, owner-token, 30 s snapshots, 16-peer capacity, in-flight crash recovery) are preserved in the design archive. **None of them gate the v1 ship.** Re-open this milestone only on a deliberate trigger — real user demand for multi-user editing, or a contributor with the capacity to implement and operate the stateful server runtime.
 
+### v1.1.0 — Image paste ✅
+
+**Closed 2026-05-12.** Tag `v1.1.0`. First post-v1 feature release. Full design at [`docs/superpowers/specs/2026-05-12-image-paste-design.md`](superpowers/specs/2026-05-12-image-paste-design.md).
+
+**Scope.** Pasted (or drag-dropped) raster images become first-class floating canvas objects. New `tools/select.ts` Select tool (`V`) provides move / resize (Shift = aspect-lock) / rotate (double-click handle resets to 0°) / delete. PNG / SVG / PDF exports include images in z-order with rotation preserved. IDB schema bumped to `v2` (new `images` + `images-blob` stores; existing strokes untouched). Op-based undo extended with `paste-image` / `delete-image` / `transform-image` / `rotate-image`. `ImageStore` interface seam mirrors `StrokeStore` and preserves the option to swap in a server-backed binary store at M5.1 when sharing returns.
+
+**Architecture additions.** `imagepaste.ts` (paste pipeline — three input paths converging on one op), `imagecache.ts` (HTMLImageElement cache with Blob URL lifecycle management), `imagegeom.ts` (single source of truth for rotation math — `imageCenter`, `rotateAroundPoint`, `rectCorners`, `imageAABB`, `pointInImage`, `ROTATION_EPSILON`), `imagestore.ts` (the `ImageStore` interface and local IDB-backed impl), `renderimages.ts` (per-frame image render pass extracted from `main.ts`).
+
+**Exit criteria — closed.**
+
+- ✅ Paste a screenshot from clipboard into the canvas; draw on top of it; reload — the image and strokes-on-top persist.
+- ✅ Drag-drop a PNG / JPEG / WebP / GIF from filesystem onto the canvas; same outcome.
+- ✅ Move / resize / rotate / delete via Select tool; each step is one undo step; undo / redo round-trips correctly.
+- ✅ `Cmd+A` includes images in the batch-delete affordance.
+- ✅ Export (PNG / SVG / PDF) includes images in correct z-order with rotation preserved; `scope: 'visible'` culls off-screen images.
+- ✅ Resize-while-rotated holds the opposite anchor pixel-fixed (no drift).
+- ✅ Image-paste design spec under `docs/superpowers/specs/`; CHANGELOG `[Unreleased]` → `v1.1.0` entry; README features list reflects the new shipped state.
+- ✅ Lint + typecheck + 100 tests + production build green; bundle stays under the 150 KB gz SPEC budget.
+
 ### M4 — Deployment polish ⬜ (post-v1)
 
 **Scope (post-v1 work).** v1.0.0 ships with Docker + GitHub Pages deploy paths working today (verified end-to-end in CI and on the demo Pages instance). M4 takes the deploy story from "works on the developer's machine and the demo Pages instance" to "reproducibly works on a clean third-party host": end-to-end validation on a fresh VM, exercising reverse-proxy paths against real Caddy and Nginx, writing operator-facing release notes.
@@ -238,7 +258,7 @@ The original v1-blocking exit criteria (two browsers shared state, owner-token, 
 - `./deploy.sh` produces a working production stack on a clean host given only Docker (validated by re-pulling on a fresh VM).
 - `BASE_PATH=/whiteboard` works behind a real reverse proxy (Caddy and Nginx, both tested against the provided snippets).
 - `docs/deployment.md` reverse-proxy snippets verified.
-- CHANGELOG entry under `[Unreleased]`; release tagged `v1.1.0`.
+- CHANGELOG entry under `[Unreleased]`; release tagged `v1.2.0`.
 
 ### M4.5 — PWA install + offline ⬜ (post-v1)
 
@@ -258,7 +278,7 @@ The original v1-blocking exit criteria (two browsers shared state, owner-token, 
 - Offline: app loads, draws, persists strokes locally with no network. Reload after going offline still works.
 - Lighthouse PWA score ≥ 90.
 - ADR if any non-obvious choice surfaces (e.g. the install-prompt policy).
-- `docs/deployment.md` updated; CHANGELOG entry; release tagged `v1.2.0`.
+- `docs/deployment.md` updated; CHANGELOG entry; release tagged `v1.3.0`.
 
 ### M5 — AI: shape recognition ⬜
 

@@ -47,10 +47,11 @@ Key submodules:
 | `tools/pen.ts`  | M1 ✅    | Drawing tool — strokes, hover preview per brush, COLOR + BRUSH menu section. |
 | `tools/eraser.ts`| M1 ✅   | Eraser — pixel-mask wipe + object modes, cursor reticle, 4-pill ERASER menu, `getPendingStamps` for live preview. ADR 0009. |
 | `tools/lasso.ts`| M1 ✅    | Lasso — polygon select + tap-select + drag-to-move + delete. Halo + dashed bbox visualization. `getDragState` for live offset preview during drag. |
+| `tools/select.ts`| v1.1 ✅ | Select tool (`V`) for floating image objects — first-hit pick (reverse-z), 8 resize handles + rotation handle, anchor-preserving resize math under rotation, double-click rotation reset, Shift = aspect-lock. Custom circular-arrow rotate cursor. |
 | `eraserhold.ts` | M1 ✅    | `E` key spring-loaded eraser modifier; mirror of `pan.ts` pattern. Tap `Shift+E` for sticky. |
 | `brushes.ts`    | M1 ✅    | Five brush presets (pen / marker / pencil / highlighter / brush). |
 | `menu-ui.ts`    | M1 ✅    | Shared DOM helpers — sectionLabel / pill / swatch / fullItem / separator. |
-| `ops.ts`        | M1 ✅    | Op-based undo (create / delete / move / eraseStamps). ADRs 0006 + 0009. |
+| `ops.ts`        | M1 / v1.1 ✅ | Op-based undo. Stroke kinds: `create` / `delete` / `move` / `eraseStamps` (ADRs 0006 + 0009). Image kinds: `paste-image` / `delete-image` / `transform-image` / `rotate-image` (v1.1). |
 | `stroke.ts`     | M0 ✅    | Stroke geometry via `perfect-freehand`; pressure curve; `erasedStamps` helpers. |
 | `render.ts`     | M1 ✅    | Three-layer canvas: `committed` (grid + composited strokes) + `strokes` (offscreen, destination-out target) + `live` (in-flight + cursor). ADR 0009 § *Renderer*. |
 | `camera.ts`     | M0 ✅    | Pan / zoom state; screen ↔ board coordinate math.        |
@@ -59,7 +60,12 @@ Key submodules:
 | `theme.ts`      | M0 ✅    | Light / dark / system themes; theme-aware "ink" color.   |
 | `metrics.ts`    | M0 ✅    | Live FPS / events / samples / event→frame HUD.           |
 | `perftest.ts`   | M0 ✅    | Synthetic stroke harness; reports JS-side latency. M1 added `?perftest=erase` + `?perftest=scale` modes (in `main.ts`) using a shared `perfRecording` flag instrumented in `frame()` for honest per-frame render-duration measurement. |
-| `storage.ts`    | M0 ✅    | Local persistence via IndexedDB.                         |
+| `storage.ts`    | M0 / v1.1 ✅ | Local persistence via IndexedDB. v1.1 bumps `DB_VERSION` to 2 with `images` (metadata) + `images-blob` (Blob bytes) stores alongside the original `strokes`. Existing data is preserved on upgrade. |
+| `imagestore.ts` | v1.1 ✅  | `ImageStore` interface seam (mirrors `StrokeStore`) — load / insert / updateMeta / hardDelete / clear + `onRemoteChange` no-op. Local IDB-backed impl. Image binaries deferred to M5.1 sync per ADR 0012. |
+| `imagecache.ts` | v1.1 ✅  | Runtime cache of decoded `HTMLImageElement`s keyed by `blobRef`. Object-URL lifecycle (created in `loadImageElement`, revoked the moment `onload` fires); cancellation flag protects against evict-during-decode races. |
+| `imagepaste.ts` | v1.1 ✅  | Paste pipeline — three input paths (synchronous `paste` event, async clipboard API fallback, drag-drop) converging on one `paste-image` op. MIME whitelist (PNG / JPEG / WebP / GIF), 25 MB blob cap with toast. |
+| `imagegeom.ts`  | v1.1 ✅  | Single source of truth for rotation math: `imageCenter`, `rotateAroundPoint`, `rectCorners`, `imageAABB`, `pointInImage`. Explicit `ROTATION_EPSILON = 1e-9` for float-drift-safe fast-paths. |
+| `renderimages.ts`| v1.1 ✅ | Per-frame image render pass — viewport cull via rotation-aware AABB, rotation transform, batch-delete dashed outline. Single `renderImages({ images, layer, camera, viewBBox, isMarkedForBatchDelete })` entry point. |
 | `settings.ts`   | M1.7 ✅  | M1.7 — v1 schema, sparse preset overrides, sync-ready reserved fields. ADR 0010. |
 | `sidepanel.ts`  | M1.7 ✅  | Side panel primitive (slide-in from right, overlay). ADR 0010. |
 | `settings/panel-content.ts` | M1.7 ✅ | M1.7 settings tree (7 sections). |
@@ -80,11 +86,11 @@ Key submodules:
 | `distractionfree.ts` | M2 ✅ | F-toggle distraction-free mode; hides app chrome via body class. |
 | `settings/curve-editor.ts` | M2 ✅ | SVG curve graph + draggable midpoint + test pad + thumbnail renderer. |
 | `exportpopover.ts`| M2 ✅    | Cmd/Ctrl+E export popover (PNG / SVG / PDF pills).      |
-| `export/bounds.ts`| M2 ✅    | Compute board bounds + 32 px margin from non-deleted strokes' AABBs. |
-| `export/png.ts`   | M2 ✅    | PNG export — detached canvas + `drawStrokeOntoLayer` + `toBlob`. |
-| `export/svg.ts`   | M2 ✅    | Custom SVG serializer; mask-based `erasedStamps` subtraction. |
-| `export/pdf.ts`   | M2 ✅    | PDF export — lazy `jspdf`, PNG embed.                   |
-| `export/index.ts` | M2 ✅    | Export dispatcher + filename + download trigger.         |
+| `export/bounds.ts`| M2 / v1.1 ✅ | Compute board bounds + 32 px margin. v1.1 includes rotation-aware image AABBs alongside stroke AABBs. |
+| `export/png.ts`   | M2 / v1.1 ✅ | PNG export — detached canvas + `drawStrokeOntoLayer` + `toBlob`. v1.1 decodes images via cache or `ImageStore.loadBlob` and draws them below strokes; `Promise.allSettled` isolates per-image decode failures. |
+| `export/svg.ts`   | M2 / v1.1 ✅ | Custom SVG serializer; mask-based `erasedStamps` subtraction. v1.1 emits `<image href="data:…">` elements (z-sorted, rotation-aware AABB cull on visible-scope export, `transform="rotate(deg cx cy)"` for rotated entries). |
+| `export/pdf.ts`   | M2 ✅    | PDF export — lazy `jspdf`, PNG embed (inherits image support from PNG path). |
+| `export/index.ts` | M2 / v1.1 ✅ | Export dispatcher + filename + download trigger. v1.1 pre-resolves image data-URIs for the SVG path; filename gains seconds (`whiteboard-YYYY-MM-DD-HHMMSS.{ext}`); `onSuccess(format)` toast hook. |
 | `sync/`         | 🟡 Deferred | Live collaboration (Y.Doc binding, WebSocket transport, presence) dropped from v1 per ADR 0012. Full design preserved at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](superpowers/specs/2026-05-10-m3-sync-design.md). |
 | `ui/`           | 🟡 Deferred | Floating toolbar dropped from v1 per ADR 0011 — right-click + keyboard + side panel cover discovery. |
 | `ai/`           | v2 ⬜    | Shape recognition, HTR, math — `transformers.js`.        |

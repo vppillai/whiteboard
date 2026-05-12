@@ -34,7 +34,7 @@
  */
 
 import './style.css'
-import type { BrushConfig, Sample, Stroke } from '@whiteboard/shared'
+import type { BrushConfig, ImageObject, Sample, Stroke } from '@whiteboard/shared'
 import { BRUSH_IDS, BRUSH_PRESETS } from './brushes'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
 import { createClearFlow } from './clearflow'
@@ -45,6 +45,15 @@ import { openExportPopover } from './exportpopover'
 import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid, invalidateGridColors } from './grid'
 import { createHelpOverlay } from './helpoverlay'
+import { _clearImageCache, evictImageElement, loadImageElement } from './imagecache'
+import {
+  type ImagePasteContext,
+  pasteImageFromBlob,
+  readImageFromClipboard,
+  readImageFromDataTransfer,
+  setupDragDropImagePaste,
+} from './imagepaste'
+import { type ImageStore, createLocalImageStore } from './imagestore'
 import { attachKeymap } from './keymap'
 import { MetricsCollector, bindHudToggle, createHud } from './metrics'
 import { type Op, type OpContext, applyOp, unapplyOp } from './ops'
@@ -55,6 +64,7 @@ import { createHelpPill } from './pill'
 import { attachPointer } from './pointer'
 import { dismissAllPopovers, getActiveTag } from './popover'
 import { applyCamera, clearLayer, drawStrokeOntoLayer, drawStrokePath, setupCanvas } from './render'
+import { renderImages } from './renderimages'
 import { createResetFlow } from './resetflow'
 import {
   getBrushId,
@@ -81,6 +91,7 @@ import {
   createEraserTool,
   createLassoTool,
   createPenTool,
+  createSelectTool,
 } from './tools'
 import { clearView, loadView, makeViewSaver } from './viewstate'
 import { fitToContent } from './zoomfit'
@@ -130,6 +141,13 @@ async function main(): Promise<void> {
   // returns (design archive at docs/superpowers/specs/2026-05-10-m3-sync-design.md),
   // a Y.Doc-backed store with the same surface plugs in here.
   const strokeStore: StrokeStore = createLocalStrokeStore()
+
+  // ImageStore — the equivalent seam for pasted images. Same shape as
+  // StrokeStore (load / insert / update / hard-delete / clear) but with
+  // a binary-blob side channel because images carry bytes that don't
+  // belong inside a small JSON record. v1 is local IDB-backed; sync of
+  // image binaries is deferred to M5.1 per ADR 0012.
+  const imageStore: ImageStore = createLocalImageStore()
 
   const root = document.getElementById('app')
   if (!root) throw new Error('#app not found')
@@ -211,6 +229,57 @@ async function main(): Promise<void> {
     console.warn('whiteboard/web: failed to load persisted strokes:', err)
   }
 
+  // Image state — parallel to strokes. Sorted by z (paste-time monotone)
+  // so iteration order is render order. nextImageZ() picks the next slot
+  // above the current max so newly-pasted images stack on top.
+  const images: ImageObject[] = []
+  const nextImageZ = (): number => {
+    let max = 0
+    for (const img of images) if (!img.deleted && img.z > max) max = img.z
+    return max + 1
+  }
+
+  // Images marked for batch delete via Cmd/Ctrl+A. Distinct from the Select
+  // tool's single-image selection (which carries handles + transform UX);
+  // this is just a "next Delete press also removes these" flag. Cleared on
+  // pointerdown / tool change / Esc / after delete. Visualized as a thin
+  // outline in the per-frame image render pass below.
+  const imagesMarkedForBatchDelete = new Set<string>()
+  const clearImageBatchSelection = (): void => {
+    if (imagesMarkedForBatchDelete.size === 0) return
+    imagesMarkedForBatchDelete.clear()
+    committedDirty = true
+  }
+
+  try {
+    const { images: persistedImages, compactedBlobRefs } = await imageStore.load()
+    images.push(...persistedImages)
+    // Compaction may have removed persisted-but-soft-deleted records from
+    // IDB. Evict any runtime cache entries that might be lingering for
+    // those blobRefs so memory is reclaimed too. (Cache is usually empty
+    // at startup; this matters when an HMR cycle leaves stale state.)
+    for (const blobRef of compactedBlobRefs) evictImageElement(blobRef)
+    // Eagerly prefetch the HTMLImageElement for each persisted image
+    // so the first frame after startup renders them immediately
+    // instead of skipping (cache returns null while load is pending).
+    // Fire-and-forget — each completed load triggers committedDirty.
+    // TODO(M5): cap parallel decode count or lazy-load on viewport entry
+    // when image counts grow (currently all decode in parallel at startup).
+    for (const img of persistedImages) {
+      void imageStore
+        .loadBlob(img.blobRef)
+        .then((blob) => (blob ? loadImageElement(img.blobRef, blob) : null))
+        .then(() => {
+          committedDirty = true
+        })
+        .catch((err) => {
+          console.warn(`whiteboard/web: failed to decode image ${img.id}:`, err)
+        })
+    }
+  } catch (err) {
+    console.warn('whiteboard/web: failed to load persisted images:', err)
+  }
+
   // ---------------------------------------------------------------------
   //  Pointer-coordinate mapping. Cached canvas rect (M1.5 perf fix).
   // ---------------------------------------------------------------------
@@ -247,6 +316,17 @@ async function main(): Promise<void> {
   // takes effect without a reload.
   const shouldUsePrediction = (): boolean => urlPredictFlag || getSettings().predictedEvents
 
+  // Single source of truth for "persist an image metadata change". Both the
+  // op-context (used by undo/redo apply) and the Select tool fire this on
+  // every move/resize/rotate, so consolidating the closure keeps the error
+  // policy (currently: warn-and-continue) in one place — future changes
+  // like surfacing a toast or retry only touch this line.
+  const persistImageMeta = (img: ImageObject): void => {
+    void imageStore.updateMeta(img).catch((err) => {
+      console.warn('whiteboard/web: failed to persist image metadata:', err)
+    })
+  }
+
   const opCtx: OpContext = {
     strokes,
     saveStroke: (s) => {
@@ -254,9 +334,27 @@ async function main(): Promise<void> {
         console.warn('whiteboard/web: failed to persist stroke:', err)
       })
     },
+    images,
+    saveImageMeta: persistImageMeta,
     markDirty: () => {
       committedDirty = true
     },
+  }
+
+  // Image-paste context. Three input paths converge through this object:
+  //   - Ctrl/Cmd+V → the document-level 'paste' event listener below
+  //   - Drag-drop file onto canvas → setupDragDropImagePaste below
+  // (Right-click → Paste image is deferred; see spec section 4. Browser
+  // paste-event covers >95% of the use case and is the conventional path.)
+  const imagePasteCtx: ImagePasteContext = {
+    imageStore,
+    images,
+    nextImageZ,
+    pushUndoOp,
+    markDirty: () => {
+      committedDirty = true
+    },
+    showInfoToast,
   }
 
   const penTool = createPenTool({
@@ -316,10 +414,20 @@ async function main(): Promise<void> {
     },
   })
 
-  const allTools: Record<'pen' | 'eraser' | 'lasso', Tool> = {
+  const selectTool = createSelectTool({
+    getImages: () => images,
+    saveImageMeta: persistImageMeta,
+    pushOp: (op) => pushUndoOp(op),
+    markCommittedDirty: () => {
+      committedDirty = true
+    },
+  })
+
+  const allTools: Record<'pen' | 'eraser' | 'lasso' | 'select', Tool> = {
     pen: penTool,
     eraser: eraserTool,
     lasso: lassoTool,
+    select: selectTool,
   }
   const tool: { current: Tool } = { current: penTool }
   // Apply the initial tool's cursor — `setTool` only fires on changes, so
@@ -370,11 +478,15 @@ async function main(): Promise<void> {
   document.body.appendChild(toolPill.el)
   const setTool = (id: ToolId): void => {
     if (tool.current.id === id) return
-    if (id !== 'pen' && id !== 'eraser' && id !== 'lasso') return // others land later
+    if (id !== 'pen' && id !== 'eraser' && id !== 'lasso' && id !== 'select') return
     tool.current.cleanup?.()
     tool.current = allTools[id]
     root.style.cursor = tool.current.cursor ?? ''
     toolPill.setActiveTool(id)
+    // Tool change drops Cmd+A image-batch marks. (Pen/Eraser etc. won't
+    // surface a "Delete deletes the marked images" affordance, so leaving
+    // them marked is misleading.)
+    clearImageBatchSelection()
     committedDirty = true // active tool changed; selection halos may toggle
   }
 
@@ -391,6 +503,13 @@ async function main(): Promise<void> {
     resolveColor: resolveInkColor,
     markCommittedDirty: () => {
       committedDirty = true
+    },
+    setCursor: (cursor) => {
+      // Set on root (which contains both canvas layers) so the cursor is
+      // visible regardless of which layer happens to be topmost or what
+      // the active tool's static `cursor` field is set to. Empty string
+      // restores the static tool cursor; useful when leaving a hit zone.
+      root.style.cursor = cursor || tool.current.cursor || ''
     },
   }
 
@@ -420,6 +539,15 @@ async function main(): Promise<void> {
     metrics.notePointerEvent(1)
   })
 
+  // When the pointer exits the canvas root, drop any tool-set hover cursor
+  // (resize / rotate / move) so we don't leave a "ready to rotate" affordance
+  // showing while the user is over the gear menu or off-canvas. Reset to the
+  // active tool's static cursor — `setCursor('')` restores it via the
+  // fallthrough in toolCtx.setCursor.
+  root.addEventListener('pointerleave', () => {
+    root.style.cursor = tool.current.cursor ?? ''
+  })
+
   // ---------------------------------------------------------------------
   //  Right-click → tool menu (capture phase + stopImmediatePropagation so
   //  the draw handler can't see right-click; pen drivers can fire
@@ -427,6 +555,71 @@ async function main(): Promise<void> {
   //  cleanly regardless).
   // ---------------------------------------------------------------------
   root.addEventListener('contextmenu', (e) => e.preventDefault())
+
+  // Any pointer-down on the canvas drops a pending Cmd+A image-batch
+  // selection. The marks are a transient "press Delete next" affordance;
+  // continuing into any other gesture (drawing, lasso, select) means the
+  // user moved on.
+  root.addEventListener(
+    'pointerdown',
+    () => {
+      clearImageBatchSelection()
+    },
+    { capture: true },
+  )
+
+  // ---------------------------------------------------------------------
+  //  Image paste — three input paths feeding one PasteImage op (see
+  //  imagepaste.ts):
+  //    - 'paste' event on document (Ctrl/Cmd+V; standard browser flow)
+  //    - 'drop' + 'dragover' on canvas (filesystem file or in-browser
+  //      image drag)
+  //    - Async clipboard read as a fallback when 'paste' has no image
+  //      (some browsers route screenshot-tool clipboard data only
+  //      through the async API)
+  // ---------------------------------------------------------------------
+  const onPaste = (e: ClipboardEvent): void => {
+    // Don't hijack paste in text-editable contexts (settings inputs, etc.).
+    const targetEl = e.target as HTMLElement | null
+    if (
+      targetEl instanceof HTMLInputElement ||
+      targetEl instanceof HTMLTextAreaElement ||
+      targetEl?.isContentEditable
+    ) {
+      return
+    }
+    const dt = e.clipboardData
+    if (!dt) return
+    // Position uses the last known cursor location (in client coords →
+    // board coords). Keyboard-triggered paste with no prior mouse activity
+    // falls back to viewport center.
+    const pasteAt = (): { x: number; y: number } => toBoard(lastPointer.x, lastPointer.y)
+    void (async () => {
+      const blob = await readImageFromDataTransfer(dt)
+      if (blob) {
+        e.preventDefault()
+        await pasteImageFromBlob(blob, pasteAt(), imagePasteCtx)
+        return
+      }
+      // Fallback: async clipboard API. Some browsers (Safari with screen-
+      // capture tools, certain Linux DEs) only expose image data through
+      // the async API, not the synchronous ClipboardEvent.
+      const fallback = await readImageFromClipboard()
+      if (fallback) {
+        e.preventDefault()
+        await pasteImageFromBlob(fallback, pasteAt(), imagePasteCtx)
+      }
+    })()
+  }
+  document.addEventListener('paste', onPaste)
+  registerCleanup(() => document.removeEventListener('paste', onPaste))
+
+  // Drag-drop. Attached to the canvas root so it fires regardless of
+  // which child element receives the drop. preventDefault inside the
+  // handlers wins over the page-level no-op so the OS doesn't navigate
+  // to a file:// URL.
+  registerCleanup(setupDragDropImagePaste(root, toBoard, imagePasteCtx))
+
   root.addEventListener(
     'pointerdown',
     (e) => {
@@ -458,10 +651,13 @@ async function main(): Promise<void> {
           openExportPopover({
             anchor: { x: e.clientX, y: e.clientY },
             getStrokes: () => strokes,
+            getImages: () => images,
+            imageStore,
             camera,
             viewportWidth: target.width,
             viewportHeight: target.height,
             onEmptyBoard: () => showInfoToast('Nothing to export'),
+            onSuccess: (fmt) => showInfoToast(`Exported ${fmt.toUpperCase()}`),
           })
         },
       })
@@ -510,9 +706,11 @@ async function main(): Promise<void> {
     refocusOnClose: root,
     onPerformClear: () => {
       // Destructive boundary by design — undo/redo stacks reset alongside
-      // the in-memory strokes and the IDB store. See ops.ts (clear is *not*
-      // an Op).
+      // the in-memory strokes, images, and the IDB stores. See ops.ts
+      // (clear is *not* an Op).
       strokes.length = 0
+      images.length = 0
+      imagesMarkedForBatchDelete.clear()
       undoStack.length = 0
       redoStack.length = 0
       camera.x = 0
@@ -521,8 +719,12 @@ async function main(): Promise<void> {
       committedDirty = true
       clearView()
       void strokeStore.clear().catch((err) => {
-        console.warn('whiteboard/web: clear failed:', err)
+        console.warn('whiteboard/web: stroke clear failed:', err)
       })
+      void imageStore.clear().catch((err) => {
+        console.warn('whiteboard/web: image clear failed:', err)
+      })
+      _clearImageCache()
     },
   })
 
@@ -595,13 +797,41 @@ async function main(): Promise<void> {
       },
       selectEraserSticky: () => setTool('eraser'),
       selectLassoTool: () => setTool('lasso'),
+      selectSelectTool: () => setTool('select'),
       deleteSelection: () => {
-        if (tool.current !== lassoTool) return false
-        return lassoTool.deleteSelection()
+        // Cmd+A also marks images for batch delete. Drain that set first
+        // (independent of which tool is active) so the user can hit
+        // Cmd+A → Delete from any tool to remove all images.
+        let didDelete = false
+        if (imagesMarkedForBatchDelete.size > 0) {
+          for (const id of imagesMarkedForBatchDelete) {
+            const img = images.find((i) => i.id === id)
+            if (!img || img.deleted) continue
+            img.deleted = true
+            void imageStore.updateMeta(img).catch((err) => {
+              console.warn('whiteboard/web: failed to persist image delete:', err)
+            })
+            pushUndoOp({ kind: 'delete-image', imageId: id })
+            didDelete = true
+          }
+          imagesMarkedForBatchDelete.clear()
+          committedDirty = true
+        }
+        if (tool.current === selectTool && selectTool.deleteSelected()) didDelete = true
+        if (tool.current === lassoTool && lassoTool.deleteSelection()) didDelete = true
+        return didDelete
       },
       selectAll: () => {
+        // Strokes via the existing lasso path …
         setTool('lasso')
         lassoTool.selectAll()
+        // … plus images via the batch-mark set so the next Delete removes
+        // them too. Visually a thin outline appears around each image (see
+        // the per-frame image render pass).
+        imagesMarkedForBatchDelete.clear()
+        for (const img of images) {
+          if (!img.deleted) imagesMarkedForBatchDelete.add(img.id)
+        }
         committedDirty = true
       },
       togglePanel,
@@ -616,6 +846,13 @@ async function main(): Promise<void> {
         }
         if (clearFlow.cancel()) handled = true
         if (dismissAllPopovers()) handled = true
+        // Esc also drops any Cmd+A image-batch marks before falling back
+        // to a tool switch — same semantic as Esc in lasso (clear the
+        // pending selection).
+        if (imagesMarkedForBatchDelete.size > 0) {
+          clearImageBatchSelection()
+          handled = true
+        }
         // Esc in lasso mode falls back to the pen tool. The lasso's `cleanup`
         // hook (called from `setTool`) clears any in-progress polygon and
         // selection state, so switching is a clean reset.
@@ -645,10 +882,13 @@ async function main(): Promise<void> {
           openExportPopover({
             anchor: lastPointer,
             getStrokes: () => strokes,
+            getImages: () => images,
+            imageStore,
             camera,
             viewportWidth: target.width,
             viewportHeight: target.height,
             onEmptyBoard: () => showInfoToast('Nothing to export'),
+            onSuccess: (fmt) => showInfoToast(`Exported ${fmt.toUpperCase()}`),
           })
       },
     }),
@@ -708,12 +948,29 @@ async function main(): Promise<void> {
         )
       }
 
-      // ----- Pass 3: committed layer (grid + composited strokes) -----
+      // ----- Pass 3: committed layer (grid + images + composited strokes) -----
       clearLayer(target.committed)
       applyCamera(target.committed, camera, target.dpr)
       drawGrid(target.committed, camera, target.width, target.height, getSettings().grid)
-      // Composite the offscreen onto committed in pixel space (identity
-      // transform) so the strokes pixel-for-pixel overlay the grid.
+
+      // Image layer — draws onto committed in board-space (camera transform
+      // is already applied above). Layered BELOW the strokes composite so
+      // pen strokes always draw on top of images, which is the whole point
+      // of the "paste an image and draw on top" feature. See renderimages.ts
+      // for the per-image draw loop (viewport cull, rotation, batch-delete
+      // outline).
+      renderImages({
+        images,
+        layer: target.committed,
+        camera,
+        viewBBox,
+        isMarkedForBatchDelete: (id) => imagesMarkedForBatchDelete.has(id),
+      })
+
+      // Composite the strokes offscreen onto committed in pixel space
+      // (identity transform) so the strokes pixel-for-pixel overlay the
+      // grid + images. The strokes layer already has the camera transform
+      // baked into its content.
       const cCtx = target.committed.ctx
       cCtx.save()
       cCtx.setTransform(1, 0, 0, 1, 0, 0)

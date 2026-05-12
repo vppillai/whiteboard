@@ -11,17 +11,24 @@
  */
 
 import type { Stroke } from '@whiteboard/shared'
+import type { ImageObject } from '@whiteboard/shared'
 import type { Camera } from './camera'
 import { type ExportFormat, type ExportScope, exportBoard } from './export'
+import type { ImageStore } from './imagestore'
 import { type Popover, showPopover } from './popover'
 
 export interface ExportPopoverOptions {
   anchor: { x: number; y: number }
   getStrokes: () => Stroke[]
+  /** Optional — supply alongside `imageStore` if the board has pasted images. */
+  getImages?: () => readonly ImageObject[]
+  imageStore?: ImageStore | null
   camera: Camera
   viewportWidth: number
   viewportHeight: number
   onEmptyBoard?: () => void
+  /** Fires after the file has been downloaded; callers surface a toast. */
+  onSuccess?: (format: ExportFormat) => void
 }
 
 // Persist scope across popover opens within a session — sensible default
@@ -79,10 +86,13 @@ export function openExportPopover(opts: ExportPopoverOptions): Popover {
     pill.addEventListener('click', () => {
       void exportBoard(fmt, lastScope, {
         getStrokes: opts.getStrokes,
+        getImages: opts.getImages,
+        imageStore: opts.imageStore,
         camera: opts.camera,
         viewportWidth: opts.viewportWidth,
         viewportHeight: opts.viewportHeight,
         onEmptyBoard: opts.onEmptyBoard,
+        onSuccess: opts.onSuccess,
       })
       popoverRef.current?.dismiss()
     })

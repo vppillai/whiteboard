@@ -8,9 +8,11 @@
  * for the per-stroke work.
  */
 
-import type { Stroke } from '@whiteboard/shared'
+import type { ImageObject, Stroke } from '@whiteboard/shared'
 import { makeCamera } from '../camera'
 import { drawGrid } from '../grid'
+import { getImageElement, loadImageElement } from '../imagecache'
+import type { ImageStore } from '../imagestore'
 import { type CanvasLayer, applyCamera, clearLayer, drawStrokeOntoLayer } from '../render'
 import type { SettingsV1 } from '../settings'
 import { effectiveOpacity, getStrokePath } from '../stroke'
@@ -24,15 +26,22 @@ export interface PngExportOptions {
 }
 
 /**
- * Render the board (theme bg + grid + strokes + erasure) into a PNG blob.
- * Background color reads from `--bg-canvas` so the export matches the user's
- * active theme — dark theme renders dark-bg PNG so light-ink strokes are
- * visible.
+ * Render the board (theme bg + grid + images + strokes + erasure) into a
+ * PNG blob. Background color reads from `--bg-canvas` so the export matches
+ * the user's active theme — dark theme renders dark-bg PNG so light-ink
+ * strokes are visible.
+ *
+ * Images render in the same z-order as on-screen (paste-time monotonic),
+ * below the strokes composite. The `imageStore` is consulted to load any
+ * image whose HTMLImageElement isn't already in the runtime cache (e.g.
+ * exporting immediately after paste before the cache promise settled).
  */
-export function exportPNG(
+export async function exportPNG(
   strokes: Stroke[],
+  images: readonly ImageObject[],
   bounds: Bounds,
   settings: SettingsV1,
+  imageStore: ImageStore | null,
   options: PngExportOptions = {},
 ): Promise<Blob> {
   const dpr = options.dpr ?? 1
@@ -48,6 +57,38 @@ export function exportPNG(
   camera.x = bounds.x
   camera.y = bounds.y
   camera.scale = 1
+
+  // Pre-resolve image elements: the export must be synchronous past this
+  // point so we don't drop frames waiting on Blob decodes mid-render.
+  // Per-image failures are isolated — one bad decode shouldn't abort the
+  // whole export (`Promise.allSettled`, not `Promise.all`). The bad image
+  // is silently dropped from the output, matching the SVG path's
+  // "missing data URI = skip" semantics.
+  const visibleImages = [...images].filter((i) => !i.deleted).sort((a, b) => a.z - b.z)
+  const imageEls = new Map<string, HTMLImageElement>()
+  if (imageStore) {
+    const results = await Promise.allSettled(
+      visibleImages.map(async (img) => {
+        const cached = getImageElement(img.blobRef)
+        if (cached) return { id: img.id, el: cached }
+        const blob = await imageStore.loadBlob(img.blobRef)
+        if (!blob) return null
+        const el = await loadImageElement(img.blobRef, blob)
+        return { id: img.id, el }
+      }),
+    )
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value) imageEls.set(r.value.id, r.value.el)
+      else if (r.status === 'rejected') {
+        console.warn('whiteboard/export: image decode failed during PNG export:', r.reason)
+      }
+    }
+  } else {
+    for (const img of visibleImages) {
+      const el = getImageElement(img.blobRef)
+      if (el) imageEls.set(img.id, el)
+    }
+  }
 
   // ----- Pass 1: per-stroke draw + destination-out onto strokes layer -----
   clearLayer(strokesLayer)
@@ -66,7 +107,7 @@ export function exportPNG(
     )
   }
 
-  // ----- Pass 2: committed = theme bg + grid + composited strokes -----
+  // ----- Pass 2: committed = theme bg + grid + images + composited strokes -----
   clearLayer(committedLayer)
   const cCtx = committedLayer.ctx
   // Theme background — read CSS variable at export time so light / dark
@@ -78,6 +119,25 @@ export function exportPNG(
   cCtx.restore()
   applyCamera(committedLayer, camera, dpr)
   drawGrid(committedLayer, camera, bounds.width, bounds.height, settings.grid)
+  // Images go between grid and strokes — they're "below" the strokes
+  // visually. drawImage uses the current board-space transform; rotation
+  // is applied by translating to the image center, rotating, drawing
+  // centered, and restoring.
+  for (const img of visibleImages) {
+    const el = imageEls.get(img.id)
+    if (!el) continue
+    const { x, y, w: iw, h: ih } = img.transform
+    const r = img.rotation ?? 0
+    if (r === 0) {
+      cCtx.drawImage(el, x, y, iw, ih)
+    } else {
+      cCtx.save()
+      cCtx.translate(x + iw / 2, y + ih / 2)
+      cCtx.rotate(r)
+      cCtx.drawImage(el, -iw / 2, -ih / 2, iw, ih)
+      cCtx.restore()
+    }
+  }
   cCtx.save()
   cCtx.setTransform(1, 0, 0, 1, 0, 0)
   cCtx.drawImage(strokesLayer.el, 0, 0)

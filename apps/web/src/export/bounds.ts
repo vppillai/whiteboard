@@ -6,8 +6,9 @@
  * viewBox / PDF page to the actual drawn content rather than the viewport.
  */
 
-import type { Stroke } from '@whiteboard/shared'
+import type { ImageObject, Stroke } from '@whiteboard/shared'
 import type { Camera } from '../camera'
+import { imageAABB } from '../imagegeom'
 import { getStrokeBBox } from '../stroke'
 
 export interface Bounds {
@@ -19,7 +20,10 @@ export interface Bounds {
 
 export const EXPORT_MARGIN = 32
 
-export function computeBoardBounds(strokes: Stroke[]): Bounds | null {
+export function computeBoardBounds(
+  strokes: Stroke[],
+  images: readonly ImageObject[] = [],
+): Bounds | null {
   let minX = Number.POSITIVE_INFINITY
   let minY = Number.POSITIVE_INFINITY
   let maxX = Number.NEGATIVE_INFINITY
@@ -33,6 +37,17 @@ export function computeBoardBounds(strokes: Stroke[]): Bounds | null {
     if (bbox.minY < minY) minY = bbox.minY
     if (bbox.maxX > maxX) maxX = bbox.maxX
     if (bbox.maxY > maxY) maxY = bbox.maxY
+    any = true
+  }
+  for (const img of images) {
+    if (img.deleted) continue
+    // Rotation-aware AABB so a rotated image's true on-screen extent
+    // contributes to the export bounds.
+    const bb = imageAABB(img)
+    if (bb.minX < minX) minX = bb.minX
+    if (bb.minY < minY) minY = bb.minY
+    if (bb.maxX > maxX) maxX = bb.maxX
+    if (bb.maxY > maxY) maxY = bb.maxY
     any = true
   }
   if (!any) return null

@@ -39,6 +39,10 @@ export interface KeyHandlers {
   selectEraserSticky: () => void
   /** Activate the lasso tool. Bound to `S`. */
   selectLassoTool: () => void
+  /** Activate the Select tool for image manipulation. Bound to `V` —
+   *  the Figma / Sketch / Excalidraw convention for the pointer/select
+   *  tool. */
+  selectSelectTool: () => void
   /** Delete the active selection (lasso). Returns `true` if anything was
    *  actually deleted; the dispatcher uses this to decide whether to
    *  preventDefault (so Backspace doesn't trigger browser history-back). */
@@ -168,6 +172,11 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       }
       if (k === 's') {
         handlers.selectLassoTool()
+        return
+      }
+      // V — Select tool (image manipulation). Figma/Sketch convention.
+      if (k === 'v') {
+        handlers.selectSelectTool()
         return
       }
       // F — toggle distraction-free mode (hides chrome). M2.

@@ -1,1 +1,1 @@
-export type { Sample, BrushConfig, Stroke } from './types'
+export type { Sample, BrushConfig, Stroke, ImageObject } from './types'

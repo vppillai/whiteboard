@@ -32,6 +32,7 @@ const TOOLS: readonly ToolDef[] = [
   { id: 'pen', label: 'Draw', enabled: true },
   { id: 'eraser', label: 'Eraser', enabled: true },
   { id: 'lasso', label: 'Lasso', enabled: true },
+  { id: 'select', label: 'Select', enabled: true },
   { id: 'laser', label: 'Laser', enabled: false },
   { id: 'text', label: 'Text', enabled: false },
 ]

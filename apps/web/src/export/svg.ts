@@ -12,13 +12,24 @@
  * in a Blob — so tests can verify content without jsdom.
  */
 
-import type { Stroke } from '@whiteboard/shared'
+import type { ImageObject, Stroke } from '@whiteboard/shared'
 import { getStroke } from 'perfect-freehand'
+import { imageAABB, imageCenter } from '../imagegeom'
 import type { GridType, SettingsV1 } from '../settings'
 import { resolveInkColor } from '../theme'
 import type { Bounds } from './bounds'
 
-export function exportSVG(strokes: Stroke[], bounds: Bounds, settings: SettingsV1): Blob {
+/** Image bytes pre-encoded as a data URI, keyed by image id. The caller
+ *  prepares this so the serializer stays pure-string-out (no DOM/IO). */
+export type ImageDataUriMap = Map<string, string>
+
+export function exportSVG(
+  strokes: Stroke[],
+  images: readonly ImageObject[],
+  imageDataUris: ImageDataUriMap,
+  bounds: Bounds,
+  settings: SettingsV1,
+): Blob {
   // Resolve theme tokens at export time so the SVG matches the user's
   // active theme. Dark theme → dark bg + lighter grid; light theme → light
   // bg + darker grid. Strokes use resolveInkColor below (same path). Bun's
@@ -45,6 +56,36 @@ export function exportSVG(strokes: Stroke[], bounds: Bounds, settings: SettingsV
     parts.push(renderGridDefs(settings.grid.type, settings.grid.spacing, gridDot, gridLine))
     parts.push(
       `<rect x="${fmt(bounds.x)}" y="${fmt(bounds.y)}" width="${fmt(bounds.width)}" height="${fmt(bounds.height)}" fill="url(#wb-grid)"/>`,
+    )
+  }
+
+  // Images (z-order; below strokes). One <image> per non-deleted image
+  // whose data URI was prepared by the caller AND whose rotation-aware
+  // bounding box intersects the export bounds — the latter prevents
+  // off-screen images from bloating a `scope: 'visible'` export. Missing
+  // data URIs are skipped silently so a single store miss doesn't abort
+  // the whole SVG.
+  //
+  // Rotation: SVG's `transform="rotate(deg cx cy)"` rotates around the
+  // image center. Radians → degrees because SVG takes degrees.
+  const boundsMaxX = bounds.x + bounds.width
+  const boundsMaxY = bounds.y + bounds.height
+  const sortedImages = [...images].filter((i) => !i.deleted).sort((a, b) => a.z - b.z)
+  for (const img of sortedImages) {
+    const href = imageDataUris.get(img.id)
+    if (!href) continue
+    const bb = imageAABB(img)
+    if (bb.maxX < bounds.x || bb.minX > boundsMaxX) continue
+    if (bb.maxY < bounds.y || bb.minY > boundsMaxY) continue
+    const { x, y, w, h } = img.transform
+    const r = img.rotation ?? 0
+    const center = imageCenter(img.transform)
+    const transformAttr =
+      r === 0
+        ? ''
+        : ` transform="rotate(${fmt((r * 180) / Math.PI)} ${fmt(center.x)} ${fmt(center.y)})"`
+    parts.push(
+      `<image href="${escapeAttr(href)}" x="${fmt(x)}" y="${fmt(y)}" width="${fmt(w)}" height="${fmt(h)}" preserveAspectRatio="none"${transformAttr}/>`,
     )
   }
 
@@ -114,10 +155,13 @@ function renderGridDefs(
 }
 
 function escapeAttr(s: string): string {
-  // Minimal escaping for color strings inserted into SVG attributes. Theme
-  // tokens are rgb()/oklch()/hex — none of these contain '<' or '"', but
-  // be defensive against future tokens with quotes.
-  return s.replace(/"/g, '&quot;').replace(/</g, '&lt;')
+  // Escape the SVG attribute-value reserved characters. Originally written
+  // for color strings (which only need '<' and '"' guards in practice);
+  // now also used for image data-URI hrefs, which can legitimately contain
+  // '&' as part of a charset parameter or similar. '&' must be escaped
+  // FIRST so the subsequent replacements don't double-encode the entity
+  // (e.g. `&quot;` would become `&amp;quot;`).
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 }
 
 function outlineToPath(outline: number[][]): string {
