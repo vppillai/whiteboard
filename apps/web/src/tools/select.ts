@@ -87,6 +87,12 @@ export interface SelectTool extends Tool {
    *  in-memory ImageObject so the caller can look up blobRef / transform
    *  without a second `getImages().find()` pass. */
   getSelectedImage(): ImageObject | null
+  /** Force-select an image by id (e.g. after paste so the user can
+   *  immediately position it). Caller is responsible for marking the
+   *  canvas dirty and switching the active tool to Select first;
+   *  this method only updates internal selection state. Silently does
+   *  nothing if no image with `id` exists or it is soft-deleted. */
+  selectImageById(id: string): void
   /** Soft-delete the currently-selected image and emit a delete-image op.
    *  No-op if nothing is selected. Returns true if anything was deleted. */
   deleteSelected(): boolean
@@ -696,6 +702,17 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       // (e.g. by a Cmd+A batch flow racing with a stale selection).
       if (!img || img.deleted) return null
       return img
+    },
+
+    selectImageById(id: string): void {
+      const img = deps.getImages().find((i) => i.id === id)
+      if (!img || img.deleted) return
+      selectedImageId = id
+      // Any in-flight drag from a prior pointer interaction is stale
+      // when the selection is force-changed externally; drop it so the
+      // next pointerdown starts cleanly.
+      drag = null
+      deps.markCommittedDirty()
     },
 
     deleteSelected(): boolean {

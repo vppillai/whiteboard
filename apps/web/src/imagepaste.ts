@@ -35,6 +35,13 @@ export interface ImagePasteContext {
   pushUndoOp: (op: Op) => void
   markDirty: () => void
   showInfoToast: (msg: string) => void
+  /** Called after a paste has fully completed (image persisted + op pushed).
+   *  main.ts uses this to auto-switch to the Select tool and select the
+   *  just-pasted image so the user can position it without an extra
+   *  tool-switch step. Decoupled from the paste pipeline so callers can
+   *  opt out (e.g. a programmatic batch import shouldn't hijack the
+   *  active tool). */
+  onPasteSuccess?: (id: string) => void
 }
 
 /**
@@ -96,6 +103,10 @@ export async function pasteImageFromBlob(
     void loadImageElement(id, blob).then(() => ctx.markDirty())
     ctx.pushUndoOp({ kind: 'paste-image', imageId: id })
     ctx.markDirty()
+    // Fire the post-paste hook AFTER persistence + undo-op are in place,
+    // so a tool-switch race (e.g. Select tool reading `images` before the
+    // push) can't see a half-applied state.
+    ctx.onPasteSuccess?.(id)
   } catch (err) {
     console.warn('whiteboard/web: failed to paste image:', err)
     // Roll back in-memory state to keep the two stores consistent on error.

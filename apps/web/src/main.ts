@@ -356,6 +356,14 @@ async function main(): Promise<void> {
       committedDirty = true
     },
     showInfoToast,
+    // Auto-switch to Select + select the new image so the user can drag
+    // it into place immediately. `setTool` / `selectTool` are declared
+    // further down — both are populated by the time a paste event can
+    // actually fire (no TDZ risk since the body only runs on user input).
+    onPasteSuccess: (id) => {
+      setTool('select')
+      selectTool.selectImageById(id)
+    },
   }
 
   const penTool = createPenTool({
