@@ -88,6 +88,11 @@ export interface SelectTool extends Tool {
 export function createSelectTool(deps: SelectToolDeps): SelectTool {
   let selectedImageId: string | null = null
   let drag: DragState | null = null
+  // Timestamp of the most recent pointerdown on the rotation handle.
+  // A second pointerdown on the same handle within DBLCLICK_MS resets
+  // the image's rotation to 0 (and does NOT start a drag).
+  let lastRotateHandleDownAt = 0
+  const ROTATE_DBLCLICK_MS = 350
 
   /** Top-most non-deleted image whose rotated rect contains the board-space
    *  point. Handles take priority — see hitTest. */
@@ -351,6 +356,21 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       // Rotation handle takes top priority — sits above the image and could
       // overlap a resize handle on a tiny image, so we check it first.
       if (sel && isOverRotationHandle(bx, by, sel, ctx.camera.scale)) {
+        // Double-click on the rotation handle resets rotation to 0.
+        // Doesn't start a drag — just snaps and pushes one op.
+        const now = performance.now()
+        const isDoubleClick = now - lastRotateHandleDownAt < ROTATE_DBLCLICK_MS
+        lastRotateHandleDownAt = isDoubleClick ? 0 : now
+        if (isDoubleClick) {
+          const before = sel.rotation ?? 0
+          if (before !== 0) {
+            sel.rotation = undefined
+            deps.saveImageMeta(sel)
+            deps.pushOp({ kind: 'rotate-image', imageId: sel.id, before, after: 0 })
+            ctx.markCommittedDirty()
+          }
+          return
+        }
         const center = imageCenter(sel.transform)
         const startAngle = Math.atan2(by - center.y, bx - center.x)
         drag = {
