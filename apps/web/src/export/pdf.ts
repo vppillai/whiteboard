@@ -7,7 +7,7 @@
  * the aspect ratio.
  */
 
-import type { ImageObject, Stroke } from '@whiteboard/shared'
+import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
 import type { ImageStore } from '../imagestore'
 import type { SettingsV1 } from '../settings'
 import type { Bounds } from './bounds'
@@ -16,6 +16,7 @@ import { exportPNG } from './png'
 export async function exportPDF(
   strokes: Stroke[],
   images: readonly ImageObject[],
+  texts: readonly TextObject[],
   bounds: Bounds,
   settings: SettingsV1,
   imageStore: ImageStore | null,
@@ -23,8 +24,9 @@ export async function exportPDF(
   const { jsPDF } = await import('jspdf')
   // Render the embedded PNG at 2× DPR so the PDF rasterization is sharp
   // when zoomed or printed — 1× looked soft in the M2 feel-test. The PNG
-  // path now includes images, so the wrapped PDF inherits them for free.
-  const png = await exportPNG(strokes, images, bounds, settings, imageStore, { dpr: 2 })
+  // path now includes images + texts, so the wrapped PDF inherits both
+  // for free.
+  const png = await exportPNG(strokes, images, texts, bounds, settings, imageStore, { dpr: 2 })
   const dataUrl = await blobToDataURL(png)
   const orientation: 'l' | 'p' = bounds.width > bounds.height ? 'l' : 'p'
   const pdf = new jsPDF({

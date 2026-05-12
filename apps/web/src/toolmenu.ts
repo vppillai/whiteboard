@@ -34,7 +34,7 @@ const TOOLS: readonly ToolDef[] = [
   { id: 'lasso', label: 'Lasso', enabled: true },
   { id: 'select', label: 'Select', enabled: true },
   { id: 'laser', label: 'Laser', enabled: true },
-  { id: 'text', label: 'Text', enabled: false },
+  { id: 'text', label: 'Text', enabled: true },
 ]
 
 export interface ToolMenuOptions {

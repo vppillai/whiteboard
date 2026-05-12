@@ -20,8 +20,9 @@
  * when the user confirms a clear.
  */
 
-import type { ImageObject, Stroke } from '@whiteboard/shared'
+import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
 import { addErasedStamps, invalidateStrokeBBox, removeErasedStamps } from './stroke'
+import { resizeToFit as resizeTextRect } from './textgeom'
 
 export interface StampEdit {
   strokeId: string
@@ -71,6 +72,42 @@ export type Op =
       before: number
       after: number
     }
+  /**
+   * Create a text object. Mirrors 'paste-image': by the time the op is
+   * pushed the text record is already in `ctx.texts` with deleted=false
+   * and persisted via TextStore. Apply (=redo) flips deleted→false;
+   * unapply (=undo) flips deleted→true. The text bytes stay in IDB
+   * across undo cycles so redo is cheap.
+   */
+  | { kind: 'create-text'; textId: string }
+  /** Soft-delete a text. Symmetric to 'create-text'. */
+  | { kind: 'delete-text'; textId: string }
+  /**
+   * Move or resize a text rect: swap the transform. Resize for text
+   * happens implicitly on every edit (auto-fit to measured content),
+   * which is its own 'edit-text' op — explicit `transform-text` is the
+   * pure-move flow only. Coalesced at drag-end.
+   */
+  | {
+      kind: 'transform-text'
+      textId: string
+      before: TextObject['transform']
+      after: TextObject['transform']
+    }
+  /**
+   * Edit a text's content / font / color in one undoable step. Coalesced
+   * across the whole edit session (typing N keys + B/I/U toggles + font
+   * change collapses to a single op pushed when edit mode exits). Stores
+   * the full before/after object payload because individual field deltas
+   * would multiply op kinds — the payload is small (string + a few
+   * fields) so the simplicity is worth the bytes.
+   */
+  | {
+      kind: 'edit-text'
+      textId: string
+      before: { content: string; font: TextObject['font']; color: string }
+      after: { content: string; font: TextObject['font']; color: string }
+    }
 
 export interface OpContext {
   /** All strokes (including soft-deleted ones). Mutated in place by ops. */
@@ -83,6 +120,10 @@ export interface OpContext {
    *  Bytes do not change after the initial paste, so this is the metadata-only
    *  fast path, not the binary-carrying saveImage from storage.ts. */
   saveImageMeta: (img: ImageObject) => void
+  /** All texts (including soft-deleted ones). Mutated in place by text ops. */
+  texts: TextObject[]
+  /** Persist a single text record. */
+  saveText: (t: TextObject) => void
   /** Mark the committed canvas dirty for the next render. */
   markDirty: () => void
 }
@@ -114,6 +155,18 @@ export function applyOp(op: Op, ctx: OpContext): void {
     case 'rotate-image':
       setImageRotation(ctx, op.imageId, op.after)
       break
+    case 'create-text':
+      flipTextDeleted(ctx, op.textId, false)
+      break
+    case 'delete-text':
+      flipTextDeleted(ctx, op.textId, true)
+      break
+    case 'transform-text':
+      setTextTransform(ctx, op.textId, op.after)
+      break
+    case 'edit-text':
+      setTextEdit(ctx, op.textId, op.after)
+      break
   }
   ctx.markDirty()
 }
@@ -144,6 +197,18 @@ export function unapplyOp(op: Op, ctx: OpContext): void {
       break
     case 'rotate-image':
       setImageRotation(ctx, op.imageId, op.before)
+      break
+    case 'create-text':
+      flipTextDeleted(ctx, op.textId, true)
+      break
+    case 'delete-text':
+      flipTextDeleted(ctx, op.textId, false)
+      break
+    case 'transform-text':
+      setTextTransform(ctx, op.textId, op.before)
+      break
+    case 'edit-text':
+      setTextEdit(ctx, op.textId, op.before)
       break
   }
   ctx.markDirty()
@@ -209,4 +274,39 @@ function setImageRotation(ctx: OpContext, id: string, rotation: number): void {
   if (!img) return
   img.rotation = rotation || undefined
   ctx.saveImageMeta(img)
+}
+
+function flipTextDeleted(ctx: OpContext, id: string, deleted: boolean): void {
+  const t = ctx.texts.find((x) => x.id === id)
+  if (!t) return
+  t.deleted = deleted || undefined
+  ctx.saveText(t)
+}
+
+function setTextTransform(ctx: OpContext, id: string, transform: TextObject['transform']): void {
+  const t = ctx.texts.find((x) => x.id === id)
+  if (!t) return
+  t.transform = { ...transform }
+  ctx.saveText(t)
+}
+
+/** Apply an edit-text op's payload to the matching text. Recomputes the
+ *  transform.w/h via measureText so the rect always matches content;
+ *  the op stores only the content + font + color, not the derived size. */
+function setTextEdit(
+  ctx: OpContext,
+  id: string,
+  payload: { content: string; font: TextObject['font']; color: string },
+): void {
+  const t = ctx.texts.find((x) => x.id === id)
+  if (!t) return
+  t.content = payload.content
+  t.font = { ...payload.font }
+  t.color = payload.color
+  // Re-fit the rect to the new content + font so move/resize stay in sync
+  // with edit. `resizeTextRect` measures via a detached canvas and falls
+  // back to a heuristic when no DOM is present (e.g. bun:test).
+  const measured = resizeTextRect(t)
+  t.transform = measured.transform
+  ctx.saveText(t)
 }

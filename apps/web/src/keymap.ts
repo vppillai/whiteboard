@@ -46,6 +46,17 @@ export interface KeyHandlers {
   /** Activate the laser pointer tool. Bound to `L`. Ephemeral fading
    *  trail for presentations; nothing persisted. */
   selectLaserTool: () => void
+  /** Activate the text tool. Bound to `T`. (Theme cycling moved to
+   *  `Shift+T` to free up the unmodified key for this — per the v1.2
+   *  user request that text be primary on T.) */
+  selectTextTool: () => void
+  /** Toggle bold / italic / underline on the active text. Routed from
+   *  Cmd/Ctrl+B/I/U. The text tool itself intercepts these inside its
+   *  contenteditable; the global keymap handlers are a backup for the
+   *  edge case where the editable isn't the focused element. */
+  toggleTextBold: () => void
+  toggleTextItalic: () => void
+  toggleTextUnderline: () => void
   /** Delete the active selection (lasso). Returns `true` if anything was
    *  actually deleted; the dispatcher uses this to decide whether to
    *  preventDefault (so Backspace doesn't trigger browser history-back). */
@@ -126,6 +137,22 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
         preventAndCall(e, handlers.openExport)
         return
       }
+      // Cmd/Ctrl+B/I/U — text formatting. Only meaningful inside text
+      // edit mode; the handler itself no-ops when not editing, so
+      // intercepting unconditionally is safe (and lets us preventDefault
+      // so the browser doesn't try its own bold/italic/underline action).
+      if (!shift && k === 'b') {
+        preventAndCall(e, handlers.toggleTextBold)
+        return
+      }
+      if (!shift && k === 'i') {
+        preventAndCall(e, handlers.toggleTextItalic)
+        return
+      }
+      if (!shift && k === 'u') {
+        preventAndCall(e, handlers.toggleTextUnderline)
+        return
+      }
     }
 
     // Esc cancels — dispatcher prevents default only if anything was actually
@@ -146,7 +173,8 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
     // Unmodified single-letter bindings (ignore auto-repeat).
     if (!meta && !alt && !shift && !e.repeat) {
       if (k === 't') {
-        handlers.toggleTheme()
+        // T enters Text mode (v1.2). Theme cycle moved to Shift+T.
+        handlers.selectTextTool()
         return
       }
       if (k === 'c') {
@@ -199,6 +227,11 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       // Shift+E: sticky eraser (the counterpart to plain E's spring-load).
       if (k === 'e') {
         handlers.selectEraserSticky()
+        return
+      }
+      // Shift+T cycles theme (moved from plain T when text gained T in v1.2).
+      if (k === 't') {
+        handlers.toggleTheme()
         return
       }
       // Shift+[ / Shift+] — cycle curated palette. M2.

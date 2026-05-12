@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import type { ImageObject, Stroke } from '@whiteboard/shared'
-import { partitionForCompaction, partitionImagesForCompaction } from './storage'
+import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
+import {
+  partitionForCompaction,
+  partitionImagesForCompaction,
+  partitionTextsForCompaction,
+} from './storage'
 
 function mkImage(id: string, opts: { z?: number; deleted?: boolean } = {}): ImageObject {
   return {
@@ -99,6 +103,54 @@ describe('storage/partitionImagesForCompaction', () => {
 
   test('empty input → empty output', () => {
     const { kept, toCompact } = partitionImagesForCompaction([])
+    expect(kept).toEqual([])
+    expect(toCompact).toEqual([])
+  })
+})
+
+function mkText(id: string, opts: { deleted?: boolean } = {}): TextObject {
+  return {
+    id,
+    content: 'hello',
+    font: { family: 'mono', size: 12, bold: false, italic: false, underline: false },
+    color: 'ink',
+    transform: { x: 0, y: 0, w: 40, h: 16 },
+    z: 1,
+    createdAt: 0,
+    ...(opts.deleted !== undefined ? { deleted: opts.deleted } : {}),
+  }
+}
+
+describe('storage/partitionTextsForCompaction', () => {
+  test('keeps non-deleted texts', () => {
+    const ts = [mkText('a'), mkText('b'), mkText('c')]
+    const { kept, toCompact } = partitionTextsForCompaction(ts)
+    expect(kept.map((t) => t.id)).toEqual(['a', 'b', 'c'])
+    expect(toCompact).toEqual([])
+  })
+
+  test('moves deleted=true texts to toCompact (id only)', () => {
+    const ts = [
+      mkText('a'),
+      mkText('b', { deleted: true }),
+      mkText('c'),
+      mkText('d', { deleted: true }),
+    ]
+    const { kept, toCompact } = partitionTextsForCompaction(ts)
+    expect(kept.map((t) => t.id)).toEqual(['a', 'c'])
+    // Unlike images, text records have no companion blob store — the
+    // compaction identifier is just `id`, no `blobRef` tuple needed.
+    expect(toCompact).toEqual(['b', 'd'])
+  })
+
+  test('treats deleted=false as kept', () => {
+    const { kept, toCompact } = partitionTextsForCompaction([mkText('a', { deleted: false })])
+    expect(kept).toHaveLength(1)
+    expect(toCompact).toEqual([])
+  })
+
+  test('empty input → empty output', () => {
+    const { kept, toCompact } = partitionTextsForCompaction([])
     expect(kept).toEqual([])
     expect(toCompact).toEqual([])
   })

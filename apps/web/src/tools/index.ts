@@ -17,3 +17,4 @@ export {
 } from './lasso'
 export { createLaserTool } from './laser'
 export { createSelectTool, type SelectTool } from './select'
+export { createTextTool, type TextTool } from './text'

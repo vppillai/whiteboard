@@ -79,6 +79,65 @@ export interface ImageObject {
   deleted?: boolean
 }
 
+/**
+ * Closed set of font families the text tool exposes. Each maps to a CSS
+ * font-family string at render time (see `apps/web/src/textgeom.ts`). The
+ * names are stable identifiers — the actual CSS stack can evolve (fallback
+ * fonts added, default size adjusted) without rewriting persisted records.
+ */
+export type TextFontFamily = 'mono' | 'sans' | 'serif'
+
+/**
+ * Text object on the canvas — a first-class non-stroke object placed and
+ * edited by the dedicated Text tool (`T` key). Rendered above images and
+ * below strokes so the pen draws on top of text the same way it draws on
+ * top of images.
+ *
+ * Formatting is OBJECT-LEVEL (the whole TextObject is bold / italic /
+ * underline, or none of the above). Range-styled rich text within a text
+ * isn't supported in v1 — Figma-basic / Excalidraw model. The
+ * contenteditable handles cursor + selection during editing; persisted
+ * content is plain text with `\n` line separators.
+ *
+ * Width / height are stored after measurement so the renderer doesn't
+ * have to re-measure every frame, but they're recomputed whenever
+ * content / font / size / bold / italic changes (underline only affects
+ * pixels, not metrics).
+ *
+ * The font choice is a closed enum (`TextFontFamily`); the actual CSS
+ * font-family stack lives in the render module so the persisted record
+ * stays small and migration-safe.
+ */
+export interface TextObject {
+  id: string
+  /** Multi-line content with '\n' separators. Plain text. */
+  content: string
+  font: {
+    family: TextFontFamily
+    /** Pixel size in board space. */
+    size: number
+    bold: boolean
+    italic: boolean
+    underline: boolean
+  }
+  /** Color token — same scheme as brushes ('ink' for theme-aware, or hex). */
+  color: string
+  /** Top-left corner + measured w/h in board space. Resize at v1 means
+   *  font-size change; w/h are recomputed from measurement on every edit. */
+  transform: { x: number; y: number; w: number; h: number }
+  /** Rotation in radians around the rect center. Defaults to 0 when absent.
+   *  Mirrors `ImageObject.rotation` for future symmetry; v1 text tool doesn't
+   *  expose rotation UI, but the field is present so persisted records survive
+   *  if rotation lands later. */
+  rotation?: number
+  /** Stack order against other texts + images (paste-time monotone). */
+  z: number
+  /** Wall-clock ms; tie-breaker plus debug aid. */
+  createdAt: number
+  /** Soft-delete (matches Stroke / ImageObject pattern; preserves undo). */
+  deleted?: boolean
+}
+
 export interface Stroke {
   id: string
   brush: BrushConfig

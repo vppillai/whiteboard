@@ -14,18 +14,24 @@
  * scan in the render loop and the heavy bytes pageable independently.
  */
 
-import type { ImageObject, Stroke } from '@whiteboard/shared'
+import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
 
 const DB_NAME = 'whiteboard-local'
 /**
- * v2 bump introduces 'images' and 'images-blob' stores for the image-paste
- * feature. Existing databases at v1 upgrade in place — the onupgradeneeded
- * branch creates only the missing stores so stroke data is preserved.
+ * Schema history:
+ *   v1: strokes
+ *   v2: + images + images-blob (M2.2 — image paste)
+ *   v3: + texts (v1.2 — text tool)
+ *
+ * Existing databases at any earlier version upgrade in place: the
+ * onupgradeneeded branch creates only the missing stores so prior data
+ * is preserved across the schema bump. There is no downgrade path.
  */
-const DB_VERSION = 2
+const DB_VERSION = 3
 const STORE_STROKES = 'strokes'
 const STORE_IMAGES = 'images'
 const STORE_IMAGES_BLOB = 'images-blob'
+const STORE_TEXTS = 'texts'
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -49,6 +55,11 @@ function getDb(): Promise<IDBDatabase> {
           // blob store is keyed manually — the Blob itself can't carry
           // an in-band key the way records do.
           db.createObjectStore(STORE_IMAGES_BLOB)
+        }
+        // texts added in v3. No companion blob store — text records carry
+        // their full payload inline (plain string `content`).
+        if (!db.objectStoreNames.contains(STORE_TEXTS)) {
+          db.createObjectStore(STORE_TEXTS, { keyPath: 'id' })
         }
       }
       req.onsuccess = () => resolve(req.result)
@@ -257,6 +268,83 @@ export async function clearAllImages(): Promise<void> {
     const tx = db.transaction([STORE_IMAGES, STORE_IMAGES_BLOB], 'readwrite')
     tx.objectStore(STORE_IMAGES).clear()
     tx.objectStore(STORE_IMAGES_BLOB).clear()
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+// ─── Text persistence ──────────────────────────────────────────────────────
+
+/**
+ * Persist a text object. Single-store (no companion blob) since text
+ * records carry their payload inline. saveText / saveTextMeta collapse to
+ * the same operation because there's no metadata/binary split here.
+ */
+export async function saveText(text: TextObject): Promise<void> {
+  const db = await getDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_TEXTS, 'readwrite')
+    tx.objectStore(STORE_TEXTS).put(text)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'))
+  })
+}
+
+/**
+ * Pure compaction predicate for texts. Mirrors the stroke / image variants:
+ * a text with `deleted === true` from a prior session has no undo path
+ * (undo stack reset on reload), so it's safe to hard-delete.
+ */
+export function partitionTextsForCompaction(texts: readonly TextObject[]): {
+  kept: TextObject[]
+  toCompact: string[]
+} {
+  const kept: TextObject[] = []
+  const toCompact: string[] = []
+  for (const t of texts) {
+    if (t.deleted === true) toCompact.push(t.id)
+    else kept.push(t)
+  }
+  return { kept, toCompact }
+}
+
+/** Load all texts, sorted by z asc (same convention as images). Fires a
+ *  fire-and-forget compaction for any leftover soft-deleted records. */
+export async function loadAllTexts(): Promise<TextObject[]> {
+  const db = await getDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_TEXTS, 'readonly')
+    const req = tx.objectStore(STORE_TEXTS).getAll()
+    req.onsuccess = () => {
+      const all = req.result as TextObject[]
+      const { kept, toCompact } = partitionTextsForCompaction(all)
+      kept.sort((a, b) => a.z - b.z)
+      if (toCompact.length > 0) {
+        void Promise.all(toCompact.map((id) => deleteText(id).catch(() => undefined)))
+      }
+      resolve(kept)
+    }
+    req.onerror = () => reject(req.error)
+  })
+}
+
+export async function deleteText(id: string): Promise<void> {
+  const db = await getDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_TEXTS, 'readwrite')
+    tx.objectStore(STORE_TEXTS).delete(id)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'))
+  })
+}
+
+export async function clearAllTexts(): Promise<void> {
+  const db = await getDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_TEXTS, 'readwrite')
+    tx.objectStore(STORE_TEXTS).clear()
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
