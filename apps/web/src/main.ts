@@ -34,7 +34,7 @@
  */
 
 import './style.css'
-import type { BrushConfig, ImageObject, Sample, Stroke } from '@whiteboard/shared'
+import type { BrushConfig, ImageObject, Sample, Stroke, TextObject } from '@whiteboard/shared'
 import { BRUSH_IDS, BRUSH_PRESETS } from './brushes'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
 import { createClearFlow } from './clearflow'
@@ -66,6 +66,7 @@ import { attachPointer } from './pointer'
 import { dismissAllPopovers, getActiveTag } from './popover'
 import { applyCamera, clearLayer, drawStrokeOntoLayer, drawStrokePath, setupCanvas } from './render'
 import { renderImages } from './renderimages'
+import { renderTexts } from './rendertexts'
 import { createResetFlow } from './resetflow'
 import {
   getBrushId,
@@ -80,6 +81,7 @@ import { createPanelContent } from './settings/panel-content'
 import { dismissSidePanel, isSidePanelOpen, showSidePanel } from './sidepanel'
 import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
 import { type StrokeStore, createLocalStrokeStore } from './strokestore'
+import { type TextStore, createLocalTextStore } from './textstore'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { openToolMenu } from './toolmenu'
 import { createToolPill } from './toolpill'
@@ -94,6 +96,7 @@ import {
   createLassoTool,
   createPenTool,
   createSelectTool,
+  createTextTool,
 } from './tools'
 import { clearView, loadView, makeViewSaver } from './viewstate'
 import { fitToContent } from './zoomfit'
@@ -150,6 +153,10 @@ async function main(): Promise<void> {
   // belong inside a small JSON record. v1 is local IDB-backed; sync of
   // image binaries is deferred to M5.1 per ADR 0012.
   const imageStore: ImageStore = createLocalImageStore()
+
+  // TextStore — analog of StrokeStore / ImageStore for text objects. Single
+  // store (no companion blob) since text records carry payload inline.
+  const textStore: TextStore = createLocalTextStore()
 
   const root = document.getElementById('app')
   if (!root) throw new Error('#app not found')
@@ -235,11 +242,18 @@ async function main(): Promise<void> {
   // so iteration order is render order. nextImageZ() picks the next slot
   // above the current max so newly-pasted images stack on top.
   const images: ImageObject[] = []
-  const nextImageZ = (): number => {
+  const texts: TextObject[] = []
+  // Shared next-z sequence for images + texts so the user-visible stack
+  // order interleaves naturally between object types. New objects always
+  // appear above all existing ones.
+  const nextObjectZ = (): number => {
     let max = 0
     for (const img of images) if (!img.deleted && img.z > max) max = img.z
+    for (const t of texts) if (!t.deleted && t.z > max) max = t.z
     return max + 1
   }
+  const nextImageZ = nextObjectZ
+  const nextTextZ = nextObjectZ
 
   // Images marked for batch delete via Cmd/Ctrl+A. Distinct from the Select
   // tool's single-image selection (which carries handles + transform UX);
@@ -247,10 +261,18 @@ async function main(): Promise<void> {
   // pointerdown / tool change / Esc / after delete. Visualized as a thin
   // outline in the per-frame image render pass below.
   const imagesMarkedForBatchDelete = new Set<string>()
+  const textsMarkedForBatchDelete = new Set<string>()
   const clearImageBatchSelection = (): void => {
-    if (imagesMarkedForBatchDelete.size === 0) return
-    imagesMarkedForBatchDelete.clear()
-    committedDirty = true
+    let changed = false
+    if (imagesMarkedForBatchDelete.size > 0) {
+      imagesMarkedForBatchDelete.clear()
+      changed = true
+    }
+    if (textsMarkedForBatchDelete.size > 0) {
+      textsMarkedForBatchDelete.clear()
+      changed = true
+    }
+    if (changed) committedDirty = true
   }
 
   try {
@@ -280,6 +302,14 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     console.warn('whiteboard/web: failed to load persisted images:', err)
+  }
+
+  try {
+    const persistedTexts = await textStore.load()
+    texts.push(...persistedTexts)
+    committedDirty = true
+  } catch (err) {
+    console.warn('whiteboard/web: failed to load persisted texts:', err)
   }
 
   // ---------------------------------------------------------------------
@@ -329,6 +359,14 @@ async function main(): Promise<void> {
     })
   }
 
+  // Same pattern for text records — single closure used by opCtx and the
+  // Text tool. Errors are warn-and-continue (matching strokes / images).
+  const persistText = (t: TextObject): void => {
+    void textStore.update(t).catch((err) => {
+      console.warn('whiteboard/web: failed to persist text:', err)
+    })
+  }
+
   const opCtx: OpContext = {
     strokes,
     saveStroke: (s) => {
@@ -338,6 +376,8 @@ async function main(): Promise<void> {
     },
     images,
     saveImageMeta: persistImageMeta,
+    texts,
+    saveText: persistText,
     markDirty: () => {
       committedDirty = true
     },
@@ -435,12 +475,32 @@ async function main(): Promise<void> {
 
   const laserTool = createLaserTool()
 
-  const allTools: Record<'pen' | 'eraser' | 'lasso' | 'select' | 'laser', Tool> = {
+  // Track the most recently active tool BEFORE Text was selected. Used
+  // by the Text tool's Esc handler to return the user to the tool they
+  // were on before. Updated in setTool() whenever the user switches AWAY
+  // from a non-text tool; stays put when text is the active tool.
+  let previousToolId: ToolId | null = null
+
+  const textTool = createTextTool({
+    getTexts: () => texts,
+    nextZ: nextTextZ,
+    pushOp: pushUndoOp,
+    saveText: persistText,
+    markCommittedDirty: () => {
+      committedDirty = true
+    },
+    resolveColor: resolveInkColor,
+    setTool: (id) => setTool(id),
+    getPreviousToolId: () => previousToolId,
+  })
+
+  const allTools: Record<'pen' | 'eraser' | 'lasso' | 'select' | 'laser' | 'text', Tool> = {
     pen: penTool,
     eraser: eraserTool,
     lasso: lassoTool,
     select: selectTool,
     laser: laserTool,
+    text: textTool,
   }
   const tool: { current: Tool } = { current: penTool }
   // Apply the initial tool's cursor — `setTool` only fires on changes, so
@@ -491,8 +551,23 @@ async function main(): Promise<void> {
   document.body.appendChild(toolPill.el)
   const setTool = (id: ToolId): void => {
     if (tool.current.id === id) return
-    if (id !== 'pen' && id !== 'eraser' && id !== 'lasso' && id !== 'select' && id !== 'laser')
+    if (
+      id !== 'pen' &&
+      id !== 'eraser' &&
+      id !== 'lasso' &&
+      id !== 'select' &&
+      id !== 'laser' &&
+      id !== 'text'
+    )
       return
+    // Capture the OUTGOING tool id as "previous" — but only when leaving
+    // a non-text tool. The Text tool's Esc-handler uses this to return
+    // to where the user was before they pressed T. Switching away from
+    // Text doesn't update previousToolId (so a subsequent T → Esc still
+    // restores the original tool).
+    if (tool.current.id !== 'text') {
+      previousToolId = tool.current.id
+    }
     tool.current.cleanup?.()
     tool.current = allTools[id]
     root.style.cursor = tool.current.cursor ?? ''
@@ -569,6 +644,20 @@ async function main(): Promise<void> {
   //  cleanly regardless).
   // ---------------------------------------------------------------------
   root.addEventListener('contextmenu', (e) => e.preventDefault())
+  // Defensive document-level guard. The root listener above covers events
+  // whose target is `root` or a descendant; but a right-click that ends up
+  // dispatched to the document (some Wacom Intuos driver versions) or to
+  // a sibling overlay element layered on top of the canvas can slip past
+  // the root listener and surface the browser's native context menu
+  // alongside our app menu. This guard suppresses the browser default
+  // only when the click is anywhere over the canvas root, leaving
+  // right-clicks on real inputs (settings panel) untouched.
+  const onDocContextMenu = (e: Event): void => {
+    const target = e.target as Node | null
+    if (target && root.contains(target)) e.preventDefault()
+  }
+  document.addEventListener('contextmenu', onDocContextMenu)
+  registerCleanup(() => document.removeEventListener('contextmenu', onDocContextMenu))
 
   // Any pointer-down on the canvas drops a pending Cmd+A image-batch
   // selection. The marks are a transient "press Delete next" affordance;
@@ -715,6 +804,7 @@ async function main(): Promise<void> {
             anchor: { x: e.clientX, y: e.clientY },
             getStrokes: () => strokes,
             getImages: () => images,
+            getTexts: () => texts,
             imageStore,
             camera,
             viewportWidth: target.width,
@@ -769,11 +859,13 @@ async function main(): Promise<void> {
     refocusOnClose: root,
     onPerformClear: () => {
       // Destructive boundary by design — undo/redo stacks reset alongside
-      // the in-memory strokes, images, and the IDB stores. See ops.ts
-      // (clear is *not* an Op).
+      // the in-memory strokes, images, texts, and the IDB stores. See
+      // ops.ts (clear is *not* an Op).
       strokes.length = 0
       images.length = 0
+      texts.length = 0
       imagesMarkedForBatchDelete.clear()
+      textsMarkedForBatchDelete.clear()
       undoStack.length = 0
       redoStack.length = 0
       camera.x = 0
@@ -786,6 +878,9 @@ async function main(): Promise<void> {
       })
       void imageStore.clear().catch((err) => {
         console.warn('whiteboard/web: image clear failed:', err)
+      })
+      void textStore.clear().catch((err) => {
+        console.warn('whiteboard/web: text clear failed:', err)
       })
       _clearImageCache()
     },
@@ -871,10 +966,18 @@ async function main(): Promise<void> {
       selectLassoTool: () => setTool('lasso'),
       selectSelectTool: () => setTool('select'),
       selectLaserTool: () => setTool('laser'),
+      selectTextTool: () => setTool('text'),
+      // Cmd+B/I/U routed to the text tool's external entry. No-ops when
+      // not in edit mode (the tool's own contenteditable handler also
+      // intercepts these; this is a backup for the edge case where the
+      // editable lost focus momentarily).
+      toggleTextBold: () => textTool.toggleFormat('bold'),
+      toggleTextItalic: () => textTool.toggleFormat('italic'),
+      toggleTextUnderline: () => textTool.toggleFormat('underline'),
       deleteSelection: () => {
-        // Cmd+A also marks images for batch delete. Drain that set first
-        // (independent of which tool is active) so the user can hit
-        // Cmd+A → Delete from any tool to remove all images.
+        // Cmd+A also marks images and texts for batch delete. Drain those
+        // sets first (independent of which tool is active) so the user
+        // can hit Cmd+A → Delete from any tool to remove all objects.
         let didDelete = false
         if (imagesMarkedForBatchDelete.size > 0) {
           for (const id of imagesMarkedForBatchDelete) {
@@ -890,6 +993,18 @@ async function main(): Promise<void> {
           imagesMarkedForBatchDelete.clear()
           committedDirty = true
         }
+        if (textsMarkedForBatchDelete.size > 0) {
+          for (const id of textsMarkedForBatchDelete) {
+            const t = texts.find((x) => x.id === id)
+            if (!t || t.deleted) continue
+            t.deleted = true
+            persistText(t)
+            pushUndoOp({ kind: 'delete-text', textId: id })
+            didDelete = true
+          }
+          textsMarkedForBatchDelete.clear()
+          committedDirty = true
+        }
         if (tool.current === selectTool && selectTool.deleteSelected()) didDelete = true
         if (tool.current === lassoTool && lassoTool.deleteSelection()) didDelete = true
         return didDelete
@@ -898,12 +1013,16 @@ async function main(): Promise<void> {
         // Strokes via the existing lasso path …
         setTool('lasso')
         lassoTool.selectAll()
-        // … plus images via the batch-mark set so the next Delete removes
-        // them too. Visually a thin outline appears around each image (see
-        // the per-frame image render pass).
+        // … plus images + texts via the batch-mark sets so the next Delete
+        // removes them too. Visually a thin outline appears around each
+        // (see the per-frame image / text render passes).
         imagesMarkedForBatchDelete.clear()
+        textsMarkedForBatchDelete.clear()
         for (const img of images) {
           if (!img.deleted) imagesMarkedForBatchDelete.add(img.id)
+        }
+        for (const t of texts) {
+          if (!t.deleted) textsMarkedForBatchDelete.add(t.id)
         }
         committedDirty = true
       },
@@ -919,10 +1038,10 @@ async function main(): Promise<void> {
         }
         if (clearFlow.cancel()) handled = true
         if (dismissAllPopovers()) handled = true
-        // Esc also drops any Cmd+A image-batch marks before falling back
-        // to a tool switch — same semantic as Esc in lasso (clear the
-        // pending selection).
-        if (imagesMarkedForBatchDelete.size > 0) {
+        // Esc also drops any Cmd+A batch marks (images OR texts) before
+        // falling back to a tool switch — same semantic as Esc in lasso
+        // (clear the pending selection).
+        if (imagesMarkedForBatchDelete.size > 0 || textsMarkedForBatchDelete.size > 0) {
           clearImageBatchSelection()
           handled = true
         }
@@ -974,6 +1093,7 @@ async function main(): Promise<void> {
             anchor: lastPointer,
             getStrokes: () => strokes,
             getImages: () => images,
+            getTexts: () => texts,
             imageStore,
             camera,
             viewportWidth: target.width,
@@ -1056,6 +1176,19 @@ async function main(): Promise<void> {
         camera,
         viewBBox,
         isMarkedForBatchDelete: (id) => imagesMarkedForBatchDelete.has(id),
+      })
+
+      // Texts render above images and below the strokes composite. The
+      // currently-edited text id is masked out by the render so the DOM-
+      // overlay editable doesn't double-render the same content.
+      renderTexts({
+        texts,
+        layer: target.committed,
+        camera,
+        viewBBox,
+        resolveColor: resolveInkColor,
+        editingId: textTool.getEditingId(),
+        isMarkedForBatchDelete: (id) => textsMarkedForBatchDelete.has(id),
       })
 
       // Composite the strokes offscreen onto committed in pixel space

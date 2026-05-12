@@ -78,8 +78,10 @@ const JIGGLE_MIN_DISPLACEMENT_PX = 8
  *  jiggle climbs above 3 quickly. */
 const JIGGLE_RATIO_THRESHOLD = 3
 /** How long the bright halo lingers after the last jiggle-detect tick
- *  before the timer demotes it back to the faint gated halo. */
-const JIGGLE_HALO_LINGER_MS = 1500
+ *  before the timer demotes it back to the faint gated halo. Tuned to
+ *  "long enough to register, short enough to feel responsive" — a longer
+ *  linger felt slow to clear after the user finds the cursor. */
+const JIGGLE_HALO_LINGER_MS = 600
 
 export interface PenToolCallbacks {
   /** Stroke finalized at pointerup. Caller pushes it to the strokes array

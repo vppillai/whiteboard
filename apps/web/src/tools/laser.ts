@@ -49,6 +49,12 @@ interface Sample {
   /** performance.now() at the time of the sample. Used to age the segment
    *  for the fade alpha. */
   t: number
+  /** True when this sample continues a stroke (pointer was already down
+   *  in the previous sample). False when this sample is the first of a
+   *  NEW stroke after a pointer-up — the renderer uses this to break the
+   *  polyline so disjoint strokes don't get a connecting line between
+   *  them. Each pointer-up → pointer-down pair produces one `false` here. */
+  continueFromPrev: boolean
 }
 
 export function createLaserTool(): Tool {
@@ -91,9 +97,14 @@ export function createLaserTool(): Tool {
     }
   }
 
-  const appendSample = (clientX: number, clientY: number, ctx: ToolContext): void => {
+  const appendSample = (
+    clientX: number,
+    clientY: number,
+    ctx: ToolContext,
+    continueFromPrev: boolean,
+  ): void => {
     const { x, y } = ctx.toBoard(clientX, clientY)
-    points.push({ x, y, t: performance.now() })
+    points.push({ x, y, t: performance.now(), continueFromPrev })
   }
 
   return {
@@ -104,7 +115,10 @@ export function createLaserTool(): Tool {
 
     onPointerDown(e, ctx) {
       active = true
-      appendSample(e.clientX, e.clientY, ctx)
+      // First sample of a NEW stroke. continueFromPrev = false so the
+      // renderer doesn't connect it to any prior pen-up sample still
+      // fading in the buffer.
+      appendSample(e.clientX, e.clientY, ctx, false)
       startFadeLoop(ctx)
     },
 
@@ -113,11 +127,12 @@ export function createLaserTool(): Tool {
       // Sample every move plus any coalesced sub-events so fast gestures
       // produce a continuous trail rather than dot-to-dot jumps. Bounded
       // by the natural cull on age, so we don't need a max-sample cap.
+      // All samples while the pointer is down continue the same stroke.
       const coalesced = e.getCoalescedEvents?.() ?? []
       if (coalesced.length === 0) {
-        appendSample(e.clientX, e.clientY, ctx)
+        appendSample(e.clientX, e.clientY, ctx, true)
       } else {
-        for (const ce of coalesced) appendSample(ce.clientX, ce.clientY, ctx)
+        for (const ce of coalesced) appendSample(ce.clientX, ce.clientY, ctx, true)
       }
     },
 
@@ -129,42 +144,68 @@ export function createLaserTool(): Tool {
 
     redraw(ctx) {
       // Live-layer only. clearLayer is the global render loop's job; we
-      // re-apply the camera transform and paint the trail with per-segment
-      // alpha based on the OLDER endpoint's age (segments fade away from
-      // their tail end, matching how a real laser trail dissipates).
-      if (points.length < 2) {
-        // Even with 0 or 1 points the layer needs an applyCamera so any
-        // subsequent tool-rendered overlay lines up. clearLayer + identity
-        // is the global loop's pre-state; do nothing here.
-        return
-      }
+      // re-apply the camera transform and paint each STROKE (a contiguous
+      // run of samples with continueFromPrev=true) as a single polyline
+      // with the average-age-driven alpha for that stroke. Drawing each
+      // stroke as one path with `lineCap = 'butt'` avoids the per-segment
+      // round-cap dots that read as a chain of beads at high glow blur.
+      //
+      // Strokes are bounded by `continueFromPrev = false` markers — the
+      // first sample of every new pointer-down is one such marker. The
+      // result is multiple disjoint polylines that don't get connecting
+      // lines between them.
+      if (points.length < 2) return
       clearLayer(ctx.liveLayer)
       applyCamera(ctx.liveLayer, ctx.camera, ctx.dpr)
       const c = ctx.liveLayer.ctx
       const now = performance.now()
       const inkColor = ctx.resolveColor(getLaserColor())
       c.save()
-      c.lineCap = 'round'
+      c.lineCap = 'butt'
       c.lineJoin = 'round'
       c.lineWidth = LASER_WIDTH_PX / ctx.camera.scale
       c.strokeStyle = inkColor
-      // Soft glow gives the laser its "light" quality (vs ink). One shadow
-      // setup applies to every segment we draw under this save() — cheaper
-      // than re-setting per segment.
       c.shadowColor = inkColor
       c.shadowBlur = LASER_GLOW_BLUR / ctx.camera.scale
-      for (let i = 1; i < points.length; i++) {
-        const a = points[i - 1]
-        const b = points[i]
-        if (!a || !b) continue
-        const alpha = Math.max(0, 1 - (now - a.t) / LASER_FADE_MS)
-        if (alpha <= 0) continue
+
+      // Walk the array and group adjacent samples into stroke-spans, where
+      // a span ends just before a sample with continueFromPrev=false (or
+      // at the end of the array). For each span ≥ 2 samples, draw a single
+      // polyline path with alpha from the span's average age — one
+      // `stroke()` call per span instead of per segment.
+      let spanStart = 0
+      const drawSpan = (startIdx: number, endIdxExclusive: number): void => {
+        const count = endIdxExclusive - startIdx
+        if (count < 2) return
+        let ageSum = 0
+        for (let k = startIdx; k < endIdxExclusive; k++) {
+          const p = points[k]
+          if (!p) return
+          ageSum += now - p.t
+        }
+        const avgAge = ageSum / count
+        const alpha = Math.max(0, 1 - avgAge / LASER_FADE_MS)
+        if (alpha <= 0) return
         c.globalAlpha = alpha
         c.beginPath()
-        c.moveTo(a.x, a.y)
-        c.lineTo(b.x, b.y)
+        const first = points[startIdx]
+        if (!first) return
+        c.moveTo(first.x, first.y)
+        for (let k = startIdx + 1; k < endIdxExclusive; k++) {
+          const p = points[k]
+          if (!p) continue
+          c.lineTo(p.x, p.y)
+        }
         c.stroke()
       }
+      for (let i = 1; i < points.length; i++) {
+        const p = points[i]
+        if (p && !p.continueFromPrev) {
+          drawSpan(spanStart, i)
+          spanStart = i
+        }
+      }
+      drawSpan(spanStart, points.length)
       c.restore()
     },
 
