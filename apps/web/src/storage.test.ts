@@ -73,7 +73,7 @@ describe('storage/partitionImagesForCompaction', () => {
     expect(toCompact).toEqual([])
   })
 
-  test('moves deleted=true images to toCompact', () => {
+  test('moves deleted=true images to toCompact with {id, blobRef}', () => {
     const imgs = [
       mkImage('a'),
       mkImage('b', { deleted: true }),
@@ -82,7 +82,12 @@ describe('storage/partitionImagesForCompaction', () => {
     ]
     const { kept, toCompact } = partitionImagesForCompaction(imgs)
     expect(kept.map((i) => i.id)).toEqual(['a', 'c'])
-    expect(toCompact).toEqual(['b', 'd'])
+    // toCompact carries `{ id, blobRef }` so deleteImage can drop the
+    // matching blob row even if a future schema makes blobRef !== id.
+    expect(toCompact).toEqual([
+      { id: 'b', blobRef: 'b' },
+      { id: 'd', blobRef: 'd' },
+    ])
   })
 
   test('treats deleted=false as kept', () => {

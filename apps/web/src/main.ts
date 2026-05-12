@@ -45,7 +45,12 @@ import { openExportPopover } from './exportpopover'
 import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid, invalidateGridColors } from './grid'
 import { createHelpOverlay } from './helpoverlay'
-import { _clearImageCache, getImageElement, loadImageElement } from './imagecache'
+import {
+  _clearImageCache,
+  evictImageElement,
+  getImageElement,
+  loadImageElement,
+} from './imagecache'
 import { imageAABB } from './imagegeom'
 import {
   type ImagePasteContext,
@@ -252,12 +257,19 @@ async function main(): Promise<void> {
   }
 
   try {
-    const persistedImages = await imageStore.load()
+    const { images: persistedImages, compactedBlobRefs } = await imageStore.load()
     images.push(...persistedImages)
+    // Compaction may have removed persisted-but-soft-deleted records from
+    // IDB. Evict any runtime cache entries that might be lingering for
+    // those blobRefs so memory is reclaimed too. (Cache is usually empty
+    // at startup; this matters when an HMR cycle leaves stale state.)
+    for (const blobRef of compactedBlobRefs) evictImageElement(blobRef)
     // Eagerly prefetch the HTMLImageElement for each persisted image
     // so the first frame after startup renders them immediately
     // instead of skipping (cache returns null while load is pending).
     // Fire-and-forget — each completed load triggers committedDirty.
+    // TODO(M5): cap parallel decode count or lazy-load on viewport entry
+    // when image counts grow (currently all decode in parallel at startup).
     for (const img of persistedImages) {
       void imageStore
         .loadBlob(img.blobRef)
@@ -309,6 +321,17 @@ async function main(): Promise<void> {
   // takes effect without a reload.
   const shouldUsePrediction = (): boolean => urlPredictFlag || getSettings().predictedEvents
 
+  // Single source of truth for "persist an image metadata change". Both the
+  // op-context (used by undo/redo apply) and the Select tool fire this on
+  // every move/resize/rotate, so consolidating the closure keeps the error
+  // policy (currently: warn-and-continue) in one place — future changes
+  // like surfacing a toast or retry only touch this line.
+  const persistImageMeta = (img: ImageObject): void => {
+    void imageStore.updateMeta(img).catch((err) => {
+      console.warn('whiteboard/web: failed to persist image metadata:', err)
+    })
+  }
+
   const opCtx: OpContext = {
     strokes,
     saveStroke: (s) => {
@@ -317,11 +340,7 @@ async function main(): Promise<void> {
       })
     },
     images,
-    saveImageMeta: (img) => {
-      void imageStore.updateMeta(img).catch((err) => {
-        console.warn('whiteboard/web: failed to persist image metadata:', err)
-      })
-    },
+    saveImageMeta: persistImageMeta,
     markDirty: () => {
       committedDirty = true
     },
@@ -402,11 +421,7 @@ async function main(): Promise<void> {
 
   const selectTool = createSelectTool({
     getImages: () => images,
-    saveImageMeta: (img) => {
-      void imageStore.updateMeta(img).catch((err) => {
-        console.warn('whiteboard/web: failed to persist image metadata:', err)
-      })
-    },
+    saveImageMeta: persistImageMeta,
     pushOp: (op) => pushUndoOp(op),
     markCommittedDirty: () => {
       committedDirty = true
@@ -527,6 +542,15 @@ async function main(): Promise<void> {
     if (!(e instanceof PointerEvent)) return
     lastPointer = { x: e.clientX, y: e.clientY }
     metrics.notePointerEvent(1)
+  })
+
+  // When the pointer exits the canvas root, drop any tool-set hover cursor
+  // (resize / rotate / move) so we don't leave a "ready to rotate" affordance
+  // showing while the user is over the gear menu or off-canvas. Reset to the
+  // active tool's static cursor — `setCursor('')` restores it via the
+  // fallthrough in toolCtx.setCursor.
+  root.addEventListener('pointerleave', () => {
+    root.style.cursor = tool.current.cursor ?? ''
   })
 
   // ---------------------------------------------------------------------
@@ -958,7 +982,10 @@ async function main(): Promise<void> {
         const { x, y, w, h } = img.transform
         const r = img.rotation ?? 0
         const isMarked = imagesMarkedForBatchDelete.has(img.id)
-        if (r === 0) {
+        // Treat near-zero rotation as zero so float drift (e.g. residual
+        // 1e-16 after rotate-to-zero reset) doesn't drop us into the
+        // slower save/translate/rotate path for no visible difference.
+        if (Math.abs(r) < 1e-9) {
           cCtx.drawImage(el, x, y, w, h)
           if (isMarked) {
             // Thin dashed outline so the batch-marked state reads as

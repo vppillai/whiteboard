@@ -60,22 +60,29 @@ export async function exportPNG(
 
   // Pre-resolve image elements: the export must be synchronous past this
   // point so we don't drop frames waiting on Blob decodes mid-render.
+  // Per-image failures are isolated — one bad decode shouldn't abort the
+  // whole export (`Promise.allSettled`, not `Promise.all`). The bad image
+  // is silently dropped from the output, matching the SVG path's
+  // "missing data URI = skip" semantics.
   const visibleImages = [...images].filter((i) => !i.deleted).sort((a, b) => a.z - b.z)
   const imageEls = new Map<string, HTMLImageElement>()
   if (imageStore) {
-    await Promise.all(
+    const results = await Promise.allSettled(
       visibleImages.map(async (img) => {
         const cached = getImageElement(img.blobRef)
-        if (cached) {
-          imageEls.set(img.id, cached)
-          return
-        }
+        if (cached) return { id: img.id, el: cached }
         const blob = await imageStore.loadBlob(img.blobRef)
-        if (!blob) return
+        if (!blob) return null
         const el = await loadImageElement(img.blobRef, blob)
-        imageEls.set(img.id, el)
+        return { id: img.id, el }
       }),
     )
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value) imageEls.set(r.value.id, r.value.el)
+      else if (r.status === 'rejected') {
+        console.warn('whiteboard/export: image decode failed during PNG export:', r.reason)
+      }
+    }
   } else {
     for (const img of visibleImages) {
       const el = getImageElement(img.blobRef)

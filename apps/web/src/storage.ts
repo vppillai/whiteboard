@@ -161,6 +161,7 @@ export async function saveImageMeta(image: ImageObject): Promise<void> {
     tx.objectStore(STORE_IMAGES).put(image)
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'))
   })
 }
 
@@ -169,21 +170,35 @@ export async function saveImageMeta(image: ImageObject): Promise<void> {
  * an image with `deleted === true` from a previous session has no undo
  * path (undo stack reset on reload), so it's safe to hard-delete + free
  * the Blob.
+ *
+ * `toCompact` carries `{ id, blobRef }` rather than just `id` so the
+ * compaction step can delete the right blob row even if a future schema
+ * change makes `blobRef !== id` (e.g. content-addressed dedupe, server
+ * URL). v1 has `blobRef === id` but the abstraction is cheap to preserve.
  */
 export function partitionImagesForCompaction(images: readonly ImageObject[]): {
   kept: ImageObject[]
-  toCompact: string[]
+  toCompact: Array<{ id: string; blobRef: string }>
 } {
   const kept: ImageObject[] = []
-  const toCompact: string[] = []
+  const toCompact: Array<{ id: string; blobRef: string }> = []
   for (const img of images) {
-    if (img.deleted === true) toCompact.push(img.id)
+    if (img.deleted === true) toCompact.push({ id: img.id, blobRef: img.blobRef })
     else kept.push(img)
   }
   return { kept, toCompact }
 }
 
-export async function loadAllImages(): Promise<ImageObject[]> {
+/**
+ * Load all image metadata records and trigger background compaction of
+ * any soft-deleted leftovers. Each compaction also returns its blobRef
+ * via the second tuple element so the caller can evict matching runtime
+ * cache entries (decoded HTMLImageElements) at the same time.
+ */
+export async function loadAllImages(): Promise<{
+  images: ImageObject[]
+  compactedBlobRefs: string[]
+}> {
   const db = await getDb()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_IMAGES, 'readonly')
@@ -192,10 +207,14 @@ export async function loadAllImages(): Promise<ImageObject[]> {
       const all = req.result as ImageObject[]
       const { kept, toCompact } = partitionImagesForCompaction(all)
       kept.sort((a, b) => a.z - b.z)
+      // Compaction is fire-and-forget — failure is non-fatal and will
+      // retry on the next load.
       if (toCompact.length > 0) {
-        void Promise.all(toCompact.map((id) => deleteImage(id).catch(() => undefined)))
+        void Promise.all(
+          toCompact.map((entry) => deleteImage(entry.id, entry.blobRef).catch(() => undefined)),
+        )
       }
-      resolve(kept)
+      resolve({ images: kept, compactedBlobRefs: toCompact.map((c) => c.blobRef) })
     }
     req.onerror = () => reject(req.error)
   })
@@ -212,18 +231,23 @@ export async function loadImageBlob(blobRef: string): Promise<Blob | null> {
 }
 
 /**
- * Hard-delete an image and its blob. Used by background compaction on load
- * (for images that died with `deleted: true` in a prior session). Live
- * delete-image ops use soft-delete via `saveImageMeta` instead.
+ * Hard-delete an image (metadata + bytes) in a single transaction. Used by
+ * background compaction on load. Live delete-image ops do soft-delete via
+ * `saveImageMeta` instead.
+ *
+ * Takes `blobRef` explicitly rather than assuming `blobRef === id` so a
+ * future schema where the binary is content-addressed or server-URL'd
+ * doesn't silently leak blob rows.
  */
-export async function deleteImage(id: string): Promise<void> {
+export async function deleteImage(id: string, blobRef: string): Promise<void> {
   const db = await getDb()
   return new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_IMAGES, STORE_IMAGES_BLOB], 'readwrite')
     tx.objectStore(STORE_IMAGES).delete(id)
-    tx.objectStore(STORE_IMAGES_BLOB).delete(id)
+    tx.objectStore(STORE_IMAGES_BLOB).delete(blobRef)
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'))
   })
 }
 

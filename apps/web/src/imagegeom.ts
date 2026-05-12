@@ -16,13 +16,22 @@ export function imageCenter(t: ImageObject['transform']): { x: number; y: number
   return { x: t.x + t.w / 2, y: t.y + t.h / 2 }
 }
 
+/**
+ * Epsilon under which a rotation is treated as "effectively zero" so the
+ * fast unrotated path can be taken. Guards against float drift (e.g. a
+ * rotate-to-zero reset that overshoots by 1e-15, `-0`, or accumulated
+ * error from repeated transforms). 1e-9 rad ≈ 5.7e-8 degrees — well below
+ * any visually perceptible rotation.
+ */
+const ROTATION_EPSILON = 1e-9
+
 /** Rotate `p` by `rad` around the pivot `c`. */
 export function rotateAroundPoint(
   p: { x: number; y: number },
   c: { x: number; y: number },
   rad: number,
 ): { x: number; y: number } {
-  if (rad === 0) return { x: p.x, y: p.y }
+  if (Math.abs(rad) < ROTATION_EPSILON) return { x: p.x, y: p.y }
   const cos = Math.cos(rad)
   const sin = Math.sin(rad)
   const dx = p.x - c.x
@@ -58,7 +67,7 @@ export function imageAABB(img: ImageObject): {
   maxY: number
 } {
   const r = img.rotation ?? 0
-  if (r === 0) {
+  if (Math.abs(r) < ROTATION_EPSILON) {
     return {
       minX: img.transform.x,
       minY: img.transform.y,
@@ -89,7 +98,7 @@ export function imageAABB(img: ImageObject): {
 export function pointInImage(p: { x: number; y: number }, img: ImageObject): boolean {
   const r = img.rotation ?? 0
   const c = imageCenter(img.transform)
-  const local = r === 0 ? p : rotateAroundPoint(p, c, -r)
+  const local = Math.abs(r) < ROTATION_EPSILON ? p : rotateAroundPoint(p, c, -r)
   const t = img.transform
   return local.x >= t.x && local.x <= t.x + t.w && local.y >= t.y && local.y <= t.y + t.h
 }
