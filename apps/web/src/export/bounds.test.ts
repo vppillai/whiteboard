@@ -1,6 +1,19 @@
 import { describe, expect, test } from 'bun:test'
-import type { Stroke } from '@whiteboard/shared'
+import type { ImageObject, Stroke } from '@whiteboard/shared'
 import { type Bounds, EXPORT_MARGIN, computeBoardBounds } from './bounds'
+
+function mkImage(x: number, y: number, w: number, h: number, deleted = false): ImageObject {
+  return {
+    id: Math.random().toString(36).slice(2),
+    blobRef: '',
+    format: 'png',
+    natural: { w, h },
+    transform: { x, y, w, h },
+    z: 1,
+    createdAt: 0,
+    deleted,
+  }
+}
 
 function expectBounds(b: Bounds | null): Bounds {
   if (b === null) throw new Error('expected bounds, got null')
@@ -98,5 +111,37 @@ describe('export/bounds: computeBoardBounds', () => {
     const s2 = mkStroke([]) // empty samples
     const b = expectBounds(computeBoardBounds([s1, s2]))
     expect(b.x + b.width).toBeLessThan(200)
+  })
+
+  test('images contribute to bounds', () => {
+    const img = mkImage(200, 200, 100, 50)
+    const b = expectBounds(computeBoardBounds([], [img]))
+    expect(b.x).toBe(200 - EXPORT_MARGIN)
+    expect(b.y).toBe(200 - EXPORT_MARGIN)
+    expect(b.width).toBe(100 + 2 * EXPORT_MARGIN)
+    expect(b.height).toBe(50 + 2 * EXPORT_MARGIN)
+  })
+
+  test('strokes + images combined gives the union of their bounds', () => {
+    const s = mkStroke([
+      { x: 0, y: 0 },
+      { x: 50, y: 50 },
+    ])
+    const img = mkImage(100, 100, 200, 200)
+    const b = expectBounds(computeBoardBounds([s], [img]))
+    expect(b.x).toBeLessThanOrEqual(0)
+    expect(b.x + b.width).toBeGreaterThanOrEqual(300)
+    expect(b.y + b.height).toBeGreaterThanOrEqual(300)
+  })
+
+  test('deleted images do not contribute', () => {
+    const live = mkImage(0, 0, 50, 50)
+    const dead = mkImage(500, 500, 100, 100, true)
+    const b = expectBounds(computeBoardBounds([], [live, dead]))
+    expect(b.x + b.width).toBeLessThan(500)
+  })
+
+  test('empty strokes + empty images → null', () => {
+    expect(computeBoardBounds([], [])).toBeNull()
   })
 })

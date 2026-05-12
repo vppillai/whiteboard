@@ -90,6 +90,7 @@ import {
   createEraserTool,
   createLassoTool,
   createPenTool,
+  createSelectTool,
 } from './tools'
 import { clearView, loadView, makeViewSaver } from './viewstate'
 import { fitToContent } from './zoomfit'
@@ -386,10 +387,24 @@ async function main(): Promise<void> {
     },
   })
 
-  const allTools: Record<'pen' | 'eraser' | 'lasso', Tool> = {
+  const selectTool = createSelectTool({
+    getImages: () => images,
+    saveImageMeta: (img) => {
+      void imageStore.updateMeta(img).catch((err) => {
+        console.warn('whiteboard/web: failed to persist image metadata:', err)
+      })
+    },
+    pushOp: (op) => pushUndoOp(op),
+    markCommittedDirty: () => {
+      committedDirty = true
+    },
+  })
+
+  const allTools: Record<'pen' | 'eraser' | 'lasso' | 'select', Tool> = {
     pen: penTool,
     eraser: eraserTool,
     lasso: lassoTool,
+    select: selectTool,
   }
   const tool: { current: Tool } = { current: penTool }
   // Apply the initial tool's cursor — `setTool` only fires on changes, so
@@ -440,7 +455,7 @@ async function main(): Promise<void> {
   document.body.appendChild(toolPill.el)
   const setTool = (id: ToolId): void => {
     if (tool.current.id === id) return
-    if (id !== 'pen' && id !== 'eraser' && id !== 'lasso') return // others land later
+    if (id !== 'pen' && id !== 'eraser' && id !== 'lasso' && id !== 'select') return
     tool.current.cleanup?.()
     tool.current = allTools[id]
     root.style.cursor = tool.current.cursor ?? ''
@@ -581,6 +596,8 @@ async function main(): Promise<void> {
           openExportPopover({
             anchor: { x: e.clientX, y: e.clientY },
             getStrokes: () => strokes,
+            getImages: () => images,
+            imageStore,
             camera,
             viewportWidth: target.width,
             viewportHeight: target.height,
@@ -718,9 +735,11 @@ async function main(): Promise<void> {
       },
       selectEraserSticky: () => setTool('eraser'),
       selectLassoTool: () => setTool('lasso'),
+      selectSelectTool: () => setTool('select'),
       deleteSelection: () => {
-        if (tool.current !== lassoTool) return false
-        return lassoTool.deleteSelection()
+        if (tool.current === selectTool) return selectTool.deleteSelected()
+        if (tool.current === lassoTool) return lassoTool.deleteSelection()
+        return false
       },
       selectAll: () => {
         setTool('lasso')
@@ -768,6 +787,8 @@ async function main(): Promise<void> {
           openExportPopover({
             anchor: lastPointer,
             getStrokes: () => strokes,
+            getImages: () => images,
+            imageStore,
             camera,
             viewportWidth: target.width,
             viewportHeight: target.height,

@@ -12,13 +12,23 @@
  * in a Blob — so tests can verify content without jsdom.
  */
 
-import type { Stroke } from '@whiteboard/shared'
+import type { ImageObject, Stroke } from '@whiteboard/shared'
 import { getStroke } from 'perfect-freehand'
 import type { GridType, SettingsV1 } from '../settings'
 import { resolveInkColor } from '../theme'
 import type { Bounds } from './bounds'
 
-export function exportSVG(strokes: Stroke[], bounds: Bounds, settings: SettingsV1): Blob {
+/** Image bytes pre-encoded as a data URI, keyed by image id. The caller
+ *  prepares this so the serializer stays pure-string-out (no DOM/IO). */
+export type ImageDataUriMap = Map<string, string>
+
+export function exportSVG(
+  strokes: Stroke[],
+  images: readonly ImageObject[],
+  imageDataUris: ImageDataUriMap,
+  bounds: Bounds,
+  settings: SettingsV1,
+): Blob {
   // Resolve theme tokens at export time so the SVG matches the user's
   // active theme. Dark theme → dark bg + lighter grid; light theme → light
   // bg + darker grid. Strokes use resolveInkColor below (same path). Bun's
@@ -45,6 +55,20 @@ export function exportSVG(strokes: Stroke[], bounds: Bounds, settings: SettingsV
     parts.push(renderGridDefs(settings.grid.type, settings.grid.spacing, gridDot, gridLine))
     parts.push(
       `<rect x="${fmt(bounds.x)}" y="${fmt(bounds.y)}" width="${fmt(bounds.width)}" height="${fmt(bounds.height)}" fill="url(#wb-grid)"/>`,
+    )
+  }
+
+  // Images (z-order; below strokes). One <image> per non-deleted image
+  // whose data URI was prepared by the caller. Missing data URIs are
+  // skipped silently — the export of that specific image fails open
+  // rather than aborting the whole SVG.
+  const sortedImages = [...images].filter((i) => !i.deleted).sort((a, b) => a.z - b.z)
+  for (const img of sortedImages) {
+    const href = imageDataUris.get(img.id)
+    if (!href) continue
+    const { x, y, w, h } = img.transform
+    parts.push(
+      `<image href="${escapeAttr(href)}" x="${fmt(x)}" y="${fmt(y)}" width="${fmt(w)}" height="${fmt(h)}" preserveAspectRatio="none"/>`,
     )
   }
 

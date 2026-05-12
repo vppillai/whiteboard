@@ -39,7 +39,7 @@ export interface ToolContext {
   markCommittedDirty(): void
 }
 
-export type ToolId = 'pen' | 'eraser' | 'lasso' | 'laser' | 'text'
+export type ToolId = 'pen' | 'eraser' | 'lasso' | 'laser' | 'text' | 'select'
 
 export interface Tool {
   id: ToolId

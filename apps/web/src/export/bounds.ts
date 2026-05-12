@@ -6,7 +6,7 @@
  * viewBox / PDF page to the actual drawn content rather than the viewport.
  */
 
-import type { Stroke } from '@whiteboard/shared'
+import type { ImageObject, Stroke } from '@whiteboard/shared'
 import type { Camera } from '../camera'
 import { getStrokeBBox } from '../stroke'
 
@@ -19,7 +19,10 @@ export interface Bounds {
 
 export const EXPORT_MARGIN = 32
 
-export function computeBoardBounds(strokes: Stroke[]): Bounds | null {
+export function computeBoardBounds(
+  strokes: Stroke[],
+  images: readonly ImageObject[] = [],
+): Bounds | null {
   let minX = Number.POSITIVE_INFINITY
   let minY = Number.POSITIVE_INFINITY
   let maxX = Number.NEGATIVE_INFINITY
@@ -33,6 +36,15 @@ export function computeBoardBounds(strokes: Stroke[]): Bounds | null {
     if (bbox.minY < minY) minY = bbox.minY
     if (bbox.maxX > maxX) maxX = bbox.maxX
     if (bbox.maxY > maxY) maxY = bbox.maxY
+    any = true
+  }
+  for (const img of images) {
+    if (img.deleted) continue
+    const { x, y, w, h } = img.transform
+    if (x < minX) minX = x
+    if (y < minY) minY = y
+    if (x + w > maxX) maxX = x + w
+    if (y + h > maxY) maxY = y + h
     any = true
   }
   if (!any) return null
