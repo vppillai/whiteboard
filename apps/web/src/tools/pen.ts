@@ -37,6 +37,23 @@ const HOVER_HALO_RADIUS_PX = 11
 const HOVER_HALO_THRESHOLD_PX = 4
 const HOVER_HALO_ALPHA = 0.35
 
+/**
+ * Idle "fluorescent" promotion. After the cursor has been still for this
+ * long, the finder halo brightens, widens, and gains a glow so the user
+ * can locate the pointer at a glance — common scenario on Wacom Intuos
+ * where the eye drifts to a reference document and back. The halo stays
+ * gated by `screenRadius < HOVER_HALO_THRESHOLD_PX` while ACTIVE; when
+ * idle it ALWAYS draws regardless of brush size, because "where is my
+ * cursor" outranks "don't double up on a big visible brush". One
+ * setTimeout dirties the canvas once at 5 s so the static state actually
+ * paints; movement clears the timer and immediately demotes back.
+ */
+const IDLE_HALO_MS = 5000
+const IDLE_HALO_RADIUS_PX = 22
+const IDLE_HALO_ALPHA = 0.9
+const IDLE_HALO_LINE_WIDTH = 2
+const IDLE_HALO_GLOW_BLUR = 14
+
 export interface PenToolCallbacks {
   /** Stroke finalized at pointerup. Caller pushes it to the strokes array
    *  and emits the create op. */
@@ -75,6 +92,27 @@ export function createPenTool(opts: PenToolOptions): Tool {
   // change, theme change, undo) — without it the brush cursor would blink
   // off until the next pointermove.
   let lastHover: { x: number; y: number } | null = null
+  // Idle-halo state. `lastMoveAt` updates on every pointermove; the timer
+  // fires once 5 s later and marks the canvas dirty so the next frame
+  // re-renders the hover with the brighter halo. Cleared on movement,
+  // active stroke start, and tool cleanup.
+  let lastMoveAt = 0
+  let idleTimer: ReturnType<typeof setTimeout> | null = null
+  const cancelIdleTimer = (): void => {
+    if (idleTimer !== null) {
+      clearTimeout(idleTimer)
+      idleTimer = null
+    }
+  }
+  const armIdleTimer = (ctx: ToolContext): void => {
+    cancelIdleTimer()
+    idleTimer = setTimeout(() => {
+      idleTimer = null
+      // Trigger a redraw — `renderHover` will see lastMoveAt > IDLE_HALO_MS
+      // ago and paint the bright halo.
+      ctx.markCommittedDirty()
+    }, IDLE_HALO_MS)
+  }
   // Performance-clock origin captured at pointerdown. `Sample.t` is the
   // elapsed milliseconds since this origin (epoch-independent, survives
   // page reload, comparable across peers). `Stroke.startedAt` is a
@@ -149,23 +187,44 @@ export function createPenTool(opts: PenToolOptions): Tool {
     }
     c.restore()
 
-    // Halo (gated): screen-coords ring so the cursor is locatable when the
-    // brush is sub-finder-sized. preset.size / 2 is a coarse "visible radius"
-    // proxy — close enough for the gate; brush's wider soft halo and
-    // highlighter's chisel half-width fall slightly above their own
-    // brush-shape extents, so the gate trips a touch eagerly on those, which
-    // is fine because the ring is faint by design.
+    // Halo: screen-coords ring so the cursor is locatable. Two modes:
+    //   - ACTIVE (recent movement): only drawn when the brush's effective
+    //     screen radius is sub-finder-sized — faint, doesn't compete with
+    //     a visible brush body.
+    //   - IDLE (>= IDLE_HALO_MS since the last move): ALWAYS drawn, with
+    //     a wider radius, higher alpha, and a soft shadow glow for a
+    //     "fluorescent" pop. Locating the pointer outranks not double-
+    //     drawing the brush body.
+    const idleFor = performance.now() - lastMoveAt
+    const isIdle = lastHover !== null && idleFor >= IDLE_HALO_MS
     const screenRadius = (preset.size / 2) * ctx.camera.scale
-    if (screenRadius < HOVER_HALO_THRESHOLD_PX) {
+    const showActiveHalo = !isIdle && screenRadius < HOVER_HALO_THRESHOLD_PX
+    if (showActiveHalo || isIdle) {
       const screen = boardToScreen(ctx.camera, boardX, boardY)
+      const inkColor = ctx.resolveColor(getColor())
       c.save()
       c.setTransform(ctx.dpr, 0, 0, ctx.dpr, 0, 0)
-      c.globalAlpha = HOVER_HALO_ALPHA
-      c.strokeStyle = ctx.resolveColor(getColor())
-      c.lineWidth = 1
-      c.beginPath()
-      c.arc(screen.x, screen.y, HOVER_HALO_RADIUS_PX, 0, Math.PI * 2)
-      c.stroke()
+      c.strokeStyle = inkColor
+      if (isIdle) {
+        // Glow pass — shadowBlur on a wider semi-transparent stroke gives
+        // the bloom; the crisp ring lands on top.
+        c.globalAlpha = 0.55
+        c.lineWidth = IDLE_HALO_LINE_WIDTH
+        c.shadowColor = inkColor
+        c.shadowBlur = IDLE_HALO_GLOW_BLUR
+        c.beginPath()
+        c.arc(screen.x, screen.y, IDLE_HALO_RADIUS_PX, 0, Math.PI * 2)
+        c.stroke()
+        c.shadowBlur = 0
+        c.globalAlpha = IDLE_HALO_ALPHA
+        c.stroke()
+      } else {
+        c.globalAlpha = HOVER_HALO_ALPHA
+        c.lineWidth = 1
+        c.beginPath()
+        c.arc(screen.x, screen.y, HOVER_HALO_RADIUS_PX, 0, Math.PI * 2)
+        c.stroke()
+      }
       c.restore()
     }
   }
@@ -175,6 +234,7 @@ export function createPenTool(opts: PenToolOptions): Tool {
     predicted = []
     renderAsFinal = false
     lastHover = null
+    cancelIdleTimer()
   }
 
   return {
@@ -187,6 +247,11 @@ export function createPenTool(opts: PenToolOptions): Tool {
     onPointerDown(e, ctx) {
       const brush = ctx.getBrush()
       strokeStartPerfTime = e.timeStamp
+      // Active stroke counts as activity — reset the idle timer so the
+      // halo doesn't bloom mid-stroke if the user pauses with the pen
+      // pressed down (e.g. between segments of a careful line).
+      lastMoveAt = performance.now()
+      cancelIdleTimer()
       active = {
         id: makeId(),
         brush,
@@ -201,6 +266,8 @@ export function createPenTool(opts: PenToolOptions): Tool {
     onPointerMove(e, ctx) {
       const board = ctx.toBoard(e.clientX, e.clientY)
       lastHover = board
+      lastMoveAt = performance.now()
+      armIdleTimer(ctx)
       if (!active) {
         // Hover render — brush preview at cursor.
         renderHover(board.x, board.y, ctx)

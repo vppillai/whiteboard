@@ -46,6 +46,7 @@ import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid, invalidateGridColors } from './grid'
 import { createHelpOverlay } from './helpoverlay'
 import { _clearImageCache, evictImageElement, loadImageElement } from './imagecache'
+import { writeImageToClipboard } from './imageclipboard'
 import {
   type ImagePasteContext,
   pasteImageFromBlob,
@@ -620,6 +621,55 @@ async function main(): Promise<void> {
   // to a file:// URL.
   registerCleanup(setupDragDropImagePaste(root, toBoard, imagePasteCtx))
 
+  // ---------------------------------------------------------------------
+  //  Copy / cut for selected image. Mirrors the paste handler's
+  //  "skip in text-editable contexts" rule so settings inputs keep their
+  //  native cut/copy. Only fires when the Select tool is active AND an
+  //  image is currently selected — any other state lets the event through
+  //  to the browser default (which is a no-op on canvas but matters for
+  //  inputs).
+  //
+  //  Cut's delete only fires AFTER the clipboard write succeeds; failing
+  //  to write but still deleting would lose the image with nowhere to
+  //  paste it back from.
+  // ---------------------------------------------------------------------
+  const isTextEditableTarget = (el: EventTarget | null): boolean =>
+    el instanceof HTMLInputElement ||
+    el instanceof HTMLTextAreaElement ||
+    (el instanceof HTMLElement && el.isContentEditable)
+
+  const clipboardImageDeps = {
+    loadBlob: (ref: string) => imageStore.loadBlob(ref),
+    onToast: showInfoToast,
+  }
+
+  const onCopy = (e: ClipboardEvent): void => {
+    if (isTextEditableTarget(e.target)) return
+    if (tool.current !== selectTool) return
+    const img = selectTool.getSelectedImage()
+    if (!img) return
+    e.preventDefault()
+    void writeImageToClipboard(img, clipboardImageDeps)
+  }
+
+  const onCut = (e: ClipboardEvent): void => {
+    if (isTextEditableTarget(e.target)) return
+    if (tool.current !== selectTool) return
+    const img = selectTool.getSelectedImage()
+    if (!img) return
+    e.preventDefault()
+    void (async () => {
+      const written = await writeImageToClipboard(img, clipboardImageDeps)
+      if (written) selectTool.deleteSelected()
+    })()
+  }
+  document.addEventListener('copy', onCopy)
+  document.addEventListener('cut', onCut)
+  registerCleanup(() => {
+    document.removeEventListener('copy', onCopy)
+    document.removeEventListener('cut', onCut)
+  })
+
   root.addEventListener(
     'pointerdown',
     (e) => {
@@ -754,6 +804,15 @@ async function main(): Promise<void> {
     }),
   )
 
+  // Double-Esc toggle: tracks the timestamp of the most recent Esc that
+  // had nothing to cancel ("no-op Esc"). A second no-op Esc within the
+  // double-tap window toggles between Draw and Select. Any Esc that
+  // actually cancelled state (popover, lasso, image-batch mark, …)
+  // resets this so the sequence "Esc dismisses popover → quick Esc"
+  // doesn't surprise the user with an unintended tool switch.
+  const ESCAPE_DOUBLE_TAP_MS = 350
+  let lastEscapeNoOpAt = Number.NEGATIVE_INFINITY
+
   registerCleanup(
     attachKeymap({
       undo,
@@ -859,6 +918,24 @@ async function main(): Promise<void> {
         if (tool.current === lassoTool) {
           setTool('pen')
           handled = true
+        }
+        // Double-Esc toggle: if THIS Esc cancelled real state, reset the
+        // double-tap window so a follow-up Esc doesn't surprise the user
+        // by switching tools mid-cleanup. If nothing was cancelled, check
+        // whether the prior Esc was a recent no-op too — that's the
+        // double-tap signal, toggle Draw ↔ Select.
+        if (handled) {
+          lastEscapeNoOpAt = Number.NEGATIVE_INFINITY
+        } else {
+          const now = performance.now()
+          if (now - lastEscapeNoOpAt < ESCAPE_DOUBLE_TAP_MS) {
+            const next: ToolId = tool.current.id === 'select' ? 'pen' : 'select'
+            setTool(next)
+            lastEscapeNoOpAt = Number.NEGATIVE_INFINITY
+            handled = true
+          } else {
+            lastEscapeNoOpAt = now
+          }
         }
         return handled
       },

@@ -82,6 +82,11 @@ const ROTATE_CURSOR =
   'url(\'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M 12 4 A 8 8 0 1 1 4 12" fill="none" stroke="white" stroke-width="4" stroke-linecap="round"/><path d="M 12 4 A 8 8 0 1 1 4 12" fill="none" stroke="black" stroke-width="2" stroke-linecap="round"/><polygon points="12,0 18,6 12,10" fill="black" stroke="white" stroke-width="1"/></svg>\') 12 12, grab'
 
 export interface SelectTool extends Tool {
+  /** Live reference to the currently-selected image, or null. Read by
+   *  main.ts for the Ctrl+C / Ctrl+X clipboard handlers. Returns the
+   *  in-memory ImageObject so the caller can look up blobRef / transform
+   *  without a second `getImages().find()` pass. */
+  getSelectedImage(): ImageObject | null
   /** Soft-delete the currently-selected image and emit a delete-image op.
    *  No-op if nothing is selected. Returns true if anything was deleted. */
   deleteSelected(): boolean
@@ -682,6 +687,15 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     cleanup(): void {
       selectedImageId = null
       drag = null
+    },
+
+    getSelectedImage(): ImageObject | null {
+      if (!selectedImageId) return null
+      const img = deps.getImages().find((i) => i.id === selectedImageId)
+      // Filter out images that have been soft-deleted out from under us
+      // (e.g. by a Cmd+A batch flow racing with a stale selection).
+      if (!img || img.deleted) return null
+      return img
     },
 
     deleteSelected(): boolean {
