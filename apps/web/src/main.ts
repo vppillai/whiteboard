@@ -600,6 +600,7 @@ async function main(): Promise<void> {
       // restores the static tool cursor; useful when leaving a hit zone.
       root.style.cursor = cursor || tool.current.cursor || ''
     },
+    getLastPointer: () => lastPointer,
   }
 
   // ---------------------------------------------------------------------
@@ -645,16 +646,21 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------
   root.addEventListener('contextmenu', (e) => e.preventDefault())
   // Defensive document-level guard. The root listener above covers events
-  // whose target is `root` or a descendant; but a right-click that ends up
-  // dispatched to the document (some Wacom Intuos driver versions) or to
-  // a sibling overlay element layered on top of the canvas can slip past
-  // the root listener and surface the browser's native context menu
-  // alongside our app menu. This guard suppresses the browser default
-  // only when the click is anywhere over the canvas root, leaving
-  // right-clicks on real inputs (settings panel) untouched.
+  // whose target is `root` or a descendant. But MANY app surfaces live
+  // OUTSIDE root (toolpill, help pill, HUD, text editor overlay, etc.) —
+  // a right-click on those would otherwise surface the browser's native
+  // context menu. Inverted rule: ALWAYS preventDefault unless the target
+  // is a form input where the browser menu (paste / spell-check) is
+  // genuinely useful. Currently the only real inputs live in the settings
+  // side panel; everything else is an inert visual.
   const onDocContextMenu = (e: Event): void => {
-    const target = e.target as Node | null
-    if (target && root.contains(target)) e.preventDefault()
+    const target = e.target as HTMLElement | null
+    if (!target) return
+    // Allow on real form inputs (the settings panel's hex / number /
+    // text inputs). `closest` walks ancestors so a click on a label
+    // inside a form input's container still allows the menu.
+    if (target.closest('input, textarea')) return
+    e.preventDefault()
   }
   document.addEventListener('contextmenu', onDocContextMenu)
   registerCleanup(() => document.removeEventListener('contextmenu', onDocContextMenu))

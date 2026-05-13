@@ -234,7 +234,12 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       editing.text.content = newContent
       const resized = resizeToFit(editing.text)
       editing.text.transform = resized.transform
-      if (lastCtx) applyEditorStyles(el, editing.text, lastCtx)
+      // NOTE: do NOT call `applyEditorStyles` here. Rewriting the editor's
+      // `style.font` / `style.position` / etc. on every keystroke can
+      // trigger browser-specific caret/focus resets that kicked the user
+      // out of edit mode after the first character (observed during user
+      // testing on 2026-05-13). The editable grows naturally with its
+      // content via its CSS sizing — we don't need to bump styles.
       deps.markCommittedDirty()
     }
     el.addEventListener('input', handleInput)
@@ -244,6 +249,10 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       if (!editing) return
       if (e.key === 'Escape') {
         e.preventDefault()
+        // Stop propagation so the global keymap's Esc-cancel handler
+        // doesn't ALSO run on the same event (it would clear popovers /
+        // run the double-tap toggle on top of our commit).
+        e.stopPropagation()
         const prev = deps.getPreviousToolId() ?? 'pen'
         commitEdit()
         deps.setTool(prev)
@@ -254,6 +263,12 @@ export function createTextTool(deps: TextToolDeps): TextTool {
         const k = e.key.toLowerCase()
         if (k === 'b' || k === 'i' || k === 'u') {
           e.preventDefault()
+          // CRITICAL: stop propagation so the document-level keymap
+          // (which has its OWN Cmd+B/I/U handler routed to
+          // toggleFormat() as a backup) doesn't fire on the same
+          // event. Without this both handlers fire and the toggle
+          // cancels itself, making B/I/U appear broken.
+          e.stopPropagation()
           toggleFormat(k === 'b' ? 'bold' : k === 'i' ? 'italic' : 'underline', lastCtx)
           return
         }
@@ -261,6 +276,18 @@ export function createTextTool(deps: TextToolDeps): TextTool {
     }
     el.addEventListener('keydown', handleKey)
     cleanups.push(() => el.removeEventListener('keydown', handleKey))
+
+    // Suppress the browser's native contextmenu over the editor. Without
+    // this the user sees a Chrome / Firefox "Cut / Copy / Paste / spell-
+    // check" menu whenever they right-click while typing. The editor's
+    // own typing UX takes precedence; spell-check / clipboard ops are
+    // already covered by Cmd+X / C / V (browser-native handling of the
+    // contenteditable).
+    const handleContextMenu = (e: Event): void => {
+      e.preventDefault()
+    }
+    el.addEventListener('contextmenu', handleContextMenu)
+    cleanups.push(() => el.removeEventListener('contextmenu', handleContextMenu))
 
     // Outside click commits + exits edit mode (without tool-switch — the
     // tool stays on Text). Capture phase so we win against any tool's

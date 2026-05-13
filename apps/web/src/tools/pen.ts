@@ -464,11 +464,25 @@ export function createPenTool(opts: PenToolOptions): Tool {
       // Camera change, theme change, settings change (e.g. brush switch),
       // undo: re-render in-flight stroke OR hover preview so the live layer
       // is never visually empty between pointer events.
+      //
+      // Tool-activation case (Esc Esc Select→Pen, etc.): `lastHover` is
+      // null after cleanup, so without a fallback the hover preview only
+      // appears on the next pointermove. Prime it from main.ts's last-
+      // known pointer position via `getLastPointer`, then translate to
+      // board space. The user sees the brush preview as soon as the tool
+      // is active.
       if (active) {
         renderStroke(ctx)
-      } else if (lastHover) {
-        renderHover(lastHover.x, lastHover.y, ctx)
+        return
       }
+      if (lastHover) {
+        renderHover(lastHover.x, lastHover.y, ctx)
+        return
+      }
+      const lp = ctx.getLastPointer()
+      const board = ctx.toBoard(lp.x, lp.y)
+      lastHover = board
+      renderHover(board.x, board.y, ctx)
     },
 
     renderContextualMenu(host, dismiss) {
