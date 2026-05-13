@@ -35,6 +35,7 @@
 
 import './style.css'
 import type { BrushConfig, ImageObject, Sample, Stroke, TextObject } from '@whiteboard/shared'
+import { createBatchSelection } from './batchselection'
 import { BRUSH_IDS, BRUSH_PRESETS } from './brushes'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
 import { createClearFlow } from './clearflow'
@@ -72,22 +73,17 @@ import {
   getBrushId,
   getColor,
   getEffectiveBrushConfig,
+  getLaserColor,
   getSettings,
-  getTextBold,
-  getTextColor,
-  getTextFont,
-  getTextItalic,
-  getTextSize,
-  getTextUnderline,
   onChange as onSettingsChange,
   setBrushId,
   setColor,
+  setLaserColor,
 } from './settings'
 import { createPanelContent } from './settings/panel-content'
 import { dismissSidePanel, isSidePanelOpen, showSidePanel } from './sidepanel'
 import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
 import { type StrokeStore, createLocalStrokeStore } from './strokestore'
-import { resizeToFit as resizeTextToFit } from './textgeom'
 import { type TextStore, createLocalTextStore } from './textstore'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { openToolMenu } from './toolmenu'
@@ -262,25 +258,23 @@ async function main(): Promise<void> {
   const nextImageZ = nextObjectZ
   const nextTextZ = nextObjectZ
 
-  // Images marked for batch delete via Cmd/Ctrl+A. Distinct from the Select
-  // tool's single-image selection (which carries handles + transform UX);
-  // this is just a "next Delete press also removes these" flag. Cleared on
-  // pointerdown / tool change / Esc / after delete. Visualized as a thin
-  // outline in the per-frame image render pass below.
-  const imagesMarkedForBatchDelete = new Set<string>()
-  const textsMarkedForBatchDelete = new Set<string>()
-  const clearObjectBatchSelection = (): void => {
-    let changed = false
-    if (imagesMarkedForBatchDelete.size > 0) {
-      imagesMarkedForBatchDelete.clear()
-      changed = true
-    }
-    if (textsMarkedForBatchDelete.size > 0) {
-      textsMarkedForBatchDelete.clear()
-      changed = true
-    }
-    if (changed) committedDirty = true
-  }
+  // Cmd+A → Delete batch state for images + texts. Distinct from the
+  // Select tool's single-object selection (which carries handles +
+  // transform UX); this is just a "next Delete press also removes
+  // these" flag, visualized as a thin outline in the per-frame image
+  // / text render passes below.
+  const batchSelection = createBatchSelection({
+    saveImage: (img) => {
+      void imageStore.updateMeta(img).catch((err) => {
+        console.warn('whiteboard/web: failed to persist image delete:', err)
+      })
+    },
+    saveText: (t) => persistText(t),
+    pushOp: (op) => pushUndoOp(op),
+    markCommittedDirty: () => {
+      committedDirty = true
+    },
+  })
 
   try {
     const { images: persistedImages, compactedBlobRefs } = await imageStore.load()
@@ -501,7 +495,10 @@ async function main(): Promise<void> {
     },
   })
 
-  const laserTool = createLaserTool()
+  const laserTool = createLaserTool({
+    getColor: getLaserColor,
+    setColor: setLaserColor,
+  })
 
   // Track the most recently active tool BEFORE Text was selected. Used
   // by the Text tool's Esc handler to return the user to the tool they
@@ -518,8 +515,7 @@ async function main(): Promise<void> {
       committedDirty = true
     },
     resolveColor: resolveInkColor,
-    setTool: (id) => setTool(id),
-    getPreviousToolId: () => previousToolId,
+    onEscExit: () => setTool(previousToolId ?? 'pen'),
   })
 
   const allTools: Record<'pen' | 'eraser' | 'lasso' | 'select' | 'laser' | 'text', Tool> = {
@@ -603,7 +599,7 @@ async function main(): Promise<void> {
     // Tool change drops Cmd+A image-batch marks. (Pen/Eraser etc. won't
     // surface a "Delete deletes the marked images" affordance, so leaving
     // them marked is misleading.)
-    clearObjectBatchSelection()
+    batchSelection.clear()
     committedDirty = true // active tool changed; selection halos may toggle
   }
 
@@ -711,7 +707,7 @@ async function main(): Promise<void> {
   root.addEventListener(
     'pointerdown',
     () => {
-      clearObjectBatchSelection()
+      batchSelection.clear()
     },
     { capture: true },
   )
@@ -747,39 +743,12 @@ async function main(): Promise<void> {
     }
   }
 
-  const makeTextPasteId = (): string =>
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? `t_${crypto.randomUUID()}`
-      : `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
-
   const pasteTextAtBoard = (content: string, board: { x: number; y: number }): void => {
-    const id = makeTextPasteId()
-    const t: TextObject = {
-      id,
-      content,
-      font: {
-        family: getTextFont(),
-        size: getTextSize(),
-        bold: getTextBold(),
-        italic: getTextItalic(),
-        underline: getTextUnderline(),
-      },
-      color: getTextColor(),
-      transform: { x: board.x, y: board.y, w: 0, h: 0 },
-      z: nextTextZ(),
-      createdAt: Date.now(),
-    }
-    const fitted = resizeTextToFit(t)
-    const final = { ...t, transform: fitted.transform }
-    texts.push(final)
-    persistText(final)
-    pushUndoOp({ kind: 'create-text', textId: id })
-    committedDirty = true
-    // Auto-switch to Select with the new text selected — mirrors the
-    // image-paste UX so the user can drag the new text into place
-    // immediately. Same TDZ-safe pattern as `onPasteSuccess` for
-    // images: the closure body only runs on user input, after all
-    // tools and setTool are populated.
+    // Delegate to the Text tool's factory so paste and on-canvas
+    // creation share the same TextObject construction (sticky defaults,
+    // sizing, persistence, op). Auto-switch to Select afterwards so the
+    // user can immediately drag — mirrors the image-paste UX.
+    const id = textTool.createTextAt(content, board)
     setTool('select')
     selectTool.selectTextById(id)
     showInfoToast('Text pasted')
@@ -1070,8 +1039,7 @@ async function main(): Promise<void> {
       strokes.length = 0
       images.length = 0
       texts.length = 0
-      imagesMarkedForBatchDelete.clear()
-      textsMarkedForBatchDelete.clear()
+      batchSelection.clear()
       undoStack.length = 0
       redoStack.length = 0
       camera.x = 0
@@ -1228,36 +1196,11 @@ async function main(): Promise<void> {
       toggleTextItalic: () => toggleTextFormat('italic'),
       toggleTextUnderline: () => toggleTextFormat('underline'),
       deleteSelection: () => {
-        // Cmd+A also marks images and texts for batch delete. Drain those
-        // sets first (independent of which tool is active) so the user
-        // can hit Cmd+A → Delete from any tool to remove all objects.
-        let didDelete = false
-        if (imagesMarkedForBatchDelete.size > 0) {
-          for (const id of imagesMarkedForBatchDelete) {
-            const img = images.find((i) => i.id === id)
-            if (!img || img.deleted) continue
-            img.deleted = true
-            void imageStore.updateMeta(img).catch((err) => {
-              console.warn('whiteboard/web: failed to persist image delete:', err)
-            })
-            pushUndoOp({ kind: 'delete-image', imageId: id })
-            didDelete = true
-          }
-          imagesMarkedForBatchDelete.clear()
-          committedDirty = true
-        }
-        if (textsMarkedForBatchDelete.size > 0) {
-          for (const id of textsMarkedForBatchDelete) {
-            const t = texts.find((x) => x.id === id)
-            if (!t || t.deleted) continue
-            t.deleted = true
-            persistText(t)
-            pushUndoOp({ kind: 'delete-text', textId: id })
-            didDelete = true
-          }
-          textsMarkedForBatchDelete.clear()
-          committedDirty = true
-        }
+        // Cmd+A also marks images and texts for batch delete. Drain
+        // those sets first (independent of which tool is active) so the
+        // user can hit Cmd+A → Delete from any tool to remove all
+        // objects.
+        let didDelete = batchSelection.deleteAll(images, texts)
         if (tool.current === selectTool && selectTool.deleteSelected()) didDelete = true
         if (tool.current === lassoTool && lassoTool.deleteSelection()) didDelete = true
         return didDelete
@@ -1270,21 +1213,12 @@ async function main(): Promise<void> {
         // to lasso here would clean-up the text tool and destroy the
         // in-progress edit — exactly the wrong outcome for Cmd+A.
         if (textTool.isEditing()) return
-        // Strokes via the existing lasso path …
+        // Strokes via the existing lasso path; images + texts via the
+        // batch-selection module (next Delete removes them; outline
+        // appears in the per-frame image / text render passes).
         setTool('lasso')
         lassoTool.selectAll()
-        // … plus images + texts via the batch-mark sets so the next Delete
-        // removes them too. Visually a thin outline appears around each
-        // (see the per-frame image / text render passes).
-        imagesMarkedForBatchDelete.clear()
-        textsMarkedForBatchDelete.clear()
-        for (const img of images) {
-          if (!img.deleted) imagesMarkedForBatchDelete.add(img.id)
-        }
-        for (const t of texts) {
-          if (!t.deleted) textsMarkedForBatchDelete.add(t.id)
-        }
-        committedDirty = true
+        batchSelection.markAll(images, texts)
       },
       togglePanel,
       cancel: () => {
@@ -1301,10 +1235,7 @@ async function main(): Promise<void> {
         // Esc also drops any Cmd+A batch marks (images OR texts) before
         // falling back to a tool switch — same semantic as Esc in lasso
         // (clear the pending selection).
-        if (imagesMarkedForBatchDelete.size > 0 || textsMarkedForBatchDelete.size > 0) {
-          clearObjectBatchSelection()
-          handled = true
-        }
+        if (batchSelection.clear()) handled = true
         // Esc in lasso mode falls back to the pen tool. The lasso's `cleanup`
         // hook (called from `setTool`) clears any in-progress polygon and
         // selection state, so switching is a clean reset.
@@ -1435,7 +1366,7 @@ async function main(): Promise<void> {
         layer: target.committed,
         camera,
         viewBBox,
-        isMarkedForBatchDelete: (id) => imagesMarkedForBatchDelete.has(id),
+        isMarkedForBatchDelete: (id) => batchSelection.hasImage(id),
       })
 
       // Texts render above images and below the strokes composite. The
@@ -1448,7 +1379,7 @@ async function main(): Promise<void> {
         viewBBox,
         resolveColor: resolveInkColor,
         editingId: textTool.getEditingId(),
-        isMarkedForBatchDelete: (id) => textsMarkedForBatchDelete.has(id),
+        isMarkedForBatchDelete: (id) => batchSelection.hasText(id),
       })
 
       // Composite the strokes offscreen onto committed in pixel space

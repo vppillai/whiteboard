@@ -19,10 +19,9 @@
  * out of scope for v1 — simple per-text formatting is what most users
  * actually want, and the persisted record stays plain text + a font tag.
  *
- * Esc returns to the previous tool — main.ts tracks the previous tool
- * id via the `getPreviousToolId` dep so the user can flip into text mode
- * with `T`, type, hit Esc, and land back in pen / select / wherever
- * they were.
+ * Esc returns to the previous tool — main.ts owns that policy and
+ * receives an `onEscExit` event from this module after the commit lands.
+ * The text tool itself doesn't know which tool was previously active.
  *
  * ToolContext caching: the contextual menu and the external
  * `toggleFormat` entry (Cmd+B/I/U from main.ts's keymap) need access to
@@ -59,7 +58,7 @@ import {
   pointInText,
   resizeToFit,
 } from '../textgeom'
-import type { Tool, ToolContext, ToolId } from './types'
+import type { Tool, ToolContext } from './types'
 
 /** Drag this many screen-pixels to upgrade a pointerdown from "click into
  *  edit mode" to "move drag". Generous because pen-on-tablet drift is
@@ -92,11 +91,13 @@ export interface TextToolDeps {
   /** Resolve a color token ('ink' / hex) to CSS. Mirrors ToolContext for
    *  use in callsites that don't have a ToolContext. */
   resolveColor: (token: string) => string
-  /** Switch back to the previous tool when edit mode exits via Esc. */
-  setTool: (id: ToolId) => void
-  /** Returns the tool that was active before Text was selected. Used
-   *  for Esc-exits-to-previous-tool. Null falls back to 'pen'. */
-  getPreviousToolId: () => ToolId | null
+  /** Fires when the user presses Esc inside the editor (after commit).
+   *  main.ts decides whether to switch tools — the tool itself doesn't
+   *  need to know the previous tool id. Replaces the earlier
+   *  setTool / getPreviousToolId callback pair, which created a
+   *  re-entrant control flow (text → main.setTool → text.cleanup →
+   *  text.commitEdit). The event-only shape keeps direction one-way. */
+  onEscExit: () => void
 }
 
 export interface TextTool extends Tool {
@@ -119,6 +120,12 @@ export interface TextTool extends Tool {
    *  true on success; false if no text with the given id exists or it's
    *  soft-deleted. */
   editTextById(id: string, ctx: ToolContext): boolean
+  /** Create a TextObject at the given board point with the user's sticky
+   *  defaults, persist it, push the `create-text` op, and return its id.
+   *  Used by main.ts's clipboard-text paste path so the paste flow goes
+   *  through the same factory + same op as on-canvas text creation. Does
+   *  NOT enter edit mode — the paste content is already final. */
+  createTextAt(content: string, board: { x: number; y: number }): string
 }
 
 interface EditingState {
@@ -162,6 +169,32 @@ export function createTextTool(deps: TextToolDeps): TextTool {
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
       ? `t_${crypto.randomUUID()}`
       : `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+
+  /** Single factory for new TextObjects with sticky defaults applied + the
+   *  content rect already measured. Used by both placement (empty-space
+   *  pointerdown → enter edit mode) AND clipboard-text paste (content
+   *  arrives pre-filled, never enters edit mode). Pure: builds and
+   *  returns; the caller pushes / persists / op-records as appropriate
+   *  for its flow. */
+  const buildTextFromDefaults = (content: string, board: { x: number; y: number }): TextObject => {
+    const nt: TextObject = {
+      id: makeId(),
+      content,
+      font: {
+        family: getTextFont(),
+        size: getTextSize(),
+        bold: getTextBold(),
+        italic: getTextItalic(),
+        underline: getTextUnderline(),
+      },
+      color: getTextColor(),
+      transform: { x: board.x, y: board.y, w: 0, h: 0 },
+      z: deps.nextZ(),
+      createdAt: Date.now(),
+    }
+    const sized = resizeToFit(nt)
+    return { ...nt, transform: sized.transform }
+  }
 
   /** Convert board → screen using the cached camera. The DOM editor is
    *  fixed-positioned in screen-space; we re-apply on every refresh. */
@@ -298,9 +331,8 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       e.stopPropagation()
       if (e.key === 'Escape') {
         e.preventDefault()
-        const prev = deps.getPreviousToolId() ?? 'pen'
         commitEdit()
-        deps.setTool(prev)
+        deps.onEscExit()
         return
       }
       const meta = e.metaKey || e.ctrlKey
@@ -454,24 +486,11 @@ export function createTextTool(deps: TextToolDeps): TextTool {
         }
         return
       }
-      // Empty space → create new text + enter edit mode.
-      const nt: TextObject = {
-        id: makeId(),
-        content: '',
-        font: {
-          family: getTextFont(),
-          size: getTextSize(),
-          bold: getTextBold(),
-          italic: getTextItalic(),
-          underline: getTextUnderline(),
-        },
-        color: getTextColor(),
-        transform: { x: board.x, y: board.y, w: 0, h: 0 },
-        z: deps.nextZ(),
-        createdAt: Date.now(),
-      }
-      const sized = resizeToFit(nt)
-      const final: TextObject = { ...nt, transform: sized.transform }
+      // Empty space → create new text + enter edit mode. The create-text
+      // op is pushed at commit time (in commitEdit) since an empty text
+      // that the user immediately Esc-out-of without typing shouldn't
+      // pollute undo history.
+      const final = buildTextFromDefaults('', board)
       deps.getTexts().push(final)
       startEdit(final, ctx, true)
     },
@@ -630,6 +649,14 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       lastCtx = ctx
       startEdit(t, ctx, false)
       return true
+    },
+    createTextAt(content: string, board: { x: number; y: number }): string {
+      const t = buildTextFromDefaults(content, board)
+      deps.getTexts().push(t)
+      deps.saveText(t)
+      deps.pushOp({ kind: 'create-text', textId: t.id })
+      deps.markCommittedDirty()
+      return t.id
     },
   }
 }

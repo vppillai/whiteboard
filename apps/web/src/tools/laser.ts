@@ -28,8 +28,16 @@
 import { CURATED_COLORS as PALETTE } from '../colorpicker'
 import { paletteGrid, sectionLabel, swatch } from '../menu-ui'
 import { applyCamera, clearLayer } from '../render'
-import { getLaserColor, setLaserColor } from '../settings'
 import type { Tool, ToolContext } from './types'
+
+export interface LaserToolDeps {
+  /** Read the laser's sticky color (separate from pen color so the laser
+   *  red doesn't bleed into draw mode). */
+  getColor: () => string
+  /** Persist the laser's sticky color after the contextual menu changes
+   *  it. main.ts also calls markCommittedDirty after this. */
+  setColor: (token: string) => void
+}
 
 /** How long any one sample point stays visible (ms). Tuned for "noticeable
  *  but doesn't linger" feel; tldraw uses ~2-3 s. */
@@ -57,7 +65,7 @@ interface Sample {
   continueFromPrev: boolean
 }
 
-export function createLaserTool(): Tool {
+export function createLaserTool(deps: LaserToolDeps): Tool {
   const points: Sample[] = []
   let active = false
   let rafHandle: number | null = null
@@ -159,7 +167,7 @@ export function createLaserTool(): Tool {
       applyCamera(ctx.liveLayer, ctx.camera, ctx.dpr)
       const c = ctx.liveLayer.ctx
       const now = performance.now()
-      const inkColor = ctx.resolveColor(getLaserColor())
+      const inkColor = ctx.resolveColor(deps.getColor())
       c.save()
       c.lineCap = 'butt'
       c.lineJoin = 'round'
@@ -216,14 +224,14 @@ export function createLaserTool(): Tool {
       // color so the user can see what's selected for this tool.
       host.appendChild(sectionLabel('Laser color'))
       const palette = paletteGrid()
-      const activeColor = getLaserColor()
+      const activeColor = deps.getColor()
       for (const c of PALETTE) {
         palette.appendChild(
           swatch({
             color: c,
             active: activeColor === c,
             onClick: () => {
-              setLaserColor(c)
+              deps.setColor(c)
               dismiss()
             },
           }),
