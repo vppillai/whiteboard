@@ -467,6 +467,8 @@ async function main(): Promise<void> {
   const selectTool = createSelectTool({
     getImages: () => images,
     saveImageMeta: persistImageMeta,
+    getTexts: () => texts,
+    saveText: persistText,
     pushOp: (op) => pushUndoOp(op),
     markCommittedDirty: () => {
       committedDirty = true

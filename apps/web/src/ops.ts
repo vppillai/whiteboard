@@ -108,6 +108,18 @@ export type Op =
       before: { content: string; font: TextObject['font']; color: string }
       after: { content: string; font: TextObject['font']; color: string }
     }
+  /**
+   * Rotate a text in place. Symmetric with rotate-image — stores
+   * before/after radians so undo / redo swap without recomputation.
+   * v1.2: emitted by the Select tool when the rotation handle is
+   * dragged on a selected text (text move-only previously).
+   */
+  | {
+      kind: 'rotate-text'
+      textId: string
+      before: number
+      after: number
+    }
 
 export interface OpContext {
   /** All strokes (including soft-deleted ones). Mutated in place by ops. */
@@ -167,6 +179,9 @@ export function applyOp(op: Op, ctx: OpContext): void {
     case 'edit-text':
       setTextEdit(ctx, op.textId, op.after)
       break
+    case 'rotate-text':
+      setTextRotation(ctx, op.textId, op.after)
+      break
   }
   ctx.markDirty()
 }
@@ -209,6 +224,9 @@ export function unapplyOp(op: Op, ctx: OpContext): void {
       break
     case 'edit-text':
       setTextEdit(ctx, op.textId, op.before)
+      break
+    case 'rotate-text':
+      setTextRotation(ctx, op.textId, op.before)
       break
   }
   ctx.markDirty()
@@ -308,5 +326,15 @@ function setTextEdit(
   // back to a heuristic when no DOM is present (e.g. bun:test).
   const measured = resizeTextRect(t)
   t.transform = measured.transform
+  ctx.saveText(t)
+}
+
+function setTextRotation(ctx: OpContext, id: string, rotation: number): void {
+  const t = ctx.texts.find((x) => x.id === id)
+  if (!t) return
+  // Symmetric with setImageRotation: store `undefined` for the zero case
+  // so persisted records don't carry an explicit `rotation: 0` field
+  // (cheaper schema; backward-compat with rotation-less records).
+  t.rotation = rotation || undefined
   ctx.saveText(t)
 }
