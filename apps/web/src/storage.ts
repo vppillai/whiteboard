@@ -22,6 +22,16 @@ const DB_NAME = 'whiteboard-local'
  *   v1: strokes
  *   v2: + images + images-blob (M2.2 — image paste)
  *   v3: + texts (v1.2 — text tool)
+ *   v4: corrective re-upgrade — no new stores. A small set of users
+ *       ended up with v3 databases that were missing the `texts` store
+ *       (reported via NotFoundError at loadAllTexts in dev). Cause
+ *       unclear (likely manual DevTools intervention or a one-time
+ *       upgrade race), but the recovery is cheap: the `if (!contains)`
+ *       guards already create stores idempotently — bumping the
+ *       version forces onupgradeneeded to re-fire and the missing
+ *       texts store gets created. Users with healthy v3 DBs pass
+ *       through onupgradeneeded with all contains-checks returning
+ *       false; no-op upgrade, just bumps the recorded version.
  *
  * Existing databases at any earlier version upgrade in place: the
  * onupgradeneeded branch creates only the missing stores so prior data
@@ -41,13 +51,13 @@ const DB_NAME = 'whiteboard-local'
  *   skip the mutation step. The `oldVersion` is available on the
  *   IDBVersionChangeEvent passed to `onupgradeneeded`.
  *
- *   v1 → v3 multi-step jumps work today because IDB fires
- *   `onupgradeneeded` once with `oldVersion = 1, newVersion = 3`, and
- *   all three `if (!contains)` guards run in sequence to create each
+ *   v1 → v4 multi-step jumps work today because IDB fires
+ *   `onupgradeneeded` once with `oldVersion = 1, newVersion = 4`, and
+ *   all four `if (!contains)` guards run in sequence to create each
  *   missing store. This is the create-only-good path; mutate paths
  *   need the version-range guard.
  */
-const DB_VERSION = 3
+const DB_VERSION = 4
 const STORE_STROKES = 'strokes'
 const STORE_IMAGES = 'images'
 const STORE_IMAGES_BLOB = 'images-blob'

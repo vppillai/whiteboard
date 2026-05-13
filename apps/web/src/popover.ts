@@ -110,6 +110,13 @@ export function showPopover(opts: PopoverOptions): Popover {
   let dismissed = false
   function dismiss(): void {
     if (dismissed) return
+    // TEMP DIAG (remove once pin bug root cause identified): log every
+    // dismiss with pin state + stack so we can see WHO is dismissing a
+    // pinned popover.
+    console.debug(
+      `[popover:${opts.tag ?? '(untagged)'}] dismiss called; pinned=${pinned}`,
+      new Error('dismiss-stack').stack,
+    )
     dismissed = true
     if (active?.popover === popover) active = null
     document.removeEventListener('keydown', onKey, true)
@@ -133,6 +140,8 @@ export function showPopover(opts: PopoverOptions): Popover {
 
   pinBtn.addEventListener('click', () => {
     pinned = !pinned
+    // TEMP DIAG: log pin toggle.
+    console.debug(`[popover:${opts.tag ?? '(untagged)'}] pin toggled; pinned=${pinned}`)
     syncPinUI()
   })
   closeBtn.addEventListener('click', dismiss)
@@ -205,6 +214,8 @@ export function showPopover(opts: PopoverOptions): Popover {
     },
     dismiss,
     noteSelection: () => {
+      // TEMP DIAG: log every noteSelection call.
+      console.debug(`[popover:${opts.tag ?? '(untagged)'}] noteSelection; pinned=${pinned}`)
       if (!pinned) dismiss()
     },
     flashAttention,
