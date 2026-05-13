@@ -16,7 +16,7 @@ import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
 import { getStroke } from 'perfect-freehand'
 import { imageAABB, imageCenter } from '../imagegeom'
 import type { GridType, SettingsV1 } from '../settings'
-import { FONT_CSS, TEXT_PADDING_X, TEXT_PADDING_Y, textAABB } from '../textgeom'
+import { FONT_CSS, TEXT_PADDING_X, TEXT_PADDING_Y, measureText, textAABB } from '../textgeom'
 import { resolveInkColor } from '../theme'
 import type { Bounds } from './bounds'
 
@@ -103,8 +103,11 @@ export function exportSVG(
     if (bb.maxX < bounds.x || bb.minX > boundsMaxX) continue
     if (bb.maxY < bounds.y || bb.minY > boundsMaxY) continue
     const r = t.rotation ?? 0
-    const lines = t.content === '' ? [''] : t.content.split('\n')
-    const lineHeight = t.font.size * 1.25
+    // Use measureText so wrap-width text (greedy word-wrap split during
+    // measurement) emits the same lines on export as it shows in the
+    // editor. Without this, a wrapped block would export as a single
+    // tspan-per-newline (visible only at hard-break positions).
+    const m = measureText(t.content, t.font, t.wrapWidth)
     const baseX = t.transform.x + TEXT_PADDING_X
     const baseY = t.transform.y + TEXT_PADDING_Y
     const fill = resolveInkColor(t.color)
@@ -115,12 +118,12 @@ export function exportSVG(
       Math.abs(r) < 1e-9
         ? ''
         : ` transform="rotate(${fmt((r * 180) / Math.PI)} ${fmt(t.transform.x + t.transform.w / 2)} ${fmt(t.transform.y + t.transform.h / 2)})"`
-    const tspans = lines
+    const tspans = m.lines
       .map((line, i) => {
         // Use dominant-baseline=hanging so the y coordinate is the top of
         // the line — matches canvas's textBaseline='top' so the export
         // aligns with the editor's WYSIWYG view.
-        const y = baseY + i * lineHeight
+        const y = baseY + i * m.lineHeight
         return `<tspan x="${fmt(baseX)}" y="${fmt(y)}">${escapeText(line)}</tspan>`
       })
       .join('')

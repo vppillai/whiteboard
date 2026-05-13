@@ -23,7 +23,7 @@
 import type { TextObject } from '@whiteboard/shared'
 import type { Camera } from './camera'
 import type { CanvasLayer } from './render'
-import { TEXT_PADDING_X, TEXT_PADDING_Y, fontCss, textAABB } from './textgeom'
+import { TEXT_PADDING_X, TEXT_PADDING_Y, fontCss, measureText, textAABB } from './textgeom'
 
 export interface ViewBBox {
   minX: number
@@ -97,19 +97,22 @@ function drawText(
   ctx.font = fontCss(t.font)
   ctx.fillStyle = resolveColor(t.color)
   ctx.textBaseline = 'top'
-  const lineHeight = t.font.size * 1.25
-  const lines = t.content === '' ? [''] : t.content.split('\n')
+  // Get the rendered-line list via measureText so wrap-width text
+  // (where the content was split by greedy word-wrap during measurement)
+  // draws the same lines it measured. Without this, `content.split('\n')`
+  // would skip soft-wrap splits and produce a clipped render.
+  const m = measureText(t.content, t.font, t.wrapWidth)
   const baseX = t.transform.x + TEXT_PADDING_X
   const baseY = t.transform.y + TEXT_PADDING_Y
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? ''
-    const y = baseY + i * lineHeight
+  for (let i = 0; i < m.lines.length; i++) {
+    const line = m.lines[i] ?? ''
+    const y = baseY + i * m.lineHeight
     ctx.fillText(line, baseX, y)
     if (t.font.underline) {
-      // Underline a couple of pixels below the baseline. `measureText`
-      // gives the line's actual width so the underline matches the
-      // glyph extent exactly.
-      const w = ctx.measureText(line).width
+      // Underline a couple of pixels below the baseline. Reuse the
+      // per-line width measureText computed (m.lineWidths[i]) so the
+      // underline matches the glyph extent exactly.
+      const w = m.lineWidths[i] ?? 0
       const underlineY = y + t.font.size * 1.05
       ctx.beginPath()
       ctx.moveTo(baseX, underlineY)

@@ -367,9 +367,14 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
   /** Hit-test against the selected object's handles (board coords). Returns
    *  null if not over any handle. Considers an HANDLE_HIT_PX-radius hit
    *  zone *in screen pixels* converted back to board space via scale.
-   *  Texts only get the 4 CORNER handles for resize — edge handles
-   *  don't make sense for text (since w/h are content-derived, an
-   *  edge drag has no clean visual semantic). Images get all 8. */
+   *
+   *  Per-kind handle availability:
+   *    - Image: 4 corners + 4 edges (8 total). Corners do
+   *      anchor-preserving rect resize; edges do 1-axis rect resize.
+   *    - Text: 4 corners (resize = font-size scale) + 2 horizontal
+   *      edges (`e`, `w`) for wrap-width adjustment. Vertical edges
+   *      (`n`, `s`) are hidden because text height is content-derived
+   *      (changing it doesn't have a useful semantic). */
   function handleAt(
     boardX: number,
     boardY: number,
@@ -378,12 +383,9 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
   ): HandleId | null {
     const tol = HANDLE_HIT_PX / scale
     const positions = handlePositions(view.transform, view.rotation)
-    // Texts only expose the 4 CORNERS (resize = font-size scale; edge
-    // drags don't have a sensible visual semantic for content-driven
-    // rect dimensions). Images get the full 8.
     const enabled =
       view.selection.kind === 'text'
-        ? (['nw', 'ne', 'se', 'sw'] as const)
+        ? (['nw', 'ne', 'se', 'sw', 'e', 'w'] as const)
         : (['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const)
     for (const id of enabled) {
       const p = positions[id]
@@ -847,17 +849,52 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         } else {
           const t = view.obj as TextObject
           if (drag.beforeFontSize !== null && drag.beforeTextSnapshot !== null) {
-            const next = applyTextResize(
-              drag.before,
-              drag.beforeFontSize,
-              drag.beforeTextSnapshot,
-              drag.beforeRotation,
-              drag.kind.resize,
-              drag.kind.anchorBoard,
-              { x: bx, y: by },
-            )
-            t.font = { ...drag.beforeTextSnapshot.font, size: next.newSize }
-            t.transform = next.newTransform
+            const handle = drag.kind.resize
+            const isHorizontalEdge = handle === 'e' || handle === 'w'
+            if (isHorizontalEdge) {
+              // Horizontal edge drag on a text → adjust `wrapWidth`. The
+              // wrap width is the LOCAL-x projection of (pointer -
+              // opposite-edge anchor); content wraps to fit, height
+              // grows naturally. Floor at a sensible minimum so the
+              // user can't shrink wrap below readability.
+              const cos = Math.cos(drag.beforeRotation)
+              const sin = Math.sin(drag.beforeRotation)
+              const vx = bx - drag.kind.anchorBoard.x
+              const vy = by - drag.kind.anchorBoard.y
+              const localXDelta = vx * cos + vy * sin
+              const MIN_WRAP_WIDTH = 40
+              const newWrapWidth = Math.max(
+                MIN_WRAP_WIDTH,
+                Math.abs(localXDelta) - 2 * 6, // subtract TEXT_PADDING_X*2 for content area
+              )
+              t.wrapWidth = newWrapWidth
+              // Re-fit to refresh the rect from the new wrapped content.
+              const fitted = resizeToFit(t)
+              t.transform = fitted.transform
+              // Anchor-preserve the W-edge or E-edge: reposition so the
+              // OPPOSITE edge stays pinned in board space.
+              // The handle direction sign in local coords:
+              const sx = handle === 'e' ? +1 : -1
+              const halfX = (sx * t.transform.w) / 2
+              const halfY = 0 // edge handles only move along their axis
+              const centerX = drag.kind.anchorBoard.x + halfX * cos - halfY * sin
+              const centerY = drag.kind.anchorBoard.y + halfX * sin + halfY * cos
+              t.transform.x = centerX - t.transform.w / 2
+              t.transform.y = centerY - t.transform.h / 2
+            } else {
+              // Corner drag → font-size scaling (existing path).
+              const next = applyTextResize(
+                drag.before,
+                drag.beforeFontSize,
+                drag.beforeTextSnapshot,
+                drag.beforeRotation,
+                handle,
+                drag.kind.anchorBoard,
+                { x: bx, y: by },
+              )
+              t.font = { ...drag.beforeTextSnapshot.font, size: next.newSize }
+              t.transform = next.newTransform
+            }
           }
         }
       }
@@ -909,13 +946,12 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         x: (p.x - ctx.camera.x) * ctx.camera.scale,
         y: (p.y - ctx.camera.y) * ctx.camera.scale,
       })
-      // Texts get the 4 corners only (no edges — those don't have a
-      // sensible visual semantic when the rect is content-driven). The
-      // hit-test filters with the same predicate so visual ↔ interactive
-      // stay in sync.
+      // Texts: 4 corners + 2 horizontal edges (E/W for wrap-width).
+      // Vertical edges (N/S) are hidden because text height is
+      // content-derived. Images: all 8.
       const visibleHandles =
         view.selection.kind === 'text'
-          ? (['nw', 'ne', 'se', 'sw'] as const)
+          ? (['nw', 'ne', 'se', 'sw', 'e', 'w'] as const)
           : (['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const)
       for (const hid of visibleHandles) {
         const s = boardToScreen(positions[hid])

@@ -82,47 +82,83 @@ export interface TextMeasurement {
   lineHeight: number
 }
 
-export function measureText(content: string, font: TextObject['font']): TextMeasurement {
-  // No DOM (bun:test runs without one) — fall back to a coarse heuristic
-  // so tests can construct TextObjects without crashing. `0.6 × size` is
-  // the standard monospace width approximation; close enough for
-  // measurement-light tests. Check BEFORE touching `document` so the
-  // ReferenceError doesn't fire.
-  if (typeof document === 'undefined') {
-    const lines = content === '' ? [''] : content.split('\n')
-    const lineHeight = font.size * LINE_HEIGHT_MULT
-    const lineWidths = lines.map((l) => l.length * font.size * 0.6)
-    return {
-      width: Math.max(0, ...lineWidths),
-      height: lines.length * lineHeight,
-      lineWidths,
-      lines,
-      lineHeight,
+/**
+ * Greedy word-wrap a single line into multiple lines fitting `maxWidth`.
+ * Used only when the text has `wrapWidth` set. Splits on whitespace runs
+ * but keeps trailing whitespace with the preceding word. A single
+ * "word" that exceeds maxWidth on its own is character-split — defensive
+ * for long URLs / no-break sequences.
+ */
+function wrapLine(line: string, maxWidth: number, measure: (s: string) => number): string[] {
+  if (line === '' || maxWidth <= 0) return [line]
+  if (measure(line) <= maxWidth) return [line]
+  const tokens = line.match(/\S+\s*/g) ?? [line]
+  const out: string[] = []
+  let current = ''
+  for (const tok of tokens) {
+    const candidate = current + tok
+    if (measure(candidate) <= maxWidth) {
+      current = candidate
+      continue
+    }
+    if (current) {
+      out.push(current.trimEnd())
+      current = ''
+    }
+    if (measure(tok) > maxWidth) {
+      // Word exceeds the wrap width on its own — character-split.
+      let chunk = ''
+      for (const ch of tok) {
+        if (measure(chunk + ch) > maxWidth) {
+          if (chunk) out.push(chunk)
+          chunk = ch
+        } else {
+          chunk += ch
+        }
+      }
+      if (chunk) current = chunk
+    } else {
+      current = tok
     }
   }
-  if (!measureCanvas) {
-    measureCanvas = document.createElement('canvas')
-    measureCtx = measureCanvas.getContext('2d')
-  }
-  if (!measureCtx) {
-    // DOM exists but canvas context unavailable — same coarse fallback.
-    const lines = content === '' ? [''] : content.split('\n')
-    const lineHeight = font.size * LINE_HEIGHT_MULT
-    const lineWidths = lines.map((l) => l.length * font.size * 0.6)
-    return {
-      width: Math.max(0, ...lineWidths),
-      height: lines.length * lineHeight,
-      lineWidths,
-      lines,
-      lineHeight,
-    }
-  }
-  measureCtx.font = fontCss(font)
-  const lines = content === '' ? [''] : content.split('\n')
+  if (current) out.push(current.trimEnd())
+  return out.length > 0 ? out : [line]
+}
+
+export function measureText(
+  content: string,
+  font: TextObject['font'],
+  wrapWidth?: number,
+): TextMeasurement {
   const lineHeight = font.size * LINE_HEIGHT_MULT
-  const lineWidths = lines.map((l) => measureCtx?.measureText(l).width ?? 0)
+  const rawLines = content === '' ? [''] : content.split('\n')
+
+  // Resolve a measurement primitive. Three tiers, in order of fidelity:
+  //   1. DOM canvas (browser, accurate per-glyph metrics)
+  //   2. `0.6 × size × char-count` heuristic (bun:test / no DOM)
+  //   3. Same heuristic if the canvas context isn't available
+  let measure: (s: string) => number
+  if (typeof document === 'undefined') {
+    measure = (s) => s.length * font.size * 0.6
+  } else {
+    if (!measureCanvas) {
+      measureCanvas = document.createElement('canvas')
+      measureCtx = measureCanvas.getContext('2d')
+    }
+    if (measureCtx) {
+      measureCtx.font = fontCss(font)
+      const ctx = measureCtx
+      measure = (s) => ctx.measureText(s).width
+    } else {
+      measure = (s) => s.length * font.size * 0.6
+    }
+  }
+
+  const lines =
+    wrapWidth && wrapWidth > 0 ? rawLines.flatMap((l) => wrapLine(l, wrapWidth, measure)) : rawLines
+  const lineWidths = lines.map(measure)
   return {
-    width: Math.max(0, ...lineWidths),
+    width: lineWidths.length === 0 ? 0 : Math.max(0, ...lineWidths),
     height: lines.length * lineHeight,
     lineWidths,
     lines,
@@ -137,12 +173,18 @@ export function measureText(content: string, font: TextObject['font']): TextMeas
  * text tool after any edit op (content change, font change, B/I toggle).
  */
 export function resizeToFit(t: TextObject): TextObject {
-  const m = measureText(t.content, t.font)
+  // When wrapWidth is set, the rect's width is FIXED to wrapWidth +
+  // padding — the content wraps to fit that width, and only the height
+  // grows with the wrapped line count. Without wrapWidth, the width is
+  // the natural measured width (longest line).
+  const m = measureText(t.content, t.font, t.wrapWidth)
+  const w =
+    t.wrapWidth && t.wrapWidth > 0 ? t.wrapWidth + TEXT_PADDING_X * 2 : m.width + TEXT_PADDING_X * 2
   return {
     ...t,
     transform: {
       ...t.transform,
-      w: m.width + TEXT_PADDING_X * 2,
+      w,
       h: m.height + TEXT_PADDING_Y * 2,
     },
   }

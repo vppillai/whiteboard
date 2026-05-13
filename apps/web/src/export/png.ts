@@ -16,7 +16,7 @@ import type { ImageStore } from '../imagestore'
 import { type CanvasLayer, applyCamera, clearLayer, drawStrokeOntoLayer } from '../render'
 import type { SettingsV1 } from '../settings'
 import { effectiveOpacity, getStrokePath } from '../stroke'
-import { TEXT_PADDING_X, TEXT_PADDING_Y, fontCss } from '../textgeom'
+import { TEXT_PADDING_X, TEXT_PADDING_Y, fontCss, measureText } from '../textgeom'
 import { resolveInkColor } from '../theme'
 import type { Bounds } from './bounds'
 
@@ -212,23 +212,23 @@ function makeDetachedLayer(w: number, h: number): CanvasLayer {
 
 /** Draw one text object's lines + optional underline onto a 2D context.
  *  Mirrors the on-screen renderer's drawText path in rendertexts.ts —
- *  same metrics so the export matches what the user sees. Caller has
- *  already applied any rotation / translation to the context. */
+ *  same metrics + same wrap-width handling so the export matches what
+ *  the user sees. Caller has already applied any rotation / translation
+ *  to the context. */
 function drawTextOntoCanvas(ctx: CanvasRenderingContext2D, t: TextObject): void {
   ctx.save()
   ctx.font = fontCss(t.font)
   ctx.fillStyle = resolveInkColor(t.color)
   ctx.textBaseline = 'top'
-  const lineHeight = t.font.size * 1.25
-  const lines = t.content === '' ? [''] : t.content.split('\n')
+  const m = measureText(t.content, t.font, t.wrapWidth)
   const baseX = t.transform.x + TEXT_PADDING_X
   const baseY = t.transform.y + TEXT_PADDING_Y
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? ''
-    const y = baseY + i * lineHeight
+  for (let i = 0; i < m.lines.length; i++) {
+    const line = m.lines[i] ?? ''
+    const y = baseY + i * m.lineHeight
     ctx.fillText(line, baseX, y)
     if (t.font.underline) {
-      const w = ctx.measureText(line).width
+      const w = m.lineWidths[i] ?? 0
       const underlineY = y + t.font.size * 1.05
       ctx.beginPath()
       ctx.moveTo(baseX, underlineY)

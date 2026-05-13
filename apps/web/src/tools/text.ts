@@ -177,8 +177,6 @@ export function createTextTool(deps: TextToolDeps): TextTool {
     el.style.position = 'fixed'
     el.style.left = `${screen.x}px`
     el.style.top = `${screen.y}px`
-    el.style.minWidth = `${screenW}px`
-    el.style.minHeight = `${screenH}px`
     // Padding mirrors textgeom.TEXT_PADDING_X/Y so typed text aligns
     // with the rendered text's first-character left edge.
     el.style.padding = `${TEXT_PADDING_Y * ctx.camera.scale}px ${TEXT_PADDING_X * ctx.camera.scale}px`
@@ -188,7 +186,6 @@ export function createTextTool(deps: TextToolDeps): TextTool {
     el.style.background = 'transparent'
     el.style.outline = '1px dashed rgba(37, 99, 235, 0.6)'
     el.style.outlineOffset = '2px'
-    el.style.whiteSpace = 'pre'
     el.style.zIndex = '10000'
     el.style.pointerEvents = 'auto'
     el.style.textDecoration = text.font.underline ? 'underline' : 'none'
@@ -196,6 +193,26 @@ export function createTextTool(deps: TextToolDeps): TextTool {
     el.style.caretColor = ctx.resolveColor(text.color)
     el.style.userSelect = 'text'
     el.style.boxSizing = 'border-box'
+    // Wrap mode: when the TextObject has `wrapWidth`, the editor uses a
+    // FIXED width (= rect screen width) and CSS `pre-wrap` so the
+    // browser does soft-wrap with the same word boundaries our
+    // measureText does. Without wrap, the editor uses `pre` (no
+    // wrapping; the rect grows in width with content).
+    if (text.wrapWidth && text.wrapWidth > 0) {
+      el.style.width = `${screenW}px`
+      el.style.minWidth = `${screenW}px`
+      el.style.maxWidth = `${screenW}px`
+      el.style.minHeight = `${screenH}px`
+      el.style.whiteSpace = 'pre-wrap'
+      el.style.wordWrap = 'break-word'
+    } else {
+      el.style.width = ''
+      el.style.maxWidth = ''
+      el.style.minWidth = `${screenW}px`
+      el.style.minHeight = `${screenH}px`
+      el.style.whiteSpace = 'pre'
+      el.style.wordWrap = ''
+    }
   }
 
   const toggleFormat = (which: 'bold' | 'italic' | 'underline', ctx: ToolContext | null): void => {

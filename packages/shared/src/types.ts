@@ -126,10 +126,13 @@ export interface TextObject {
    *  font-size change; w/h are recomputed from measurement on every edit. */
   transform: { x: number; y: number; w: number; h: number }
   /** Rotation in radians around the rect center. Defaults to 0 when absent.
-   *  Mirrors `ImageObject.rotation` for future symmetry; v1 text tool doesn't
-   *  expose rotation UI, but the field is present so persisted records survive
-   *  if rotation lands later. */
+   *  Mirrors `ImageObject.rotation` for future symmetry. */
   rotation?: number
+  /** When set, text wraps to this width (in board pixels) via greedy
+   *  word-wrap during measurement. Height grows with content. When
+   *  absent (the default), text auto-grows in width — no wrap. v1.2:
+   *  Select tool's E/W edge handles on a text adjust this value. */
+  wrapWidth?: number
   /** Stack order against other texts + images (paste-time monotone). */
   z: number
   /** Wall-clock ms; tie-breaker plus debug aid. */
