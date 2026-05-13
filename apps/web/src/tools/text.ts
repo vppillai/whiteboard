@@ -123,12 +123,15 @@ export interface TextTool extends Tool {
 
 interface EditingState {
   text: TextObject
-  /** Snapshot of the text's content/font/color at edit-start. Used to
-   *  build the edit-text op at commit time. */
+  /** Snapshot of the text's content / font / color / wrapWidth at
+   *  edit-start. Used to build the edit-text op at commit time so
+   *  undo can fully restore. wrapWidth is undefined for auto-width
+   *  texts; both states round-trip through undo correctly. */
   before: {
     content: string
     font: TextObject['font']
     color: string
+    wrapWidth: number | undefined
   }
   /** The contenteditable host. */
   el: HTMLDivElement
@@ -237,6 +240,7 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       content: text.content,
       font: { ...text.font },
       color: text.color,
+      wrapWidth: text.wrapWidth,
     }
     const el = document.createElement('div')
     el.className = 'whiteboard-text-editor'
@@ -346,6 +350,7 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       content: e.text.content,
       font: { ...e.text.font },
       color: e.text.color,
+      wrapWidth: e.text.wrapWidth,
     }
 
     if (e.isNewText && e.text.content === '') {
@@ -376,7 +381,8 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       e.before.font.bold !== after.font.bold ||
       e.before.font.italic !== after.font.italic ||
       e.before.font.underline !== after.font.underline ||
-      e.before.color !== after.color
+      e.before.color !== after.color ||
+      e.before.wrapWidth !== after.wrapWidth
     if (changed) {
       deps.saveText(e.text)
       deps.pushOp({
@@ -571,17 +577,13 @@ export function createTextTool(deps: TextToolDeps): TextTool {
     },
 
     cleanup(): void {
-      // Tool switched while editing — best-effort persist + tear down the
-      // overlay. No op is pushed here because the user didn't take a
-      // tool-level action; the in-memory state stays as the user left it.
-      if (editing) {
-        for (const c of editing.cleanups) c()
-        editing.el.remove()
-        if (editing.text.content !== '') {
-          deps.saveText(editing.text)
-        }
-        editing = null
-      }
+      // Tool switched while editing — commit through the normal path so
+      // the create-text / edit-text op lands in undo. Without this the
+      // user could type into a new text, switch to Pen, and find that
+      // undo can't reverse the edit (the text persists but no op was
+      // ever pushed). Same data-loss shape as the v1.1.0 Tier-A "clear
+      // board didn't reset images" bug (image-paste batch).
+      commitEdit()
       drag = null
       lastCtx = null
     },

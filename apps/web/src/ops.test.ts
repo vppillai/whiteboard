@@ -20,6 +20,7 @@ function mkText(id: string, overrides: Partial<TextObject> = {}): TextObject {
     content: 'hello',
     font: { family: 'mono', size: 12, bold: false, italic: false, underline: false },
     color: 'ink',
+    wrapWidth: undefined,
     transform: { x: 10, y: 20, w: 40, h: 16 },
     z: 1,
     createdAt: 0,
@@ -138,11 +139,13 @@ describe('ops: edit-text', () => {
       content: 'hello',
       font: { family: 'mono' as const, size: 12, bold: false, italic: false, underline: false },
       color: 'ink',
+      wrapWidth: undefined,
     }
     const after = {
       content: 'world!',
       font: { family: 'serif' as const, size: 24, bold: true, italic: true, underline: true },
       color: '#ef4444',
+      wrapWidth: undefined,
     }
     const h = mkHarness([mkText('a', before)])
     const op: Op = { kind: 'edit-text', textId: 'a', before, after }
@@ -164,6 +167,7 @@ describe('ops: edit-text', () => {
       content: '',
       font: { family: 'mono' as const, size: 12, bold: false, italic: false, underline: false },
       color: 'ink',
+      wrapWidth: undefined,
     }
     const after = { ...before, content: 'abc' }
     const h = mkHarness([mkText('a', { ...before, transform: { x: 0, y: 0, w: 0, h: 0 } })])
@@ -183,6 +187,7 @@ describe('ops: edit-text', () => {
       content: 'a',
       font: { family: 'mono' as const, size: 12, bold: false, italic: false, underline: false },
       color: 'ink',
+      wrapWidth: undefined,
     }
     const after = { ...before, content: 'b' }
     const h = mkHarness([mkText('a', before)])
@@ -200,7 +205,12 @@ describe('ops dispatch: markDirty fires once per apply / unapply', () => {
     const h = mkHarness([t])
     const before = { ...t.transform }
     const after = { ...before, x: 100 }
-    const editBefore = { content: t.content, font: { ...t.font }, color: t.color }
+    const editBefore = {
+      content: t.content,
+      font: { ...t.font },
+      color: t.color,
+      wrapWidth: t.wrapWidth,
+    }
     const editAfter = { ...editBefore, content: 'changed' }
     const ops: Op[] = [
       { kind: 'create-text', textId: 'a' },

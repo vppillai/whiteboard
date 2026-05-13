@@ -95,18 +95,30 @@ export type Op =
       after: TextObject['transform']
     }
   /**
-   * Edit a text's content / font / color in one undoable step. Coalesced
-   * across the whole edit session (typing N keys + B/I/U toggles + font
-   * change collapses to a single op pushed when edit mode exits). Stores
-   * the full before/after object payload because individual field deltas
-   * would multiply op kinds — the payload is small (string + a few
-   * fields) so the simplicity is worth the bytes.
+   * Edit a text's content / font / color / wrapWidth in one undoable
+   * step. Coalesced across the whole edit session (typing N keys +
+   * B/I/U toggles + font change + E/W edge drag collapses to a single
+   * op pushed when edit mode exits). Stores the full before/after
+   * payload because individual field deltas would multiply op kinds —
+   * the payload is small (string + a few fields) so the simplicity is
+   * worth the bytes. `wrapWidth` may be `undefined` (auto-width) or
+   * a positive number; both round-trip through undo correctly.
    */
   | {
       kind: 'edit-text'
       textId: string
-      before: { content: string; font: TextObject['font']; color: string }
-      after: { content: string; font: TextObject['font']; color: string }
+      before: {
+        content: string
+        font: TextObject['font']
+        color: string
+        wrapWidth: number | undefined
+      }
+      after: {
+        content: string
+        font: TextObject['font']
+        color: string
+        wrapWidth: number | undefined
+      }
     }
   /**
    * Rotate a text in place. Symmetric with rotate-image — stores
@@ -309,21 +321,30 @@ function setTextTransform(ctx: OpContext, id: string, transform: TextObject['tra
 }
 
 /** Apply an edit-text op's payload to the matching text. Recomputes the
- *  transform.w/h via measureText so the rect always matches content;
- *  the op stores only the content + font + color, not the derived size. */
+ *  transform.w/h via measureText so the rect always matches content +
+ *  wrapWidth; the op stores only the content / font / color / wrapWidth,
+ *  not the derived size. wrapWidth is restored explicitly so an edge-
+ *  handle drag's undo correctly puts the wrap layout back. */
 function setTextEdit(
   ctx: OpContext,
   id: string,
-  payload: { content: string; font: TextObject['font']; color: string },
+  payload: {
+    content: string
+    font: TextObject['font']
+    color: string
+    wrapWidth: number | undefined
+  },
 ): void {
   const t = ctx.texts.find((x) => x.id === id)
   if (!t) return
   t.content = payload.content
   t.font = { ...payload.font }
   t.color = payload.color
-  // Re-fit the rect to the new content + font so move/resize stay in sync
-  // with edit. `resizeTextRect` measures via a detached canvas and falls
-  // back to a heuristic when no DOM is present (e.g. bun:test).
+  t.wrapWidth = payload.wrapWidth
+  // Re-fit the rect to the new content + font + wrapWidth so move/
+  // resize stay in sync with edit. `resizeTextRect` measures via a
+  // detached canvas and falls back to a heuristic when no DOM is
+  // present (e.g. bun:test).
   const measured = resizeTextRect(t)
   t.transform = measured.transform
   ctx.saveText(t)

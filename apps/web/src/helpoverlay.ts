@@ -35,7 +35,7 @@ const SHORTCUTS = [
   '⌘/Ctrl + Shift + K clear board (confirm twice)',
   '',
   'M                  toggle metrics',
-  'Shift + T          cycle theme  (moved from T in v1.2)',
+  'Shift + T          cycle theme',
   '?                  toggle this help',
   '',
   '⌘/Ctrl + 0         reset zoom',

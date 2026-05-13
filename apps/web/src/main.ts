@@ -10,7 +10,7 @@
  *   E                  — eraser (tap toggles, hold spring-loads — see eraserhold.ts)
  *   1 – 5              — brush preset
  *   M                  — toggle metrics HUD
- *   T                  — cycle theme
+ *   T                  — text tool  (Shift+T cycles theme)
  *   ?                  — toggle help overlay
  *   Esc                — cancel / dismiss popover
  *   ⌘/Ctrl + Z         — undo
@@ -262,7 +262,7 @@ async function main(): Promise<void> {
   // outline in the per-frame image render pass below.
   const imagesMarkedForBatchDelete = new Set<string>()
   const textsMarkedForBatchDelete = new Set<string>()
-  const clearImageBatchSelection = (): void => {
+  const clearObjectBatchSelection = (): void => {
     let changed = false
     if (imagesMarkedForBatchDelete.size > 0) {
       imagesMarkedForBatchDelete.clear()
@@ -587,9 +587,18 @@ async function main(): Promise<void> {
     // Tool change drops Cmd+A image-batch marks. (Pen/Eraser etc. won't
     // surface a "Delete deletes the marked images" affordance, so leaving
     // them marked is misleading.)
-    clearImageBatchSelection()
+    clearObjectBatchSelection()
     committedDirty = true // active tool changed; selection halos may toggle
   }
+
+  // Last-pointer (for popover anchoring on keyboard shortcuts AND for
+  // pen.redraw's hover-prime via toolCtx.getLastPointer). Declared
+  // BEFORE toolCtx so the closure below captures an already-initialized
+  // binding instead of relying on toolCtx not being invoked
+  // synchronously between this line and the let assignment further
+  // down. Updated on every pointermove (the listener is later in this
+  // function but the binding is hoisted into TDZ — see comment there).
+  let lastPointer = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
 
   // ---------------------------------------------------------------------
   //  Tool context — passed to every tool event. Carries cross-cutting
@@ -634,7 +643,9 @@ async function main(): Promise<void> {
   // `noteSampleCount` callback through ToolContext (matches the
   // `markCommittedDirty` pattern) so tools report from where they already
   // hold the coalesced array.
-  let lastPointer = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+  // `lastPointer` is declared earlier (above toolCtx) so its binding is
+  // already initialized when toolCtx's getLastPointer closure captures
+  // it. The listener body below assigns into that same binding.
   root.addEventListener('pointermove', (e) => {
     if (!(e instanceof PointerEvent)) return
     lastPointer = { x: e.clientX, y: e.clientY }
@@ -684,7 +695,7 @@ async function main(): Promise<void> {
   root.addEventListener(
     'pointerdown',
     () => {
-      clearImageBatchSelection()
+      clearObjectBatchSelection()
     },
     { capture: true },
   )
@@ -1015,10 +1026,14 @@ async function main(): Promise<void> {
     if (sel?.kind !== 'text') return
     const t = texts.find((x) => x.id === sel.id)
     if (!t || t.deleted) return
+    // Spread `t.font` for the snapshot — `t.font` is mutated in-place
+    // below, and `before.font` must be a SEPARATE object (not a live
+    // reference) for undo to correctly restore the pre-toggle state.
     const before = {
       content: t.content,
       font: { ...t.font },
       color: t.color,
+      wrapWidth: t.wrapWidth,
     }
     if (which === 'bold') t.font.bold = !t.font.bold
     else if (which === 'italic') t.font.italic = !t.font.italic
@@ -1028,6 +1043,7 @@ async function main(): Promise<void> {
       content: t.content,
       font: { ...t.font },
       color: t.color,
+      wrapWidth: t.wrapWidth,
     }
     pushUndoOp({ kind: 'edit-text', textId: t.id, before, after })
     committedDirty = true
@@ -1122,6 +1138,13 @@ async function main(): Promise<void> {
         return didDelete
       },
       selectAll: () => {
+        // Guard: if a text editor is open, defer to its native Cmd+A
+        // (the editor's keydown handler stops propagation; this guard
+        // catches the edge case where focus drifted off the editor
+        // momentarily and the global keymap saw the event). Switching
+        // to lasso here would clean-up the text tool and destroy the
+        // in-progress edit — exactly the wrong outcome for Cmd+A.
+        if (textTool.isEditing()) return
         // Strokes via the existing lasso path …
         setTool('lasso')
         lassoTool.selectAll()
@@ -1154,7 +1177,7 @@ async function main(): Promise<void> {
         // falling back to a tool switch — same semantic as Esc in lasso
         // (clear the pending selection).
         if (imagesMarkedForBatchDelete.size > 0 || textsMarkedForBatchDelete.size > 0) {
-          clearImageBatchSelection()
+          clearObjectBatchSelection()
           handled = true
         }
         // Esc in lasso mode falls back to the pen tool. The lasso's `cleanup`

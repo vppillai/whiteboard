@@ -39,7 +39,7 @@ import { imageCenter, pointInImage, rotateAroundPoint } from '../imagegeom'
 import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
 import type { Op } from '../ops'
 import { applyCamera, clearLayer } from '../render'
-import { pointInText, resizeToFit } from '../textgeom'
+import { TEXT_PADDING_X, pointInText, resizeToFit } from '../textgeom'
 import type { Tool, ToolContext } from './types'
 
 type Selection = { kind: 'image'; id: string } | { kind: 'text'; id: string }
@@ -86,6 +86,7 @@ interface DragState {
     content: string
     font: TextObject['font']
     color: string
+    wrapWidth: number | undefined
   } | null
   /** Board-space coords of the pointer at pointerdown. */
   startBoard: { x: number; y: number }
@@ -474,29 +475,36 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       return
     }
     if (isResize) {
-      // Resize for text mutates font.size (and re-fits transform) — that's
-      // an edit-text op in the persistence model, not transform-text.
-      // d.beforeTextSnapshot captures content + font + color at drag-start.
-      if (d.beforeTextSnapshot) {
-        const after = {
-          content: t.content,
-          font: { ...t.font },
-          color: t.color,
-        }
-        const changed =
-          d.beforeTextSnapshot.font.size !== after.font.size ||
-          d.beforeTextSnapshot.font.family !== after.font.family ||
-          d.beforeTextSnapshot.font.bold !== after.font.bold ||
-          d.beforeTextSnapshot.font.italic !== after.font.italic ||
-          d.beforeTextSnapshot.font.underline !== after.font.underline
-        if (changed) {
-          deps.pushOp({
-            kind: 'edit-text',
-            textId: t.id,
-            before: d.beforeTextSnapshot,
-            after,
-          })
-        }
+      // Resize for text emits edit-text in two flavors:
+      //   - Corner drag: scales font.size → font payload change.
+      //   - E/W edge drag: mutates wrapWidth → wrapWidth payload change.
+      // Both are captured in `beforeTextSnapshot` (taken at drag-start)
+      // vs current state. wrapWidth is in the change predicate so the
+      // E/W drag's undo path correctly restores the auto-width vs
+      // wrap-width layout — without this the op silently disappeared.
+      if (!d.beforeTextSnapshot) {
+        throw new Error('select: text resize commit missing beforeTextSnapshot')
+      }
+      const after = {
+        content: t.content,
+        font: { ...t.font },
+        color: t.color,
+        wrapWidth: t.wrapWidth,
+      }
+      const changed =
+        d.beforeTextSnapshot.font.size !== after.font.size ||
+        d.beforeTextSnapshot.font.family !== after.font.family ||
+        d.beforeTextSnapshot.font.bold !== after.font.bold ||
+        d.beforeTextSnapshot.font.italic !== after.font.italic ||
+        d.beforeTextSnapshot.font.underline !== after.font.underline ||
+        d.beforeTextSnapshot.wrapWidth !== after.wrapWidth
+      if (changed) {
+        deps.pushOp({
+          kind: 'edit-text',
+          textId: t.id,
+          before: d.beforeTextSnapshot,
+          after,
+        })
       }
       return
     }
@@ -729,6 +737,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
                   content: (view.obj as TextObject).content,
                   font: { ...(view.obj as TextObject).font },
                   color: (view.obj as TextObject).color,
+                  wrapWidth: (view.obj as TextObject).wrapWidth,
                 }
               : null
           drag = {
@@ -791,7 +800,12 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         }
       }
 
-      // Clicked empty space → deselect.
+      // Clicked empty space → deselect. Also clear the double-click
+      // window so a "click text → click empty → quick-click same text"
+      // sequence doesn't unexpectedly open the editor (the empty-space
+      // click is a genuine reset of intent).
+      lastTextDownAt = Number.NEGATIVE_INFINITY
+      lastTextDownId = null
       if (selected) {
         selected = null
         ctx.markCommittedDirty()
@@ -865,7 +879,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
               const MIN_WRAP_WIDTH = 40
               const newWrapWidth = Math.max(
                 MIN_WRAP_WIDTH,
-                Math.abs(localXDelta) - 2 * 6, // subtract TEXT_PADDING_X*2 for content area
+                Math.abs(localXDelta) - 2 * TEXT_PADDING_X,
               )
               t.wrapWidth = newWrapWidth
               // Re-fit to refresh the rect from the new wrapped content.
@@ -1002,6 +1016,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
           content: t.content,
           font: { ...t.font },
           color: t.color,
+          wrapWidth: t.wrapWidth,
         }
         mutate(t)
         // Re-fit the rect to any font-affecting changes so the rendered
@@ -1013,6 +1028,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
           content: t.content,
           font: { ...t.font },
           color: t.color,
+          wrapWidth: t.wrapWidth,
         }
         deps.pushOp({ kind: 'edit-text', textId: t.id, before, after })
         deps.markCommittedDirty()

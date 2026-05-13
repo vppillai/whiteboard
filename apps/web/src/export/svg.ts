@@ -120,16 +120,18 @@ export function exportSVG(
         : ` transform="rotate(${fmt((r * 180) / Math.PI)} ${fmt(t.transform.x + t.transform.w / 2)} ${fmt(t.transform.y + t.transform.h / 2)})"`
     const tspans = m.lines
       .map((line, i) => {
-        // Use dominant-baseline=hanging so the y coordinate is the top of
-        // the line — matches canvas's textBaseline='top' so the export
-        // aligns with the editor's WYSIWYG view.
+        // `dominant-baseline=hanging` on each <tspan> makes the y
+        // coordinate the TOP of the line (matches canvas's
+        // textBaseline='top' so the SVG export aligns with the editor's
+        // WYSIWYG view). On the parent <text> it would be inert here
+        // because per-<tspan> y= overrides it.
         const y = baseY + i * m.lineHeight
-        return `<tspan x="${fmt(baseX)}" y="${fmt(y)}">${escapeText(line)}</tspan>`
+        return `<tspan x="${fmt(baseX)}" y="${fmt(y)}" dominant-baseline="hanging">${escapeText(line)}</tspan>`
       })
       .join('')
     const textDecoration = t.font.underline ? ' text-decoration="underline"' : ''
     textEls.push(
-      `<text font-family="${escapeAttr(fontFamily)}" font-size="${fmt(t.font.size)}" fill="${escapeAttr(fill)}" dominant-baseline="hanging"${fontStyle}${fontWeight}${textDecoration}${transformAttr}>${tspans}</text>`,
+      `<text font-family="${escapeAttr(fontFamily)}" font-size="${fmt(t.font.size)}" fill="${escapeAttr(fill)}"${fontStyle}${fontWeight}${textDecoration}${transformAttr}>${tspans}</text>`,
     )
   }
 
