@@ -720,22 +720,33 @@ async function main(): Promise<void> {
     ) {
       return
     }
-    const dt = e.clipboardData
-    if (!dt) return
     // Position uses the last known cursor location (in client coords →
     // board coords). Keyboard-triggered paste with no prior mouse activity
     // falls back to viewport center.
     const pasteAt = (): { x: number; y: number } => toBoard(lastPointer.x, lastPointer.y)
     void (async () => {
-      const blob = await readImageFromDataTransfer(dt)
-      if (blob) {
-        e.preventDefault()
-        await pasteImageFromBlob(blob, pasteAt(), imagePasteCtx)
-        return
+      // Try the synchronous ClipboardEvent path first when clipboardData
+      // is non-null. This catches drag-drop, file managers, screenshot
+      // utilities that populate `dataTransfer.files` / `dataTransfer.items`
+      // with `kind === 'file'`.
+      const dt = e.clipboardData
+      if (dt) {
+        const blob = await readImageFromDataTransfer(dt)
+        if (blob) {
+          e.preventDefault()
+          await pasteImageFromBlob(blob, pasteAt(), imagePasteCtx)
+          return
+        }
       }
-      // Fallback: async clipboard API. Some browsers (Safari with screen-
-      // capture tools, certain Linux DEs) only expose image data through
-      // the async API, not the synchronous ClipboardEvent.
+      // Async Clipboard API fallback. CRITICAL for:
+      //   - Google Docs / Google Slides image copy (puts image bytes
+      //     only on the async API, not on `clipboardData.files`)
+      //   - Safari with screenshot / annotation utilities
+      //   - Some Linux DEs that route image data through the async
+      //     clipboard portal only
+      // Note: this runs even if `e.clipboardData` was null — without
+      // this, the Google Docs round-trip (copy from sheet → paste back
+      // into whiteboard) silently dropped the image.
       const fallback = await readImageFromClipboard()
       if (fallback) {
         e.preventDefault()

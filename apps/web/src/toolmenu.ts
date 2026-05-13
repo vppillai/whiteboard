@@ -28,13 +28,16 @@ interface ToolDef {
   enabled: boolean
 }
 
+// Right-click tool order — user-requested grouping: input verbs first
+// (pen, text), then mark-removal (eraser), then selection / transform
+// (lasso, select). Laser sits at the end as a presentation accent.
 const TOOLS: readonly ToolDef[] = [
   { id: 'pen', label: 'Draw', enabled: true },
+  { id: 'text', label: 'Text', enabled: true },
   { id: 'eraser', label: 'Eraser', enabled: true },
   { id: 'lasso', label: 'Lasso', enabled: true },
   { id: 'select', label: 'Select', enabled: true },
   { id: 'laser', label: 'Laser', enabled: true },
-  { id: 'text', label: 'Text', enabled: true },
 ]
 
 export interface ToolMenuOptions {

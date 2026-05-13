@@ -357,10 +357,33 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       // Discard the empty starter — no point persisting an invisible
       // record. Roll back the in-memory insertion the tool did at
       // pointer-down time; persist as deleted so a future load skips it.
+      // No undo op because there was nothing to undo to (the create
+      // never happened from the user's perspective).
       const texts = deps.getTexts()
       const idx = texts.indexOf(e.text)
       if (idx >= 0) texts.splice(idx, 1)
       deps.saveText({ ...e.text, deleted: true })
+      deps.markCommittedDirty()
+      return
+    }
+
+    if (!e.isNewText && e.text.content === '') {
+      // EXISTING text edited down to empty content → soft-delete so the
+      // user doesn't have an invisible box on the canvas. Restore the
+      // BEFORE state in-memory before saving so a single undo brings
+      // back the original content + formatting AND un-deletes — the
+      // user sees their pre-edit text restored in one Cmd+Z, not two.
+      e.text.content = e.before.content
+      e.text.font = { ...e.before.font }
+      e.text.color = e.before.color
+      e.text.wrapWidth = e.before.wrapWidth
+      // Re-fit so the rect matches the restored content (otherwise
+      // it'd retain the zero-content size).
+      const refitted = resizeToFit(e.text)
+      e.text.transform = refitted.transform
+      e.text.deleted = true
+      deps.saveText(e.text)
+      deps.pushOp({ kind: 'delete-text', textId: e.text.id })
       deps.markCommittedDirty()
       return
     }
