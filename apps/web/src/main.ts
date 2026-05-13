@@ -970,15 +970,16 @@ async function main(): Promise<void> {
           onCameraChange()
         },
         onZoomToFit: () => {
-          if (
-            fitToContent(
-              camera,
-              { strokes, images, texts },
-              { width: target.width, height: target.height },
-            )
-          ) {
-            onCameraChange()
-          }
+          // Empty board → reset zoom (fitToContent returns false on
+          // empty). Fall through so "Fit to view" always does something
+          // visible rather than no-op'ing on a fresh canvas.
+          const fit = fitToContent(
+            camera,
+            { strokes, images, texts },
+            { width: target.width, height: target.height },
+          )
+          if (!fit) resetZoom(camera)
+          onCameraChange()
         },
         onClear: clearFlow.request,
         togglePanel,
@@ -1163,15 +1164,16 @@ async function main(): Promise<void> {
         onCameraChange()
       },
       zoomToFit: () => {
-        if (
-          fitToContent(
-            camera,
-            { strokes, images, texts },
-            { width: target.width, height: target.height },
-          )
-        ) {
-          onCameraChange()
-        }
+        // Same fallback as the right-click "Fit to view" pill — empty
+        // board resets zoom so the keyboard shortcut is never a silent
+        // no-op.
+        const fit = fitToContent(
+          camera,
+          { strokes, images, texts },
+          { width: target.width, height: target.height },
+        )
+        if (!fit) resetZoom(camera)
+        onCameraChange()
       },
       clear: clearFlow.request,
       toggleTheme: cycleMode,
