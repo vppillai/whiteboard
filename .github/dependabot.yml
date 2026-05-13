@@ -1,0 +1,44 @@
+# Dependabot — automatic dependency-vulnerability PRs.
+#
+# Scope:
+#   - npm (root + workspaces): the main JS dependency surface.
+#   - github-actions: keeps workflow action versions current so we don't
+#     drift onto deprecated runners or vulnerable action releases.
+#
+# Cadence is weekly because the project is single-SPA and dependency
+# churn is low — daily would mostly create noise. `open-pull-requests-limit`
+# caps each ecosystem's open PR count so a flurry of minor bumps doesn't
+# bury the PR list.
+
+version: 2
+updates:
+  # Root package.json + the bun workspaces (apps/web, apps/server,
+  # packages/shared). Dependabot walks `workspaces` automatically.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: chore(deps)
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: ci(deps)
+      include: scope
