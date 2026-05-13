@@ -156,10 +156,10 @@ export interface OpContext {
 export function applyOp(op: Op, ctx: OpContext): void {
   switch (op.kind) {
     case 'create':
-      flipDeleted(ctx, [op.strokeId], false)
+      flipStrokesDeleted(ctx, [op.strokeId], false)
       break
     case 'delete':
-      flipDeleted(ctx, op.strokeIds, true)
+      flipStrokesDeleted(ctx, op.strokeIds, true)
       break
     case 'move':
       translateStrokes(ctx, op.strokeIds, op.dx, op.dy)
@@ -202,10 +202,10 @@ export function applyOp(op: Op, ctx: OpContext): void {
 export function unapplyOp(op: Op, ctx: OpContext): void {
   switch (op.kind) {
     case 'create':
-      flipDeleted(ctx, [op.strokeId], true)
+      flipStrokesDeleted(ctx, [op.strokeId], true)
       break
     case 'delete':
-      flipDeleted(ctx, op.strokeIds, false)
+      flipStrokesDeleted(ctx, op.strokeIds, false)
       break
     case 'move':
       translateStrokes(ctx, op.strokeIds, -op.dx, -op.dy)
@@ -244,13 +244,32 @@ export function unapplyOp(op: Op, ctx: OpContext): void {
   ctx.markDirty()
 }
 
-function flipDeleted(ctx: OpContext, ids: readonly string[], deleted: boolean): void {
-  for (const id of ids) {
-    const stroke = ctx.strokes.find((s) => s.id === id)
-    if (!stroke) continue
-    stroke.deleted = deleted || undefined
-    ctx.saveStroke(stroke)
-  }
+/**
+ * Generic soft-delete flip for any board-resident object kind. The three
+ * earlier per-kind helpers (`flipDeleted` for strokes, `flipImageDeleted`,
+ * `flipTextDeleted`) were 5-line copies of this same pattern — a 4th
+ * object kind (shapes / sticky notes) would have added a 4th copy and a
+ * 4th place that could drift on the `deleted || undefined` invariant.
+ *
+ * `deleted || undefined` is intentional: it stores `true` for deleted
+ * and `undefined` (omitted on serialization) for live, keeping persisted
+ * records compact and backward-compatible with rotation-less / delete-
+ * less records.
+ */
+function flipDeletedOn<T extends { id: string; deleted?: boolean }>(
+  arr: readonly T[],
+  id: string,
+  deleted: boolean,
+  save: (obj: T) => void,
+): void {
+  const obj = arr.find((x) => x.id === id)
+  if (!obj) return
+  obj.deleted = deleted || undefined
+  save(obj)
+}
+
+function flipStrokesDeleted(ctx: OpContext, ids: readonly string[], deleted: boolean): void {
+  for (const id of ids) flipDeletedOn(ctx.strokes, id, deleted, ctx.saveStroke)
 }
 
 function translateStrokes(ctx: OpContext, ids: readonly string[], dx: number, dy: number): void {
@@ -286,10 +305,7 @@ function applyStampEdits(ctx: OpContext, edits: readonly StampEdit[], add: boole
 }
 
 function flipImageDeleted(ctx: OpContext, id: string, deleted: boolean): void {
-  const img = ctx.images.find((i) => i.id === id)
-  if (!img) return
-  img.deleted = deleted || undefined
-  ctx.saveImageMeta(img)
+  flipDeletedOn(ctx.images, id, deleted, ctx.saveImageMeta)
 }
 
 function setImageTransform(ctx: OpContext, id: string, transform: ImageObject['transform']): void {
@@ -307,10 +323,7 @@ function setImageRotation(ctx: OpContext, id: string, rotation: number): void {
 }
 
 function flipTextDeleted(ctx: OpContext, id: string, deleted: boolean): void {
-  const t = ctx.texts.find((x) => x.id === id)
-  if (!t) return
-  t.deleted = deleted || undefined
-  ctx.saveText(t)
+  flipDeletedOn(ctx.texts, id, deleted, ctx.saveText)
 }
 
 function setTextTransform(ctx: OpContext, id: string, transform: TextObject['transform']): void {

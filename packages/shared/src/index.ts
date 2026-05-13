@@ -1,4 +1,5 @@
 export type {
+  BoardObject,
   BrushConfig,
   ImageObject,
   Sample,

@@ -9,7 +9,6 @@ function mkStroke(opts: Partial<Stroke> = {}): Stroke {
   return {
     id: 's1',
     brush: {
-      id: 'fine-tip',
       color: 'ink',
       size: 2,
       thinning: 0,
@@ -19,10 +18,11 @@ function mkStroke(opts: Partial<Stroke> = {}): Stroke {
       taperEnd: 0,
       capStart: true,
       capEnd: true,
+      pressureGamma: 1,
     },
     samples: [
-      { x: 0, y: 0, pressure: 0.5, t: 0 },
-      { x: 100, y: 100, pressure: 0.5, t: 10 },
+      { x: 0, y: 0, p: 0.5, t: 0 },
+      { x: 100, y: 100, p: 0.5, t: 10 },
     ],
     startedAt: 0,
     ...opts,
@@ -32,7 +32,9 @@ function mkStroke(opts: Partial<Stroke> = {}): Stroke {
 function mkImage(opts: Partial<ImageObject> = {}): ImageObject {
   return {
     id: 'i1',
-    blobKey: 'k1',
+    blobRef: 'i1',
+    format: 'png',
+    natural: { w: 100, h: 100 },
     transform: { x: 200, y: 200, w: 100, h: 100 },
     z: 1,
     createdAt: 0,

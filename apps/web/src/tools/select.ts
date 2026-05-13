@@ -1195,6 +1195,12 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       if (!t || t.deleted) return
 
       const applyEdit = (mutate: (text: TextObject) => void): void => {
+        // Commit any in-flight drag BEFORE snapshotting `before` — without
+        // this, picking a color while a rotation drag is mid-flight would
+        // emit two undo ops for what felt like one gesture (the rotation
+        // op on drag-release + this edit op now). Safe to call when no
+        // drag is active (commitDrag no-ops on null drag).
+        commitDrag(null)
         const before = {
           content: t.content,
           font: { ...t.font },
