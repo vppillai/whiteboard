@@ -6,6 +6,38 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 ## [Unreleased]
 
+**Post-v1.2 polish + 4-lane review hardening.** Three follow-on features land on top of v1.2.0: click-to-select strokes in the Select tool, `Cmd/Ctrl+V` of clipboard text on the canvas creates a TextObject, and a Google Docs paste path (async image-fallback when DataTransfer is empty). Plus the Tier-A / Tier-B fixes from a 4-lane parallel code review of the v1.2 batch.
+
+### Added
+
+- **Click-to-select strokes in Select mode.** The Select tool's hit-test (previously texts-above-images only) now also picks the topmost stroke under the pointer when no floating object hits. Selected strokes get a dashed bbox + the standard Delete handling; no resize / rotate handles (strokes have no rect-derived geometry to drive them). `selectStrokeById(id)` helper exposed for the lasso → Select handoff when a single stroke is lassoed.
+- **`Cmd/Ctrl+V` on canvas → TextObject from clipboard text.** When the clipboard carries text/plain (no image) and the active surface is the canvas (not a text-editable input), the paste lands as a new TextObject at the cursor with the user's sticky text defaults. Uses the same `create-text` op as the Text tool so undo just works.
+- **"Nothing to paste" toast on dead clipboard.** `Cmd/Ctrl+V` on canvas with no clipboard image / text surfaces an info toast instead of silently doing nothing.
+- **Google Docs paste path.** Some sources (notably Google Docs) emit a `paste` event with a populated `clipboardData.items` but no actual image bytes; the previous synchronous handler bailed silently. The handler now falls back to the async Clipboard API when synchronous extraction yields nothing, recovering the paste.
+
+### Changed
+
+- **Tool menu reorder.** The right-click TOOL row now reads `Draw | Text | Eraser | Lasso | Select | Laser` (input verbs first, then mark-removal, then selection/transform, with the presentation accent at the end). The tool-pill cycle order mirrors this.
+- **Empty-text auto-cleanup on commit.** Creating a text and Esc-committing without typing anything no longer leaves an empty TextObject behind. The text tool's `cleanup` / `commitEdit` paths now drop empty content as a final step.
+- **`select.ts` decomposed.** Per-kind commit and render helpers (`commitImageDrag` / `commitStrokeDrag` / `commitTextDrag`; `drawStrokeSelection` / `drawFloatingObjectSelection`) replace the inline switch-on-kind branches at three call sites. Each helper has its own docblock; file is longer in LOC but switch-site density is lower and the dispatch shape is the chosen incremental migration step before any full vtable refactor (see [ADR 0014](docs/decisions/0014-select-tool-selection-union.md) *Migration trigger*).
+- **`BatchSelection` module** (`apps/web/src/batchselection.ts`). The Cmd+A → Delete state for images + texts moves out of `main.ts` into a dedicated module with `markAll` / `clear` / `deleteAll` / `isMarked` surface. Reduces the orchestrator's surface and is straightforward to grow when strokes join the batch surface later.
+- **Text-paste factory unified.** The "synchronous paste path" and "async clipboard fallback path" both route through a single `createTextFromClipboardText` factory, eliminating duplicated TextObject construction.
+- **Text tool's Esc handoff is one-way (`onEscExit`).** The text tool no longer reaches up into its parent's tool-switching state; instead it calls a single `onEscExit(prevTool)` callback wired by `main.ts`. Cleaner boundary, easier to test.
+- **Laser tool color via DI.** The laser tool reads its color through a `getColor()` injection rather than importing `settings` directly. Mirrors the rest of the tool surface and breaks the cycle for testability.
+- **`BoardObject` base type** in `packages/shared/src/types.ts`. `ImageObject` and `TextObject` now `extends BoardObject` (shared fields: `id`, `transform`, `rotation?`, `z`, `createdAt`, `deleted?`). Structural extension — not a discriminated union — so kind-specific consumers stay statically typed. Strokes deliberately stay outside (sample-driven, not rect-driven).
+- **Generic `flipDeletedOn` helper** in `ops.ts`. The per-kind `flipDeletedOn{Stroke,Image,Text}` undo paths collapsed into one parametric helper. One source of truth for the "find by id, mutate `deleted`, persist" pattern.
+- **Commit-drag race guard on contextual-menu edits.** Right-clicking a selected text mid-drag could open the contextual menu before the drag committed; the menu's font/size/color edits would then race the pending `transform-text` op. The select tool now commits any in-flight drag before opening the contextual menu so menu edits land on a stable selection.
+
+### Fixed (review hardening — Tier-A across 4 lanes)
+
+- **`select.cleanup()` didn't commit an in-flight drag.** Switching tools mid-drag could orphan the drag state (no `transform-*` op pushed, but `view.obj.transform` already mutated). `cleanup()` now commits a pending drag through the same per-kind helper as pointerup.
+- **`Cmd/Ctrl+1` fit-to-content didn't include images / texts.** Bounds computation walked strokes only; pasted images or texts could sit outside the framed rect. Now uses the same union as the export-bounds path.
+- **Bare `\r` normalization in text input.** Some sources (older Office paste, certain Linux clipboards) deliver `\r` line separators; the editor's commit path now normalizes `\r\n` and bare `\r` to `\n` before persisting so wrap-width measurement and SVG export both behave.
+
+### Notes
+
+- Bundle and test-count effects pending the next versioned release; this section accumulates them as features land.
+
 ## [1.2.0] — 2026-05-13
 
 **Text tool + Select tool generalization + presentation laser + UX polish.** First-class text objects with full edit / rotate / resize / wrap-width support. Select tool extended to operate on texts alongside images via a discriminated-union selection model. Ephemeral laser pointer for presentations. Mouse-mode synthetic pressure, double-Esc Draw↔Select toggle, idle / jiggle pen halo, image copy/cut, lasso copy-as-PNG, and a handful of input-pipeline + workflow fixes. 127 unit tests at release (up from 100 at v1.1.0). Main bundle 43 KB gz (up from 34.65 KB; well within the 150 KB SPEC budget). IDB schema bump 2 → 3 (new `texts` store; existing strokes + images preserved). Full design notes in [ADRs 0013–0015](docs/decisions/).
@@ -72,7 +104,7 @@ A 4-lane parallel review across the v1.2 batch surfaced six MUST-FIX bugs.
 
 ## [1.1.0] — 2026-05-12
 
-**Image paste and manipulation.** Pasted (or drag-dropped) raster images become first-class floating objects on the canvas, manipulable through a dedicated **Select tool** (`V`) — move, resize (corner + edge handles, Shift for aspect-lock), rotate (handle above top edge, double-click to reset to 0°), delete. PNG / SVG / PDF export include images in z-order with rotation preserved. Image bytes live in IndexedDB alongside strokes; v1.4.x users upgrade in place via a DB version bump (existing strokes preserved). Undo / redo cover paste / move / resize / rotate / delete. 100 unit tests at release (up from 92). Main bundle 34.65 KB gz (up from 28.70 KB gz; well within the 150 KB gz SPEC budget). Full design archive at [`docs/superpowers/specs/2026-05-12-image-paste-design.md`](docs/superpowers/specs/2026-05-12-image-paste-design.md).
+**Image paste and manipulation.** Pasted (or drag-dropped) raster images become first-class floating objects on the canvas, manipulable through a dedicated **Select tool** (`V`) — move, resize (corner + edge handles, Shift for aspect-lock), rotate (handle above top edge, double-click to reset to 0°), delete. PNG / SVG / PDF export include images in z-order with rotation preserved. Image bytes live in IndexedDB alongside strokes; v1.0.x users upgrade in place via a DB version bump (existing strokes preserved). Undo / redo cover paste / move / resize / rotate / delete. 100 unit tests at release (up from 92). Main bundle 34.65 KB gz (up from 28.70 KB gz; well within the 150 KB gz SPEC budget). Full design archive at [`docs/superpowers/specs/2026-05-12-image-paste-design.md`](docs/superpowers/specs/2026-05-12-image-paste-design.md).
 
 ### Added
 

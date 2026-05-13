@@ -13,8 +13,9 @@ A low-latency, browser-based whiteboard tuned for Wacom Intuos and other indirec
 - **Five brush presets** — pen, marker, pencil, highlighter, brush — each with an independently customizable pressure curve.
 - **Two eraser modes** — pixel-mask wipe ("cuts through" strokes, leaves disconnected runs alive) and object delete (whole stroke).
 - **Lasso select** — polygon or tap; drag-to-move, delete-selected, select-all.
-- **Image paste, draw on top** — `Ctrl/Cmd+V` or drag-drop a PNG / JPEG / WebP / GIF onto the canvas; the dedicated **Select tool** (`V`) provides move / resize (Shift = aspect-lock) / rotate (double-click handle to reset to 0°) / delete. Images live below strokes so pen-on-image is the natural workflow.
-- **Text** (`T`) — multi-line text objects with mono / 12 px defaults. Bold / italic / underline via `Cmd/Ctrl+B/I/U`. Right-click menu for font / size / color. Drag the E/W edge handle on a selected text in `V` mode to set a wrap width and reflow content. Double-click text in `V` mode to edit.
+- **Select tool (`V`)** — universal pointer for any single board object (image, text, stroke). Click to manipulate; drag handles to resize / rotate where applicable (images get 8 handles + rotation; texts get 4 corners + E/W wrap-width edges + rotation; strokes are move-only via body-drag). Double-click the rotation handle to reset to 0°. Delete to remove with undo. Double-click a text in `V` mode to edit.
+- **Image paste** — `Ctrl/Cmd+V` or drag-drop a PNG / JPEG / WebP / GIF onto the canvas; lands as a floating object below the strokes layer so pen-on-image is the natural workflow. Auto-switches to the Select tool with handles shown so the user can drag into place.
+- **Text** (`T`) — multi-line text objects with mono / 12 px defaults. Bold / italic / underline via `Cmd/Ctrl+B/I/U`. Right-click menu for font / size / color. `Ctrl/Cmd+V` on the canvas with clipboard text creates a new TextObject at the cursor. Drag the E/W edge handle on a selected text in `V` mode to set a wrap width and reflow content.
 - **Laser** (`L`) — fading polyline trail for presentations; color via the curated palette. Nothing persists.
 - **Lasso copy** — `Cmd/Ctrl+C` with strokes lasso-selected copies them as a transparent-background PNG to the system clipboard. Paste anywhere (Google Docs, Slack, Confluence, back into canvas).
 - **Exports** — PNG, SVG, PDF; all include images + texts in z-order with rotation and wrap-width preserved.
@@ -27,7 +28,7 @@ A low-latency, browser-based whiteboard tuned for Wacom Intuos and other indirec
 - **Settings panel** (`Cmd/Ctrl+,`) — brush tuning, swatches, theme, grid, advanced.
 - **Op-based undo / redo** — cheap, bounded at 500 entries, listener-cleanup wired through HMR + `beforeunload`.
 - **Local persistence** — IndexedDB; pick up where you left off after reload; no account required.
-- **Comprehensive keyboard shortcuts** — `?` opens the in-app overlay.
+- **Comprehensive keyboard shortcuts** — `?` opens the in-app overlay. Includes `Esc Esc` to toggle Draw ↔ Select, `Shift+T` to cycle theme (the unmodified `T` is the Text tool), and click-to-select strokes in Select mode.
 - **Sub-33 ms pen-to-photon latency** on Wacom Intuos — instrumented and measured (`?perftest=1`).
 
 ## Why this exists

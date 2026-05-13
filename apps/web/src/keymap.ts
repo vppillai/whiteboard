@@ -39,9 +39,9 @@ export interface KeyHandlers {
   selectEraserSticky: () => void
   /** Activate the lasso tool. Bound to `S`. */
   selectLassoTool: () => void
-  /** Activate the Select tool for image manipulation. Bound to `V` —
-   *  the Figma / Sketch / Excalidraw convention for the pointer/select
-   *  tool. */
+  /** Activate the Select tool for floating-object manipulation (images,
+   *  texts, and strokes). Bound to `V` — the Figma / Sketch / Excalidraw
+   *  convention for the universal pointer / select tool. */
   selectSelectTool: () => void
   /** Activate the laser pointer tool. Bound to `L`. Ephemeral fading
    *  trail for presentations; nothing persisted. */
@@ -205,7 +205,8 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
         handlers.selectLassoTool()
         return
       }
-      // V — Select tool (image manipulation). Figma/Sketch convention.
+      // V — Select tool (universal pointer for images / texts / strokes).
+      // Figma / Sketch / Excalidraw convention.
       if (k === 'v') {
         handlers.selectSelectTool()
         return

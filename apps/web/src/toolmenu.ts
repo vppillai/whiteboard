@@ -1,7 +1,7 @@
 /**
  * Right-click tool menu. Thin dispatcher: hosts the active tool's contextual
  * section (which the tool itself builds), then the static TOOL / VIEW /
- * CLEAR sections below.
+ * EXPORT / Settings / Clear sections below.
  *
  * Designed for fully pen-only operation: tap to select, menu dismisses.
  *
@@ -10,9 +10,14 @@
  *   [active tool's contextual section]   ← e.g. COLOR + BRUSH for Draw,
  *                                          ERASER for Eraser, etc.
  *   ─
- *   TOOL   [Draw | Eraser | Lasso | Laser | Text]
+ *   TOOL   [Draw | Text | Eraser | Lasso | Select | Laser]
  *   ─
  *   VIEW   [Reset zoom · Fit to view · Grid options…]
+ *   ─
+ *   EXPORT [Export…]                     ← opens the export popover
+ *                                          (scope + format)
+ *   ─
+ *   Settings…                            ← opens the settings side panel
  *   ─
  *   Clear board…
  */

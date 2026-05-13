@@ -39,7 +39,7 @@ Both approaches are well-established. tldraw, Excalidraw, and Figma all use vari
 **Costs:**
 
 - The on-canvas render pass must skip the editing text to avoid double-rendering. A simple `editingId` parameter handles this but requires the tool to publish its edit state via `getEditingId()`.
-- Camera pan/zoom during edit mis-positions the overlay until the next style refresh. We disabled the per-input style refresh (which was causing focus loss — see commit `bce0f33`); pan/zoom-during-edit is a documented v1 limitation that the user can work around by Esc-committing first.
+- Camera pan/zoom during edit mis-positions the overlay until the next style refresh. We disabled the per-input style refresh (which was causing focus loss during edit); pan/zoom-during-edit is a documented v1 limitation that the user can work around by Esc-committing first.
 - contenteditable behavior differs across browsers (Safari's `plaintext-only` quirk, Firefox's whitespace handling). We use `el.innerText.replace(/\r\n/g, '\n')` to normalize paste output and rely on `plaintext-only` to prevent style-tag insertion. Edge cases (older Safari ignoring `plaintext-only`) fall back to `innerText` doing the right thing because `<br>` correctly converts to `\n`.
 
 ## Considered alternatives
