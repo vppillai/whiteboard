@@ -64,7 +64,7 @@ import { attachPan } from './pan'
 import { runPerftest } from './perftest'
 import { createHelpPill } from './pill'
 import { attachPointer } from './pointer'
-import { dismissAllPopovers, getActiveTag } from './popover'
+import { dismissAllPopovers, getActivePopover, getActiveTag } from './popover'
 import { applyCamera, clearLayer, drawStrokeOntoLayer, drawStrokePath, setupCanvas } from './render'
 import { renderImages } from './renderimages'
 import { renderTexts } from './rendertexts'
@@ -948,7 +948,17 @@ async function main(): Promise<void> {
       e.stopImmediatePropagation()
       e.preventDefault()
       if (getActiveTag() === 'tools') {
-        dismissAllPopovers()
+        // A tool menu is already up. If it's pinned, the user explicitly
+        // asked for it to persist — flash it to redirect their eye (the
+        // pinned menu IS their context menu now) and don't open a new
+        // instance. Otherwise, the right-click acts as a toggle and
+        // dismisses the current menu.
+        const active = getActivePopover()
+        if (active?.isPinned()) {
+          active.flashAttention()
+        } else {
+          dismissAllPopovers()
+        }
         return
       }
       openToolMenu({

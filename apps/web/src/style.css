@@ -369,6 +369,29 @@ body {
   overflow: hidden;
 }
 
+/* Attention pulse — toggled when a user action (e.g. right-click on
+   canvas while this popover is pinned) would otherwise have opened a
+   new popover. Redirects the eye to the pinned popover instead of
+   moving the OS cursor (which browsers don't permit). */
+@keyframes whiteboard-popover-pulse {
+  0% {
+    box-shadow: var(--banner-shadow);
+    transform: scale(1);
+  }
+  30% {
+    box-shadow: var(--banner-shadow), 0 0 0 4px var(--whiteboard-accent, #2563eb);
+    transform: scale(1.025);
+  }
+  100% {
+    box-shadow: var(--banner-shadow);
+    transform: scale(1);
+  }
+}
+
+.whiteboard-popover.whiteboard-popover-flash {
+  animation: whiteboard-popover-pulse 500ms ease-out;
+}
+
 .whiteboard-popover-header {
   display: flex;
   align-items: center;

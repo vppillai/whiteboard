@@ -68,12 +68,23 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
   root.className = 'whiteboard-tools'
 
   const popoverRef: { current?: Popover } = {}
+  // `noteSelection` is the pin-aware close: dismisses if unpinned, no-ops
+  // if pinned. Used for body action pills (tool select, view actions,
+  // contextual menu choices, Settings) so a pinned menu stays alive as a
+  // floating palette across multiple selections. `dismiss` is the
+  // unconditional close — used for explicit navigations to another
+  // popover (Grid…, Export…) that intentionally replace this one, and
+  // for the destructive Clear board… flow.
+  const noteSelection = (): void => popoverRef.current?.noteSelection()
   const dismiss = (): void => popoverRef.current?.dismiss()
 
   // Active tool's contextual section comes first (closest to the cursor).
+  // The contextual menu's selection clicks (color, font, size, B/I/U)
+  // route through noteSelection so a pinned menu survives multiple
+  // formatting tweaks in a row.
   const activeTool = opts.getActiveTool()
   if (activeTool.renderContextualMenu) {
-    activeTool.renderContextualMenu(root, dismiss)
+    activeTool.renderContextualMenu(root, noteSelection)
   }
 
   // TOOL row.
@@ -90,7 +101,7 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
         onClick: t.enabled
           ? () => {
               opts.onSelectTool(t.id)
-              dismiss()
+              noteSelection()
             }
           : undefined,
       }),
@@ -106,7 +117,7 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
     pill({
       label: 'Reset zoom',
       onClick: () => {
-        dismiss()
+        noteSelection()
         opts.onResetZoom()
       },
     }),
@@ -115,7 +126,7 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
     pill({
       label: 'Fit to view',
       onClick: () => {
-        dismiss()
+        noteSelection()
         opts.onZoomToFit()
       },
     }),
@@ -125,6 +136,9 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
       label: 'Grid…',
       title: 'Grid options',
       onClick: () => {
+        // Grid… opens another popover; the single-instance rule will
+        // replace this menu regardless of pin state. Use dismiss for
+        // honesty.
         dismiss()
         openOptionsMenu(opts.at)
       },
@@ -143,6 +157,8 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
     pill({
       label: 'Export…',
       onClick: () => {
+        // Export… opens another popover — same dismiss-on-navigation
+        // rationale as Grid… above.
         dismiss()
         opts.onExport()
       },
@@ -152,11 +168,12 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
 
   // Settings — pen-friendly entry point matching the toolpill gear and the
   // Cmd/Ctrl+, shortcut. Above CLEAR so the destructive row stays anchored
-  // at the bottom.
+  // at the bottom. Opens a side panel (not a popover), so a pinned tool
+  // menu can coexist — use noteSelection.
   root.appendChild(separator())
   root.appendChild(
     fullItem('Settings…', () => {
-      dismiss()
+      noteSelection()
       opts.togglePanel()
     }),
   )
