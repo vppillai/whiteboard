@@ -260,7 +260,11 @@ export function createTextTool(deps: TextToolDeps): TextTool {
 
     const handleInput = (): void => {
       if (!editing) return
-      const newContent = el.innerText.replace(/\r\n/g, '\n')
+      // Normalize line endings: CRLF (Windows) and bare CR (legacy macOS,
+      // some IME compositions) both flatten to '\n'. measureText() splits
+      // on '\n' only — a stray '\r' would merge two visual lines into one
+      // very-wide measured line, corrupting the bounding rect.
+      const newContent = el.innerText.replace(/\r\n?/g, '\n')
       editing.text.content = newContent
       const resized = resizeToFit(editing.text)
       editing.text.transform = resized.transform

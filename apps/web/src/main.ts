@@ -723,17 +723,24 @@ async function main(): Promise<void> {
   //  Multi-line strings (with `\n`) become multi-line text. Whitespace-
   //  only paste is ignored.
   // ---------------------------------------------------------------------
+  // Normalize line endings at the clipboard read boundary so downstream
+  // measureText() — which splits on '\n' only — never sees a bare '\r'.
+  // Centralizing here covers both clipboard read paths AND the in-editor
+  // input handler (which has its own normalize since contenteditable
+  // bypasses these reads).
+  const normalizeLineEndings = (s: string): string => s.replace(/\r\n?/g, '\n')
+
   const readTextFromClipboardEvent = (dt: DataTransfer | null): string | null => {
     if (!dt) return null
     const t = dt.getData('text/plain')
-    return t || null
+    return t ? normalizeLineEndings(t) : null
   }
 
   const readTextFromAsyncClipboard = async (): Promise<string | null> => {
     if (!navigator.clipboard?.readText) return null
     try {
       const t = await navigator.clipboard.readText()
-      return t || null
+      return t ? normalizeLineEndings(t) : null
     } catch {
       // Permission denied / not in user gesture / etc.
       return null
@@ -984,7 +991,13 @@ async function main(): Promise<void> {
           onCameraChange()
         },
         onZoomToFit: () => {
-          if (fitToContent(camera, strokes, { width: target.width, height: target.height })) {
+          if (
+            fitToContent(
+              camera,
+              { strokes, images, texts },
+              { width: target.width, height: target.height },
+            )
+          ) {
             onCameraChange()
           }
         },
@@ -1172,7 +1185,13 @@ async function main(): Promise<void> {
         onCameraChange()
       },
       zoomToFit: () => {
-        if (fitToContent(camera, strokes, { width: target.width, height: target.height })) {
+        if (
+          fitToContent(
+            camera,
+            { strokes, images, texts },
+            { width: target.width, height: target.height },
+          )
+        ) {
           onCameraChange()
         }
       },

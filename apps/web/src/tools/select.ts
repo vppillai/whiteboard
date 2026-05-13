@@ -1325,6 +1325,13 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     },
 
     cleanup(): void {
+      // Commit any in-flight drag BEFORE clearing state so the op lands in
+      // the undo stack. Without this, a tool-switch (or OS gesture-steal)
+      // mid-drag silently dropped the move/transform/rotate op — the
+      // object was already mutated in memory and persisted per-tick, so
+      // the user saw the change but couldn't undo it. commitDrag is a
+      // no-op when `drag` is null, so this is safe on every cleanup call.
+      commitDrag(null)
       selected = null
       drag = null
     },
