@@ -46,7 +46,7 @@ import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid, invalidateGridColors } from './grid'
 import { createHelpOverlay } from './helpoverlay'
 import { _clearImageCache, evictImageElement, loadImageElement } from './imagecache'
-import { writeImageToClipboard } from './imageclipboard'
+import { writeImageToClipboard, writePngBlobToClipboard } from './imageclipboard'
 import {
   type ImagePasteContext,
   pasteImageFromBlob,
@@ -751,25 +751,76 @@ async function main(): Promise<void> {
     onToast: showInfoToast,
   }
 
+  // Render the lasso-selected strokes to a PNG blob. Used by Cmd+C / Cmd+X
+  // when the user has strokes selected via lasso — produces a paste-anywhere
+  // raster of just those strokes (the surrounding canvas is transparent).
+  // dpr=2 matches the PDF embed quality so the pasted image is crisp on
+  // retina / 4K targets like Google Docs.
+  const renderLassoSelectionAsPng = async (): Promise<Blob | null> => {
+    const ids = lassoTool.getSelectedStrokeIds()
+    if (ids.length === 0) return null
+    const idSet = new Set(ids)
+    const selected = strokes.filter((s) => idSet.has(s.id) && !s.deleted)
+    if (selected.length === 0) return null
+    const { computeBoardBounds } = await import('./export/bounds')
+    const { exportPNG } = await import('./export/png')
+    const bounds = computeBoardBounds(selected)
+    if (!bounds) return null
+    return exportPNG(selected, [], [], bounds, getSettings(), null, { dpr: 2 })
+  }
+
   const onCopy = (e: ClipboardEvent): void => {
     if (isTextEditableTarget(e.target)) return
-    if (tool.current !== selectTool) return
-    const img = selectTool.getSelectedImage()
-    if (!img) return
-    e.preventDefault()
-    void writeImageToClipboard(img, clipboardImageDeps)
+
+    // Lasso selection → render selected strokes to a PNG and write to
+    // clipboard. Lets the user paste a drawing into Docs / Confluence /
+    // Slack / etc., or back into this canvas as an image. Takes
+    // precedence over the Select-tool image-copy path because the user
+    // has to be IN lasso mode with a selection for this to fire — no
+    // ambiguity with Select.
+    if (tool.current === lassoTool && lassoTool.hasSelection()) {
+      e.preventDefault()
+      void (async () => {
+        const blob = await renderLassoSelectionAsPng()
+        if (blob) await writePngBlobToClipboard(blob, showInfoToast)
+      })()
+      return
+    }
+
+    // Select tool + image selected → copy the image bytes.
+    if (tool.current === selectTool) {
+      const img = selectTool.getSelectedImage()
+      if (!img) return
+      e.preventDefault()
+      void writeImageToClipboard(img, clipboardImageDeps)
+    }
   }
 
   const onCut = (e: ClipboardEvent): void => {
     if (isTextEditableTarget(e.target)) return
-    if (tool.current !== selectTool) return
-    const img = selectTool.getSelectedImage()
-    if (!img) return
-    e.preventDefault()
-    void (async () => {
-      const written = await writeImageToClipboard(img, clipboardImageDeps)
-      if (written) selectTool.deleteSelected()
-    })()
+
+    if (tool.current === lassoTool && lassoTool.hasSelection()) {
+      e.preventDefault()
+      void (async () => {
+        const blob = await renderLassoSelectionAsPng()
+        if (!blob) return
+        const written = await writePngBlobToClipboard(blob, showInfoToast)
+        // Only delete after the clipboard write succeeded — same data-
+        // loss-prevention rule as the image cut path.
+        if (written) lassoTool.deleteSelection()
+      })()
+      return
+    }
+
+    if (tool.current === selectTool) {
+      const img = selectTool.getSelectedImage()
+      if (!img) return
+      e.preventDefault()
+      void (async () => {
+        const written = await writeImageToClipboard(img, clipboardImageDeps)
+        if (written) selectTool.deleteSelected()
+      })()
+    }
   }
   document.addEventListener('copy', onCopy)
   document.addEventListener('cut', onCut)

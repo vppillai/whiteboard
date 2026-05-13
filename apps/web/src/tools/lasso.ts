@@ -89,6 +89,11 @@ export interface LassoTool extends Tool {
   deleteSelection(): boolean
   selectAll(): void
   clearSelection(): void
+  /** Snapshot of currently-selected stroke IDs. Returned as a new array
+   *  so callers can iterate / filter without seeing live mutations.
+   *  Used by main.ts for Cmd+C / Cmd+X (render the selection as a PNG
+   *  to the clipboard). */
+  getSelectedStrokeIds(): string[]
   /** Stroke IDs being live-moved during a drag, plus the current offset.
    *  `null` when not dragging. */
   getDragState(): DragState | null
@@ -407,6 +412,8 @@ export function createLassoTool(opts: LassoToolOptions): LassoTool {
     clearSelection: () => {
       selection.clear()
     },
+
+    getSelectedStrokeIds: () => [...selection],
 
     getDragState: () => {
       if (phase !== 'moving' || !dragStart || !dragCurrent) return null

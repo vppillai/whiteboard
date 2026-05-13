@@ -62,6 +62,29 @@ export async function writeImageToClipboard(
   }
 }
 
+/**
+ * Write a pre-rendered PNG blob to the system clipboard. Used by the
+ * lasso-copy path that exports selected strokes as a PNG. Blob is
+ * assumed to already be `image/png`; no re-encode is attempted.
+ * Returns true on success so callers can gate cut-then-delete on the
+ * write succeeding.
+ */
+export async function writePngBlobToClipboard(
+  blob: Blob,
+  onToast: (msg: string) => void,
+  successMsg = 'Drawing copied',
+): Promise<boolean> {
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+    onToast(successMsg)
+    return true
+  } catch (err) {
+    console.warn('whiteboard/web: clipboard write failed:', err)
+    onToast('Copy failed — clipboard not available')
+    return false
+  }
+}
+
 async function reencodeAsPng(blobRef: string, srcBlob: Blob): Promise<Blob> {
   // Prefer the already-decoded element from the runtime cache. The cache
   // only returns it after `onload` has fired (per imagecache.ts), so
