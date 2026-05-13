@@ -476,6 +476,15 @@ async function main(): Promise<void> {
     saveImageMeta: persistImageMeta,
     getTexts: () => texts,
     saveText: persistText,
+    getStrokes: () => strokes,
+    // Stroke persistence — same warn-and-continue policy as
+    // persistImageMeta / persistText. Used by the Select tool's
+    // stroke-drag path (per-tick saves) and stroke-delete path.
+    saveStroke: (s) => {
+      void strokeStore.save(s).catch((err) => {
+        console.warn('whiteboard/web: failed to persist stroke (Select move/delete):', err)
+      })
+    },
     pushOp: (op) => pushUndoOp(op),
     markCommittedDirty: () => {
       committedDirty = true
@@ -831,7 +840,13 @@ async function main(): Promise<void> {
       if (text?.trim()) {
         e.preventDefault()
         pasteTextAtBoard(text, pasteAt())
+        return
       }
+      // Nothing usable found. Surface a short toast so the user knows
+      // the Cmd+V was seen but had nothing to land — common when copying
+      // from sources that don't populate the system clipboard (Google
+      // Docs's internal image clipboard, app-private formats, etc.).
+      showInfoToast('Nothing to paste')
     })()
   }
   document.addEventListener('paste', onPaste)

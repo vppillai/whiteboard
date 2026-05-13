@@ -33,26 +33,31 @@
  * op-kind emission, delete) branches on `selection.kind`.
  */
 
-import type { ImageObject, TextFontFamily, TextObject } from '@whiteboard/shared'
+import type { ImageObject, Stroke, TextFontFamily, TextObject } from '@whiteboard/shared'
 import { CURATED_COLORS as PALETTE } from '../colorpicker'
 import { imageCenter, pointInImage, rotateAroundPoint } from '../imagegeom'
 import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
 import type { Op } from '../ops'
 import { applyCamera, clearLayer } from '../render'
+import { getStrokeBBox, getStrokePath, invalidateStrokeBBox } from '../stroke'
 import { TEXT_PADDING_X, pointInText, resizeToFit } from '../textgeom'
 import type { Tool, ToolContext } from './types'
 
-type Selection = { kind: 'image'; id: string } | { kind: 'text'; id: string }
+type Selection =
+  | { kind: 'image'; id: string }
+  | { kind: 'text'; id: string }
+  | { kind: 'stroke'; id: string }
 
 /**
  * Live view of the currently-selected object. Both `obj` and `transform`
  * are LIVE references — mutating `transform.x/y` (and saving via the
  * matching `save*` callback) is the canonical way to move/resize during
- * a drag.
+ * a drag. Strokes don't carry a transform field of their own; their
+ * "transform" is derived from the bbox of their samples.
  */
 interface ObjectView {
   selection: Selection
-  obj: ImageObject | TextObject
+  obj: ImageObject | TextObject | Stroke
   transform: ImageObject['transform']
   rotation: number
 }
@@ -88,6 +93,12 @@ interface DragState {
     color: string
     wrapWidth: number | undefined
   } | null
+  /** Cumulative board-space delta applied to a STROKE's samples during a
+   *  move drag. Each onPointerMove tick computes the new desired total
+   *  delta and applies the difference from this snapshot, so the per-
+   *  tick sample translation stays incremental (avoids redundant work)
+   *  and the commit op carries the final (dx, dy). */
+  strokeMoveApplied: { dx: number; dy: number } | null
   /** Board-space coords of the pointer at pointerdown. */
   startBoard: { x: number; y: number }
 }
@@ -101,6 +112,16 @@ interface SelectToolDeps {
   getTexts: () => TextObject[]
   /** Persist a single text after each move-tick. */
   saveText: (t: TextObject) => void
+  /** Read-only access. Used by the stroke hit-test path so clicking on
+   *  a drawing in Select mode selects it (parallel to Lasso's tap-
+   *  select). */
+  getStrokes: () => Stroke[]
+  /** Persist a single stroke after a move-tick / delete. The `move` op's
+   *  apply/unapply semantics translate samples in place; mutation during
+   *  drag is direct and saveStroke is fired per-tick, then the op is
+   *  pushed (NOT applied — samples are already at the post-drag state)
+   *  on drag-end. */
+  saveStroke: (s: Stroke) => void
   /** Push an op into the undo stack — fired on drag-end + on delete. */
   pushOp: (op: Op) => void
   /** Mark the committed layer dirty so the next frame re-renders. */
@@ -200,22 +221,46 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         rotation: img.rotation ?? 0,
       }
     }
-    const t = deps.getTexts().find((x) => x.id === sel.id)
-    if (!t || t.deleted) return null
+    if (sel.kind === 'text') {
+      const t = deps.getTexts().find((x) => x.id === sel.id)
+      if (!t || t.deleted) return null
+      return {
+        selection: sel,
+        obj: t,
+        transform: t.transform,
+        rotation: t.rotation ?? 0,
+      }
+    }
+    // sel.kind === 'stroke'
+    const s = deps.getStrokes().find((x) => x.id === sel.id)
+    if (!s || s.deleted) return null
+    const bb = getStrokeBBox(s)
     return {
       selection: sel,
-      obj: t,
-      transform: t.transform,
-      rotation: t.rotation ?? 0,
+      obj: s,
+      // Strokes don't carry a transform — derive one from the bbox so
+      // handle math / hover-cursor reuse the same fields. Strokes don't
+      // expose handles (corners / edges / rotation), so the only
+      // consumer is the body hit-test and the halo render.
+      transform: { x: bb.minX, y: bb.minY, w: bb.maxX - bb.minX, h: bb.maxY - bb.minY },
+      rotation: 0,
     }
   }
 
-  /** Top-most non-deleted object (text OR image) whose rotated rect
-   *  contains the board-space point. Texts render above images on-screen
-   *  (per the per-frame render passes), so the hit-test walks texts
-   *  first; within each kind, reverse-z so paste-time-latest wins.
-   *  Handles take priority — see hitTest. */
-  function objectAt(boardX: number, boardY: number): Selection | null {
+  /** Top-most non-deleted object whose rotated rect (image / text) or
+   *  per-sample tolerance ring (stroke) contains the board-space point.
+   *  Priority order matches the visual stack (top → bottom):
+   *    1. Texts (above images per the render order)
+   *    2. Images
+   *    3. Strokes (drawn on top of images + texts on the composite, but
+   *       semantically "behind" the floating objects for selection
+   *       purposes — clicking a text-on-top-of-stroke should select the
+   *       text, not the stroke beneath)
+   *  Within each kind, reverse-z so paste-time-latest wins. Stroke hit-
+   *  test uses a per-sample tolerance ring (matches Lasso's tap-select
+   *  tolerance) — a pixel-perfect stroke-outline test would be more
+   *  expensive without meaningfully improving the UX. */
+  function objectAt(boardX: number, boardY: number, scale: number): Selection | null {
     const texts = [...deps.getTexts()].filter((t) => !t.deleted).sort((a, b) => b.z - a.z)
     for (const t of texts) {
       if (pointInText({ x: boardX, y: boardY }, t)) {
@@ -226,6 +271,32 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     for (const img of imgs) {
       if (pointInImage({ x: boardX, y: boardY }, img)) {
         return { kind: 'image', id: img.id }
+      }
+    }
+    // Stroke tap-select. Tolerance scales with zoom so a 10-screen-px
+    // ring around each sample point is the effective hit zone. Same
+    // tolerance as Lasso's findStrokeAt so the two tools feel
+    // consistent.
+    const TOL_PX = 10
+    const tol = TOL_PX / scale
+    const tol2 = tol * tol
+    const strokes = deps.getStrokes()
+    for (let i = strokes.length - 1; i >= 0; i--) {
+      const s = strokes[i]
+      if (!s || s.deleted) continue
+      const bb = getStrokeBBox(s)
+      if (
+        boardX < bb.minX - tol ||
+        boardX > bb.maxX + tol ||
+        boardY < bb.minY - tol ||
+        boardY > bb.maxY + tol
+      ) {
+        continue
+      }
+      for (const sample of s.samples) {
+        const dx = sample.x - boardX
+        const dy = sample.y - boardY
+        if (dx * dx + dy * dy <= tol2) return { kind: 'stroke', id: s.id }
       }
     }
     return null
@@ -464,6 +535,30 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       return
     }
 
+    if (view.selection.kind === 'stroke') {
+      // Stroke branch — only `move` is supported (no resize / rotate
+      // semantics for freehand geometry).
+      //
+      // Key invariant: samples were mutated directly during the drag
+      // (see onPointerMove stroke branch). The `move` op handler in
+      // ops.ts ALSO translates samples on apply / unapply. Pushing the
+      // op via deps.pushOp records it in the undo stack WITHOUT calling
+      // applyOp — otherwise we'd double-translate on commit. Undo /
+      // redo work correctly because the op's apply/unapply are
+      // symmetric (translate by +dx vs -dx).
+      const stroke = view.obj as Stroke
+      const applied = d.strokeMoveApplied
+      if (applied && (applied.dx !== 0 || applied.dy !== 0)) {
+        deps.pushOp({
+          kind: 'move',
+          strokeIds: [stroke.id],
+          dx: applied.dx,
+          dy: applied.dy,
+        })
+      }
+      return
+    }
+
     // Text branch
     const t = view.obj as TextObject
     if (isRotation) {
@@ -532,7 +627,11 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
   function updateHoverCursor(ctx: ToolContext, boardX: number, boardY: number): void {
     const view = getView()
 
-    if (view) {
+    // Strokes don't expose handles (no resize / rotate UI — strokes are
+    // freehand geometry, not rect-shaped objects). Skip the handle
+    // lookup entirely for stroke selections so we don't waste cycles
+    // hit-testing handles that aren't drawn.
+    if (view && view.selection.kind !== 'stroke') {
       if (isOverRotationHandle(boardX, boardY, view, ctx.camera.scale)) {
         ctx.setCursor(ROTATE_CURSOR)
         return
@@ -544,7 +643,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       }
     }
 
-    const hit = objectAt(boardX, boardY)
+    const hit = objectAt(boardX, boardY, ctx.camera.scale)
     ctx.setCursor(hit ? 'move' : 'default')
   }
 
@@ -681,8 +780,13 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       const view = getView()
 
       // Rotation handle takes top priority — it sits above the rect and
-      // could overlap a resize handle on a small selection.
-      if (view && isOverRotationHandle(bx, by, view, ctx.camera.scale)) {
+      // could overlap a resize handle on a small selection. Strokes have
+      // no handles (no rect-shaped affordance), so they're skipped.
+      if (
+        view &&
+        view.selection.kind !== 'stroke' &&
+        isOverRotationHandle(bx, by, view, ctx.camera.scale)
+      ) {
         const now = performance.now()
         const isDoubleClick = now - lastRotateHandleDownAt < ROTATE_DBLCLICK_MS
         lastRotateHandleDownAt = now
@@ -719,6 +823,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
           beforeRotation: view.rotation,
           beforeFontSize: null,
           beforeTextSnapshot: null,
+          strokeMoveApplied: null,
           startBoard: { x: bx, y: by },
         }
         ;(e.target as Element).setPointerCapture?.(e.pointerId)
@@ -726,8 +831,8 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         return
       }
 
-      // Resize handles next.
-      if (view) {
+      // Resize handles next (image / text only — strokes have none).
+      if (view && view.selection.kind !== 'stroke') {
         const handle = handleAt(bx, by, view, ctx.camera.scale)
         if (handle) {
           // Text-resize uses a separate code path (font.size scaling); we
@@ -754,6 +859,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
             beforeRotation: view.rotation,
             beforeFontSize,
             beforeTextSnapshot,
+            strokeMoveApplied: null,
             startBoard: { x: bx, y: by },
           }
           ;(e.target as Element).setPointerCapture?.(e.pointerId)
@@ -761,8 +867,8 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         }
       }
 
-      // Hit-test against ALL objects (text + image, topmost wins).
-      const hit = objectAt(bx, by)
+      // Hit-test against ALL objects (text → image → stroke, topmost wins).
+      const hit = objectAt(bx, by, ctx.camera.scale)
       if (hit) {
         // Double-click on a text body → handoff to the Text tool so the
         // user can immediately edit. Image double-click has no special
@@ -796,6 +902,11 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
             beforeRotation: fresh.rotation,
             beforeFontSize: null,
             beforeTextSnapshot: null,
+            // For stroke moves, track cumulative dx/dy applied to the
+            // sample array so each tick only translates by the delta.
+            // Null for image/text moves (they re-derive position from
+            // `before` + startBoard each tick).
+            strokeMoveApplied: hit.kind === 'stroke' ? { dx: 0, dy: 0 } : null,
             startBoard: { x: bx, y: by },
           }
           ;(e.target as Element).setPointerCapture?.(e.pointerId)
@@ -828,10 +939,45 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       if (!view) return
 
       if (drag.kind === 'move') {
-        const dx = bx - drag.startBoard.x
-        const dy = by - drag.startBoard.y
-        view.obj.transform.x = drag.before.x + dx
-        view.obj.transform.y = drag.before.y + dy
+        const totalDx = bx - drag.startBoard.x
+        const totalDy = by - drag.startBoard.y
+        if (view.selection.kind === 'stroke') {
+          // Strokes don't carry a `transform` field — their position is
+          // the per-sample x/y. Translate each sample by the DELTA from
+          // the last applied total (not absolute) so the per-tick work
+          // is bounded by the drag-step size, not the cumulative drag
+          // distance. erasedStamps (which live at absolute board coords)
+          // move with the stroke so partly-erased holes stay in the
+          // right place. Bbox cache invalidated so the next render uses
+          // the fresh extent.
+          const stroke = view.obj as Stroke
+          const applied = drag.strokeMoveApplied
+          if (applied) {
+            const stepDx = totalDx - applied.dx
+            const stepDy = totalDy - applied.dy
+            if (stepDx !== 0 || stepDy !== 0) {
+              for (const sample of stroke.samples) {
+                sample.x += stepDx
+                sample.y += stepDy
+              }
+              if (stroke.erasedStamps) {
+                for (const stamp of stroke.erasedStamps) {
+                  stamp.x += stepDx
+                  stamp.y += stepDy
+                }
+              }
+              invalidateStrokeBBox(stroke)
+              applied.dx = totalDx
+              applied.dy = totalDy
+            }
+          }
+        } else {
+          // Image / text: rect-transform objects. Move = re-derive
+          // transform.x/y from `before` + total delta (single in-place
+          // mutation per tick; idempotent).
+          ;(view.obj as ImageObject | TextObject).transform.x = drag.before.x + totalDx
+          ;(view.obj as ImageObject | TextObject).transform.y = drag.before.y + totalDy
+        }
       } else if ('rotate' in drag.kind) {
         // Rotation drag: angle is the polar angle from the object's
         // current center to the pointer. Delta from the start angle is
@@ -921,8 +1067,10 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       // matching save callback so reloads pick up the in-progress state.
       if (view.selection.kind === 'image') {
         deps.saveImageMeta(view.obj as ImageObject)
-      } else {
+      } else if (view.selection.kind === 'text') {
         deps.saveText(view.obj as TextObject)
+      } else {
+        deps.saveStroke(view.obj as Stroke)
       }
       ctx.markCommittedDirty()
     },
@@ -937,10 +1085,41 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       const view = getView()
       if (!view) return
 
-      const { x, y, w, h } = view.transform
-      const r = view.rotation
       const c = ctx.liveLayer.ctx
       const accent = resolveAccent(c)
+
+      // Stroke selection: paint a halo along the perfect-freehand outline
+      // (matches Lasso's selection visual so the two tools feel
+      // consistent) + a dashed bbox in the accent color. No corner /
+      // edge / rotation handles — strokes don't carry rect-shaped
+      // affordances and the underlying geometry is the per-sample
+      // freehand outline.
+      if (view.selection.kind === 'stroke') {
+        applyCamera(ctx.liveLayer, ctx.camera, ctx.dpr)
+        const stroke = view.obj as Stroke
+        const path = getStrokePath(stroke, [], true)
+        const scale = ctx.camera.scale
+        c.save()
+        if (path) {
+          c.strokeStyle = accent
+          c.lineWidth = 3 / scale
+          c.lineJoin = 'round'
+          c.lineCap = 'round'
+          c.stroke(path)
+        }
+        // Dashed bbox so the user has a clear "selected" rectangle even
+        // for thin strokes whose halo blends with the stroke ink.
+        const { x: bx, y: by, w: bw, h: bh } = view.transform
+        c.strokeStyle = accent
+        c.lineWidth = 1 / scale
+        c.setLineDash([6 / scale, 4 / scale])
+        c.strokeRect(bx, by, bw, bh)
+        c.restore()
+        return
+      }
+
+      const { x, y, w, h } = view.transform
+      const r = view.rotation
 
       // Outline — drawn rotated around rect center. Same code path for
       // image + text since the math is identical (transform + rotation).
@@ -1200,7 +1379,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         img.deleted = true
         deps.saveImageMeta(img)
         deps.pushOp({ kind: 'delete-image', imageId: id })
-      } else {
+      } else if (selected.kind === 'text') {
         const id = selected.id
         const t = deps.getTexts().find((x) => x.id === id)
         if (!t || t.deleted) {
@@ -1210,6 +1389,20 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         t.deleted = true
         deps.saveText(t)
         deps.pushOp({ kind: 'delete-text', textId: id })
+      } else {
+        // Stroke branch — uses the existing stroke 'delete' op kind
+        // (M1; ADRs 0006 + 0009). Mutates stroke.deleted directly +
+        // pushes the op as undo record (apply/unapply flip deleted
+        // symmetrically, so no double-apply concern).
+        const id = selected.id
+        const s = deps.getStrokes().find((x) => x.id === id)
+        if (!s || s.deleted) {
+          selected = null
+          return false
+        }
+        s.deleted = true
+        deps.saveStroke(s)
+        deps.pushOp({ kind: 'delete', strokeIds: [id] })
       }
       selected = null
       deps.markCommittedDirty()
