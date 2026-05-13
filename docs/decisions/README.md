@@ -18,6 +18,9 @@ ADRs document non-obvious architectural choices. See [process.md](../process.md)
 | [0010](0010-settings-data-model.md)   | Settings data model — versioned, sparse, sync-ready | Accepted |
 | [0011](0011-toolbar-deferred.md)      | Floating toolbar deferred from v1                   | Accepted |
 | [0012](0012-sharing-deferred.md)      | Sharing / live collaboration deferred from v1       | Accepted |
+| [0013](0013-text-contenteditable-overlay.md) | Text editing via DOM contenteditable overlay | Accepted |
+| [0014](0014-select-tool-selection-union.md)  | Select tool: discriminated-union Selection (vs polymorphism) | Accepted |
+| [0015](0015-text-wrap-width-per-object.md)   | Text wrap-width as a per-object field        | Accepted |
 
 ## Format
 

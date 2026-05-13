@@ -6,7 +6,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 
 ## Current state
 
-**v1.1.0 shipped 2026-05-12.** Single-user, offline-first whiteboard with image paste (move / resize / rotate via dedicated Select tool; included in PNG / SVG / PDF exports). Live collaboration deferred per [ADR 0012](decisions/0012-sharing-deferred.md). PWA install + deployment polish are post-v1 work tracked below.
+**v1.2.0 shipped 2026-05-13.** Single-user, offline-first whiteboard with image paste + text tool (mono / 12 px default, wrap-width, Cmd+B/I/U, rotate/move/scale via Select tool) + laser pointer + mouse-mode synthetic pressure + lasso copy-as-PNG. Live collaboration deferred per [ADR 0012](decisions/0012-sharing-deferred.md). PWA install + deployment polish are post-v1 work tracked below.
 
 | M  | Title                                                                    | Status |
 |----|--------------------------------------------------------------------------|--------|
@@ -20,6 +20,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | M3 | Server, sync, room URLs                                                  | 🟡 **Deferred from v1** *(see [ADR 0012](decisions/0012-sharing-deferred.md); design archive at [`docs/superpowers/specs/2026-05-10-m3-sync-design.md`](superpowers/specs/2026-05-10-m3-sync-design.md))* |
 | **v1.0.0** | First production release (offline-first, pen-optimized)         | ✅ *(2026-05-11; tag `v1.0.0`)* |
 | **v1.1.0** | Image paste — Select tool, move / resize / rotate, export integration | ✅ *(2026-05-12; tag `v1.1.0`)* |
+| **v1.2.0** | Text tool + Select extension + laser + mouse synthetic pressure + lasso PNG copy | ✅ *(2026-05-13; tag `v1.2.0`)* |
 | M4 | Deployment polish — clean-host validation, reverse-proxy paths           | ⬜ post-v1 |
 | M4.5 | PWA install + offline (manifest, service worker)                       | ⬜ post-v1 |
 | M5 | AI: shape recognition                                                    | ⬜ v2 |

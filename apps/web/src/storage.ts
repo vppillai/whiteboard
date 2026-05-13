@@ -26,6 +26,26 @@ const DB_NAME = 'whiteboard-local'
  * Existing databases at any earlier version upgrade in place: the
  * onupgradeneeded branch creates only the missing stores so prior data
  * is preserved across the schema bump. There is no downgrade path.
+ *
+ * CRITICAL MIGRATION CONSTRAINT — read before adding a new schema
+ * version:
+ *
+ *   The `if (!db.objectStoreNames.contains(storeName))` guards are
+ *   safe ONLY for CREATE-NEW-STORE migrations. Any mutation to an
+ *   EXISTING store (adding an index, renaming a field, changing the
+ *   keyPath) must be guarded by an explicit version-range check:
+ *
+ *     if (event.oldVersion < N) { ... }
+ *
+ *   Otherwise users who already have the existing store will silently
+ *   skip the mutation step. The `oldVersion` is available on the
+ *   IDBVersionChangeEvent passed to `onupgradeneeded`.
+ *
+ *   v1 → v3 multi-step jumps work today because IDB fires
+ *   `onupgradeneeded` once with `oldVersion = 1, newVersion = 3`, and
+ *   all three `if (!contains)` guards run in sequence to create each
+ *   missing store. This is the create-only-good path; mutate paths
+ *   need the version-range guard.
  */
 const DB_VERSION = 3
 const STORE_STROKES = 'strokes'

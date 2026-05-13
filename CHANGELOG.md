@@ -6,6 +6,70 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-05-13
+
+**Text tool + Select tool generalization + presentation laser + UX polish.** First-class text objects with full edit / rotate / resize / wrap-width support. Select tool extended to operate on texts alongside images via a discriminated-union selection model. Ephemeral laser pointer for presentations. Mouse-mode synthetic pressure, double-Esc Draw↔Select toggle, idle / jiggle pen halo, image copy/cut, lasso copy-as-PNG, and a handful of input-pipeline + workflow fixes. 127 unit tests at release (up from 100 at v1.1.0). Main bundle 43 KB gz (up from 34.65 KB; well within the 150 KB SPEC budget). IDB schema bump 2 → 3 (new `texts` store; existing strokes + images preserved). Full design notes in [ADRs 0013–0015](docs/decisions/).
+
+### Added
+
+- **Text tool (`T`)** — first-class non-stroke object type. Click empty canvas to create + edit; click existing text in Text mode tentatively drags or releases-to-edit. Multi-line via Enter. **`Esc` commits + returns to the previous tool**. Default font: mono / 12 px / no B/I/U / ink color (all sticky-per-session). Right-click contextual menu offers Mono / Sans / Serif / sizes 12 / 14 / 18 / 24 / 36 / color palette / B/I/U toggles. **`Cmd/Ctrl + B / I / U`** toggles object-level bold / italic / underline (works both inside the editor AND when a text is selected in Select tool). Clipboard paste into the editor uses native browser behavior. Full design at [ADR 0013](docs/decisions/0013-text-contenteditable-overlay.md).
+- **Text wrap-width** — drag the **E/W edge handle** on a selected text to set a fixed wrap width; content greedy-word-wraps to fit; height grows naturally with line count. Auto-width (no wrap, rect grows with content) remains the default. Both modes persist per-object and round-trip cleanly through undo. The DOM editor's `pre-wrap` CSS aligns with the canvas greedy word-wrap for WYSIWYG. Full design at [ADR 0015](docs/decisions/0015-text-wrap-width-per-object.md).
+- **Select tool extension to texts** — `Selection = { kind: 'image' | 'text'; id }` discriminated union with a uniform `ObjectView` abstraction. Click any object (texts above images by z) to select. **Image and text both** support: drag-body-to-move, drag-rotation-handle-to-rotate, double-click-rotation-handle to reset 0°, Delete to soft-delete. Resize differs by kind: image = anchor-preserving rect resize (corners + edges, Shift = aspect-lock); text corner = font-size scaling, text E/W edge = wrap-width adjustment. **Double-click a text in Select mode** → hands off to Text tool's edit mode on that text. **Right-click contextual menu on a selected text** shows Color / Font / Size / B/I/U pills. Full design at [ADR 0014](docs/decisions/0014-select-tool-selection-union.md).
+- **Laser tool (`L`)** — ephemeral fading polyline trail patterned after tldraw v5's laser. Each pen-down draws a disjoint stroke; trails fade over ~2.2 s after pen-up. Color selection via the curated palette (stored separately from pen color — `laserColor` setting defaults to red `#ef4444`). Nothing persists.
+- **Mouse-mode synthetic pressure** — velocity-to-pressure shaping for `pointerType === 'mouse'` strokes (slow = thicker, saturated fast = thinner; V_SAT = 1.6 px/ms, P_MAX = 0.85, P_MIN = 0.3). Toggleable in the settings panel's Input section (default on). Pen / touch unaffected.
+- **Double-Esc toggles Draw ↔ Select.** When the first Esc has nothing to cancel, the second within 350 ms toggles tools. If the first did cancel state, the window resets to avoid surprise tool switches mid-cleanup.
+- **Image Cmd/Ctrl + C / X** — copies / cuts a Select-tool-selected image to the system clipboard. Non-PNG sources are re-encoded to PNG via canvas for cross-browser compat. Cut deletes only after the clipboard write succeeds.
+- **Lasso Cmd/Ctrl + C / X** — copies / cuts lasso-selected strokes as a **transparent-background PNG** to the system clipboard. Paste anywhere — Google Docs / Slack / Confluence / back to canvas. dpr=2 for crisp embeds.
+- **Auto-switch to Select after image paste** — newly pasted image is selected immediately with handles so the user can drag it into place.
+- **Idle pen halo** — after 5 s of cursor inactivity, the locator ring widens (22 px) + brightens (alpha 0.9) + gains a soft shadow glow. Movement demotes back to the faint gated ring.
+- **Jiggle-to-show HiViz halo** — back-and-forth pointer motion (path-length / displacement ratio > 3 over a 300 ms sliding window) briefly promotes the halo for 600 ms. Gated on `!active` so active scribbling never bloom-promotes.
+- **Export filename gains seconds** — `whiteboard-YYYY-MM-DD-HHMMSS.{png,svg,pdf}`. Back-to-back exports within the same minute don't collide.
+
+### Changed (schema + persistence — v1.1 compatible)
+
+- **IDB schema bumped to `DB_VERSION = 3`** with a new `texts` object store (text records carry payload inline; no companion blob store). v1.0.x / v1.1 records upgrade in place — the `onupgradeneeded` handler creates only the missing store.
+- **Op-pipeline extended** with five new text op kinds: `create-text`, `delete-text`, `transform-text`, `edit-text`, `rotate-text`. `OpContext` gains `texts` + `saveText`. `edit-text` carries `{ content, font, color, wrapWidth }` in both `before` and `after` payloads so undo restores wrap-width alongside font changes.
+- **TextObject schema** in `@whiteboard/shared` adds `wrapWidth?: number` (optional; undefined = auto-width). Persisted records without the field load as auto-width — no migration needed.
+- **Settings**: six new sticky text defaults (`textFont`, `textSize`, `textBold`, `textItalic`, `textUnderline`, `textColor`), plus `mouseSyntheticPressure` and `laserColor`. All migrated with defaults so older IDB state upgrades cleanly.
+- **`StrokeStore` + `ImageStore` + `TextStore` are now three parallel interface seams.** TextStore mirrors the StrokeStore / ImageStore shape (load / insert / update / hardDelete / clear + onRemoteChange no-op). Image binaries remain deferred to M5.1 sync per [ADR 0012](docs/decisions/0012-sharing-deferred.md).
+- **`ToolContext.getLastPointer()`** — new method exposing the most-recent pointer client coords. Consumed by the pen tool's `redraw` to prime hover when activated via tool switch.
+- **Export pipeline** accepts texts in PNG / SVG / PDF. `computeBoardBounds` includes rotation-aware text AABBs. `exportPNG` renders texts above images and below the strokes composite; gains a `transparentBg` option used by the lasso clipboard path. `exportSVG` emits `<text>` with one `<tspan>` per measured (wrapped) line.
+
+### Fixed (review hardening — Tier-A across 4-lane parallel reviews)
+
+A 4-lane parallel review across the v1.2 batch surfaced six MUST-FIX bugs.
+
+- **Tool-switch dropped the text edit op.** The Text tool's `cleanup()` persisted content but never pushed `create-text` / `edit-text`. Switch from Text → Pen mid-edit and undo couldn't reverse anything. Fix: `cleanup()` routes through `commitEdit()` so the op lands in undo before the editor tears down.
+- **`wrapWidth` lost on undo.** E/W edge-handle drags mutated `t.wrapWidth` but the `edit-text` op carried only `{ content, font, color }`. Fix: `wrapWidth` added to the payload + restored in `setTextEdit`.
+- **Typing in text mode exited after 1-2 letters.** The global keymap binds many unmodified single letters (b/p/s/v/l/t/f/c/o + 1-5) to tool / brush actions. Without `stopPropagation` on the editor's `keydown`, typing those letters hijacked the keystroke and switched tools. Fix: editor's `keydown` stops propagation on EVERY event.
+- **Cmd+B/I/U on a Select-tool-selected text did nothing.** Only the editor's own handler was wired. Fix: main.ts's `toggleTextFormat` dispatcher checks Text tool's edit state first, then falls through to Select tool's text selection.
+- **Double-click misfire after empty-space click.** Click text → click empty → click same text quickly tripped the editor handoff. Fix: reset the double-click window in the empty-space deselect branch.
+- **Cmd+A while editing destroyed the edit.** Edge case where focus drifted off the editor momentarily. Fix: `selectAll` short-circuits when `textTool.isEditing()`.
+
+### Fixed (other Tier-A)
+
+- **Pen pointer not shown after Esc-Esc Select → Pen.** Pen tool's `lastHover` was null after `cleanup()`. Fix: `getLastPointer()` lets `pen.redraw` prime the hover.
+- **Pen-lift trail on Wacom Intuos.** Some driver versions don't reliably fire `pointerup` — instead they send `pointermove(buttons === 0)` trailing samples. The router treats `buttons === 0` on a captured pointer as an implicit `pointerup`.
+- **Right-click menus stacked (browser + app)** for clicks on overlay elements outside `root`. Fix: `document`-level guard preventDefaults unless target is a form input.
+- **Right-click in text edit showed browser menu.** Fix: dedicated `contextmenu` listener on the editor element.
+- **Laser trail connected disjoint strokes** and showed dot-beads under shadowBlur glow. Fix: per-sample `continueFromPrev` + `butt` lineCap.
+
+### Changed (review hygiene — Tier-B)
+
+- `clearImageBatchSelection` renamed to `clearObjectBatchSelection` (covers images + texts).
+- `TEXT_PADDING_X` imported in `select.ts` (was hard-coded `2 * 6`).
+- `beforeTextSnapshot` is an assertion, not a silent null-guard.
+- `storage.ts` documents the IDB migration constraint (create-only vs index/field mutations).
+- main.ts file-header JSDoc updated for T-key migration.
+- SVG export's `dominant-baseline` moved to `<tspan>` (where it actually controls the y-coord interpretation).
+- Editor `keydown` `stopPropagation` insulates the editor from the global keymap.
+
+### Notes
+
+- **Storage upgrade path.** v1.0.x users have only `strokes`; v1.1 users have `strokes` + `images` + `images-blob`. Opening v1.2 triggers a single `onupgradeneeded` that creates the missing `texts` store; existing data untouched. Upgrade is one-way.
+- **Bundle size.** Main chunk grew from 34.65 KB gz (v1.1.0) to 43 KB gz (+8.35 KB) — text + Select extension + laser + clipboard re-encode. Lazy chunks (jsPDF, html2canvas, DOMPurify) unchanged.
+- **Sharing-deferred posture preserved.** All new objects ride the same `StrokeStore`-pattern store seam ([ADR 0012](docs/decisions/0012-sharing-deferred.md)).
+
 ## [1.1.0] — 2026-05-12
 
 **Image paste and manipulation.** Pasted (or drag-dropped) raster images become first-class floating objects on the canvas, manipulable through a dedicated **Select tool** (`V`) — move, resize (corner + edge handles, Shift for aspect-lock), rotate (handle above top edge, double-click to reset to 0°), delete. PNG / SVG / PDF export include images in z-order with rotation preserved. Image bytes live in IndexedDB alongside strokes; v1.4.x users upgrade in place via a DB version bump (existing strokes preserved). Undo / redo cover paste / move / resize / rotate / delete. 100 unit tests at release (up from 92). Main bundle 34.65 KB gz (up from 28.70 KB gz; well within the 150 KB gz SPEC budget). Full design archive at [`docs/superpowers/specs/2026-05-12-image-paste-design.md`](docs/superpowers/specs/2026-05-12-image-paste-design.md).
