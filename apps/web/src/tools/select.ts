@@ -33,8 +33,10 @@
  * op-kind emission, delete) branches on `selection.kind`.
  */
 
-import type { ImageObject, TextObject } from '@whiteboard/shared'
+import type { ImageObject, TextFontFamily, TextObject } from '@whiteboard/shared'
+import { CURATED_COLORS as PALETTE } from '../colorpicker'
 import { imageCenter, pointInImage, rotateAroundPoint } from '../imagegeom'
+import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
 import type { Op } from '../ops'
 import { applyCamera, clearLayer } from '../render'
 import { pointInText, resizeToFit } from '../textgeom'
@@ -102,6 +104,11 @@ interface SelectToolDeps {
   pushOp: (op: Op) => void
   /** Mark the committed layer dirty so the next frame re-renders. */
   markCommittedDirty: () => void
+  /** Fired when the user double-clicks a TEXT body. Caller (main.ts)
+   *  switches to the Text tool and opens edit mode on the given text
+   *  via the Text tool's `editTextById`. Decoupled from the Text tool
+   *  reference itself so the Select tool stays unaware of its sibling. */
+  onTextDoubleClick?: (id: string, ctx: ToolContext) => void
 }
 
 /** Distance from the top-center handle to the rotation handle, in screen
@@ -151,6 +158,14 @@ export interface SelectTool extends Tool {
 export function createSelectTool(deps: SelectToolDeps): SelectTool {
   let selected: Selection | null = null
   let drag: DragState | null = null
+  // Double-click-text-body tracking: most recent pointerdown timestamp +
+  // text id, used to dispatch the Text tool handoff when the user clicks
+  // the same text twice within the threshold. Strict same-id matching
+  // (not just "any recent click") so dragging from text A to text B
+  // doesn't trip the handoff.
+  let lastTextDownAt = Number.NEGATIVE_INFINITY
+  let lastTextDownId: string | null = null
+  const TEXT_DBLCLICK_MS = 400
   // Timestamp of the most recent pointerdown on the rotation handle.
   // A second pointerdown on the same handle within DBLCLICK_MS resets
   // the image's rotation to 0 (and does NOT start a drag). Sentinel
@@ -734,6 +749,28 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       // Hit-test against ALL objects (text + image, topmost wins).
       const hit = objectAt(bx, by)
       if (hit) {
+        // Double-click on a text body → handoff to the Text tool so the
+        // user can immediately edit. Image double-click has no special
+        // semantic (currently). Strict same-id matching so dragging
+        // from text A to text B can't trigger the handoff.
+        if (hit.kind === 'text' && deps.onTextDoubleClick) {
+          const now = performance.now()
+          const isDouble = lastTextDownId === hit.id && now - lastTextDownAt < TEXT_DBLCLICK_MS
+          lastTextDownAt = now
+          lastTextDownId = hit.id
+          if (isDouble) {
+            // Hand off to Text tool. Don't start a drag — the caller's
+            // setTool('text') call will cleanup() us anyway and any
+            // drag state would just be discarded.
+            deps.onTextDoubleClick(hit.id, ctx)
+            return
+          }
+        } else {
+          // Reset on a non-text hit so a future text click doesn't
+          // double-fire from a stale prior text id.
+          lastTextDownAt = Number.NEGATIVE_INFINITY
+          lastTextDownId = null
+        }
         selected = hit
         const fresh = getView()
         if (fresh) {
@@ -911,6 +948,145 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       c.arc(rotPos.x, rotPos.y, HANDLE_PX / 2, 0, Math.PI * 2)
       c.fill()
       c.restore()
+    },
+
+    renderContextualMenu(host, dismiss): void {
+      // Right-click contextual menu — content depends on what's selected.
+      // Currently only text gets a rich menu (Color / Font / Size /
+      // B / I / U). Image-selection / no-selection both fall through
+      // to the static TOOL / VIEW / EXPORT rows that toolmenu.ts adds
+      // outside this hook.
+      const sel = selected
+      if (!sel || sel.kind !== 'text') return
+      const t = deps.getTexts().find((x) => x.id === sel.id)
+      if (!t || t.deleted) return
+
+      const applyEdit = (mutate: (text: TextObject) => void): void => {
+        const before = {
+          content: t.content,
+          font: { ...t.font },
+          color: t.color,
+        }
+        mutate(t)
+        // Re-fit the rect to any font-affecting changes so the rendered
+        // bbox stays correct.
+        const fitted = resizeToFit(t)
+        t.transform = fitted.transform
+        deps.saveText(t)
+        const after = {
+          content: t.content,
+          font: { ...t.font },
+          color: t.color,
+        }
+        deps.pushOp({ kind: 'edit-text', textId: t.id, before, after })
+        deps.markCommittedDirty()
+      }
+
+      // COLOR
+      host.appendChild(sectionLabel('Color'))
+      const palette = paletteGrid()
+      for (const c of PALETTE) {
+        palette.appendChild(
+          swatch({
+            color: c,
+            active: t.color === c,
+            onClick: () => {
+              applyEdit((x) => {
+                x.color = c
+              })
+              dismiss()
+            },
+          }),
+        )
+      }
+      host.appendChild(palette)
+
+      // FONT
+      host.appendChild(separator())
+      host.appendChild(sectionLabel('Font'))
+      const fontRow = pillRow()
+      const families: { id: TextFontFamily; label: string }[] = [
+        { id: 'mono', label: 'Mono' },
+        { id: 'sans', label: 'Sans' },
+        { id: 'serif', label: 'Serif' },
+      ]
+      for (const f of families) {
+        fontRow.appendChild(
+          pill({
+            label: f.label,
+            active: t.font.family === f.id,
+            onClick: () => {
+              applyEdit((x) => {
+                x.font = { ...x.font, family: f.id }
+              })
+              dismiss()
+            },
+          }),
+        )
+      }
+      host.appendChild(fontRow)
+
+      // SIZE
+      host.appendChild(separator())
+      host.appendChild(sectionLabel('Size'))
+      const sizeRow = pillRow()
+      for (const s of [12, 14, 18, 24, 36]) {
+        sizeRow.appendChild(
+          pill({
+            label: String(s),
+            active: t.font.size === s,
+            onClick: () => {
+              applyEdit((x) => {
+                x.font = { ...x.font, size: s }
+              })
+              dismiss()
+            },
+          }),
+        )
+      }
+      host.appendChild(sizeRow)
+
+      // STYLE (B / I / U)
+      host.appendChild(separator())
+      host.appendChild(sectionLabel('Style'))
+      const styleRow = pillRow()
+      styleRow.appendChild(
+        pill({
+          label: 'B',
+          active: t.font.bold,
+          onClick: () => {
+            applyEdit((x) => {
+              x.font = { ...x.font, bold: !x.font.bold }
+            })
+            dismiss()
+          },
+        }),
+      )
+      styleRow.appendChild(
+        pill({
+          label: 'I',
+          active: t.font.italic,
+          onClick: () => {
+            applyEdit((x) => {
+              x.font = { ...x.font, italic: !x.font.italic }
+            })
+            dismiss()
+          },
+        }),
+      )
+      styleRow.appendChild(
+        pill({
+          label: 'U',
+          active: t.font.underline,
+          onClick: () => {
+            applyEdit((x) => {
+              x.font = { ...x.font, underline: !x.font.underline }
+            })
+            dismiss()
+          },
+        }),
+      )
+      host.appendChild(styleRow)
     },
 
     cleanup(): void {

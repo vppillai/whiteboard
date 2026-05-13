@@ -24,6 +24,12 @@ export interface PngExportOptions {
   /** Device-pixel-ratio multiplier. Default 1 (matches on-screen-at-100%
    *  zoom). PDF embed bumps to 2 for print quality. */
   dpr?: number
+  /** When true, skip the theme-background fill so the PNG has a
+   *  transparent background. Used by the lasso clipboard-copy path so
+   *  drawings pasted into Docs / Slack / etc. don't bring a canvas-
+   *  colored rectangle with them. File exports default `false` (we want
+   *  the background visible in a standalone PNG file). */
+  transparentBg?: boolean
 }
 
 /**
@@ -109,18 +115,27 @@ export async function exportPNG(
     )
   }
 
-  // ----- Pass 2: committed = theme bg + grid + images + composited strokes -----
+  // ----- Pass 2: committed = (theme bg) + grid + images + composited strokes -----
   clearLayer(committedLayer)
   const cCtx = committedLayer.ctx
   // Theme background — read CSS variable at export time so light / dark
-  // themes produce matching PNGs.
-  cCtx.save()
-  cCtx.setTransform(1, 0, 0, 1, 0, 0)
-  cCtx.fillStyle = resolveBgColor()
-  cCtx.fillRect(0, 0, w, h)
-  cCtx.restore()
+  // themes produce matching PNGs. Skipped when `transparentBg` is set
+  // (clipboard-copy path), so pasting into Google Docs / Slack / etc.
+  // doesn't bring along a canvas-colored rectangle. The grid is ALSO
+  // skipped on transparent renders — a grid on a transparent background
+  // looks wrong (no canvas underneath it) and isn't what a "drawing only"
+  // copy implies.
+  if (!options.transparentBg) {
+    cCtx.save()
+    cCtx.setTransform(1, 0, 0, 1, 0, 0)
+    cCtx.fillStyle = resolveBgColor()
+    cCtx.fillRect(0, 0, w, h)
+    cCtx.restore()
+  }
   applyCamera(committedLayer, camera, dpr)
-  drawGrid(committedLayer, camera, bounds.width, bounds.height, settings.grid)
+  if (!options.transparentBg) {
+    drawGrid(committedLayer, camera, bounds.width, bounds.height, settings.grid)
+  }
   // Images go between grid and strokes — they're "below" the strokes
   // visually. drawImage uses the current board-space transform; rotation
   // is applied by translating to the image center, rotating, drawing

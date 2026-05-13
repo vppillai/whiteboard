@@ -473,6 +473,16 @@ async function main(): Promise<void> {
     markCommittedDirty: () => {
       committedDirty = true
     },
+    // Select tool double-click on a text body → hand off to Text tool
+    // so the user can edit immediately. setTool('text') cleanups Select
+    // (drops the selection); editTextById then opens the editor on the
+    // same text. The ctx is the Select tool's last pointer event ctx —
+    // Text tool needs it to position the DOM overlay (it has no
+    // pointer-event cache of its own yet).
+    onTextDoubleClick: (id, ctx) => {
+      setTool('text')
+      textTool.editTextById(id, ctx)
+    },
   })
 
   const laserTool = createLaserTool()
@@ -768,7 +778,14 @@ async function main(): Promise<void> {
     const { exportPNG } = await import('./export/png')
     const bounds = computeBoardBounds(selected)
     if (!bounds) return null
-    return exportPNG(selected, [], [], bounds, getSettings(), null, { dpr: 2 })
+    // `transparentBg: true` strips the theme-colored background + grid so
+    // the pasted drawing lands cleanly into Google Docs / Slack /
+    // Confluence / etc. — the user's hostside document supplies the
+    // background.
+    return exportPNG(selected, [], [], bounds, getSettings(), null, {
+      dpr: 2,
+      transparentBg: true,
+    })
   }
 
   const onCopy = (e: ClipboardEvent): void => {
@@ -980,6 +997,42 @@ async function main(): Promise<void> {
   const ESCAPE_DOUBLE_TAP_MS = 350
   let lastEscapeNoOpAt = Number.NEGATIVE_INFINITY
 
+  /**
+   * Cmd/Ctrl + B / I / U dispatcher. Two scopes:
+   *   - Text tool currently EDITING a text → routes to the tool's
+   *     toggleFormat (the editor's keydown handler intercepts first when
+   *     focused; this is the backup for momentary-focus-loss cases).
+   *   - Select tool has a TEXT selected (not editing) → toggle that
+   *     text's font directly + emit an `edit-text` op so undo restores.
+   * Other contexts: no-op (matches user expectation).
+   */
+  const toggleTextFormat = (which: 'bold' | 'italic' | 'underline'): void => {
+    if (textTool.isEditing()) {
+      textTool.toggleFormat(which)
+      return
+    }
+    const sel = selectTool.getSelected()
+    if (sel?.kind !== 'text') return
+    const t = texts.find((x) => x.id === sel.id)
+    if (!t || t.deleted) return
+    const before = {
+      content: t.content,
+      font: { ...t.font },
+      color: t.color,
+    }
+    if (which === 'bold') t.font.bold = !t.font.bold
+    else if (which === 'italic') t.font.italic = !t.font.italic
+    else t.font.underline = !t.font.underline
+    persistText(t)
+    const after = {
+      content: t.content,
+      font: { ...t.font },
+      color: t.color,
+    }
+    pushUndoOp({ kind: 'edit-text', textId: t.id, before, after })
+    committedDirty = true
+  }
+
   registerCleanup(
     attachKeymap({
       undo,
@@ -1030,9 +1083,9 @@ async function main(): Promise<void> {
       // not in edit mode (the tool's own contenteditable handler also
       // intercepts these; this is a backup for the edge case where the
       // editable lost focus momentarily).
-      toggleTextBold: () => textTool.toggleFormat('bold'),
-      toggleTextItalic: () => textTool.toggleFormat('italic'),
-      toggleTextUnderline: () => textTool.toggleFormat('underline'),
+      toggleTextBold: () => toggleTextFormat('bold'),
+      toggleTextItalic: () => toggleTextFormat('italic'),
+      toggleTextUnderline: () => toggleTextFormat('underline'),
       deleteSelection: () => {
         // Cmd+A also marks images and texts for batch delete. Drain those
         // sets first (independent of which tool is active) so the user

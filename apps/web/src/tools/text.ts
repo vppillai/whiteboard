@@ -110,6 +110,15 @@ export interface TextTool extends Tool {
    *  main.ts's keymap as a backup for Cmd+B/I/U when the editable
    *  doesn't intercept (e.g. focus left the editor for a moment). */
   toggleFormat(which: 'bold' | 'italic' | 'underline'): void
+  /** Open the editor on an existing text by id. Used by the Select tool's
+   *  double-click handoff: Select detects double-click on a text body,
+   *  switches to Text tool via setTool, then calls this to immediately
+   *  enter edit mode on the clicked text. `ctx` is needed because the
+   *  Text tool's own pointer-event cache hasn't been populated yet —
+   *  this is the FIRST interaction it sees after activation. Returns
+   *  true on success; false if no text with the given id exists or it's
+   *  soft-deleted. */
+  editTextById(id: string, ctx: ToolContext): boolean
 }
 
 interface EditingState {
@@ -247,12 +256,23 @@ export function createTextTool(deps: TextToolDeps): TextTool {
 
     const handleKey = (e: KeyboardEvent): void => {
       if (!editing) return
+      // CRITICAL: stop propagation on EVERY keystroke. The global keymap
+      // (attachKeymap on document) binds many UNMODIFIED single letters
+      // — `b` / `s` / `v` / `l` / `t` / `f` / `p` / `c` / `o`, plus
+      // `1`-`5` for brush presets. Without stopPropagation, typing any
+      // of those letters into the editor ALSO fires the global tool-
+      // switch handlers, which then `cleanup()`s the text tool and
+      // discards the in-progress edit. That was the actual root cause
+      // of "text mode exits after the first letter" — applyEditorStyles
+      // wasn't the culprit. Browser-native shortcuts inside the
+      // editable (Cmd+A select-all-in-editor, Cmd+Z undo-last-edit)
+      // still fire because preventDefault isn't called below — only
+      // propagation is stopped, so the document-level handlers can't
+      // see the event but the browser's default behavior on the
+      // editable still runs.
+      e.stopPropagation()
       if (e.key === 'Escape') {
         e.preventDefault()
-        // Stop propagation so the global keymap's Esc-cancel handler
-        // doesn't ALSO run on the same event (it would clear popovers /
-        // run the double-tap toggle on top of our commit).
-        e.stopPropagation()
         const prev = deps.getPreviousToolId() ?? 'pen'
         commitEdit()
         deps.setTool(prev)
@@ -263,12 +283,6 @@ export function createTextTool(deps: TextToolDeps): TextTool {
         const k = e.key.toLowerCase()
         if (k === 'b' || k === 'i' || k === 'u') {
           e.preventDefault()
-          // CRITICAL: stop propagation so the document-level keymap
-          // (which has its OWN Cmd+B/I/U handler routed to
-          // toggleFormat() as a backup) doesn't fire on the same
-          // event. Without this both handlers fire and the toggle
-          // cancels itself, making B/I/U appear broken.
-          e.stopPropagation()
           toggleFormat(k === 'b' ? 'bold' : k === 'i' ? 'italic' : 'underline', lastCtx)
           return
         }
@@ -563,6 +577,13 @@ export function createTextTool(deps: TextToolDeps): TextTool {
     },
     toggleFormat(which: 'bold' | 'italic' | 'underline'): void {
       toggleFormat(which, lastCtx)
+    },
+    editTextById(id: string, ctx: ToolContext): boolean {
+      const t = deps.getTexts().find((x) => x.id === id)
+      if (!t || t.deleted) return false
+      lastCtx = ctx
+      startEdit(t, ctx, false)
+      return true
     },
   }
 }
