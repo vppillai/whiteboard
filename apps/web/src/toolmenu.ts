@@ -68,124 +68,151 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
   root.className = 'whiteboard-tools'
 
   const popoverRef: { current?: Popover } = {}
-  // `noteSelection` is the pin-aware close: dismisses if unpinned, no-ops
-  // if pinned. Used for body action pills (tool select, view actions,
-  // contextual menu choices, Settings) so a pinned menu stays alive as a
-  // floating palette across multiple selections. `dismiss` is the
-  // unconditional close — used for explicit navigations to another
-  // popover (Grid…, Export…) that intentionally replace this one, and
-  // for the destructive Clear board… flow.
-  const noteSelection = (): void => popoverRef.current?.noteSelection()
   const dismiss = (): void => popoverRef.current?.dismiss()
-
-  // Active tool's contextual section comes first (closest to the cursor).
-  // The contextual menu's selection clicks (color, font, size, B/I/U)
-  // route through noteSelection so a pinned menu survives multiple
-  // formatting tweaks in a row.
-  const activeTool = opts.getActiveTool()
-  if (activeTool.renderContextualMenu) {
-    activeTool.renderContextualMenu(root, noteSelection)
+  /** Pin-aware action handler for body pills (tool select, contextual
+   *  menu choices, view actions, Settings).
+   *
+   *  - Unpinned: dismiss (current "menu disappears after one selection"
+   *    behavior).
+   *  - Pinned: rebuild the content so active-state highlights reflect
+   *    the new state — e.g. switching tool with the menu pinned should
+   *    show the new tool's pill as active, color swatches should reflect
+   *    the new picked color, etc. The menu was previously a one-time
+   *    snapshot at open time; with pinning, that snapshot froze the
+   *    active-state visuals until the user re-opened the menu.
+   *
+   *  Rebuilding is cheap (a few DOM nodes) and only happens on user
+   *  action — not per-frame. Position is preserved because we only
+   *  replace the CONTENT div's children, not the popover wrapper. */
+  const onAction = (): void => {
+    if (popoverRef.current?.isPinned()) {
+      rebuildContent()
+    } else {
+      dismiss()
+    }
   }
 
-  // TOOL row.
-  if (root.childNodes.length > 0) root.appendChild(separator())
-  root.appendChild(sectionLabel('Tool'))
-  const toolsRow = pillRow()
-  for (const t of TOOLS) {
-    toolsRow.appendChild(
+  /** Build (or re-build) the menu's content into `root`. Reads
+   *  `opts.getActiveTool()` and other live getters every call so the
+   *  rendered state always reflects the current app state. */
+  const buildContent = (): void => {
+    // Active tool's contextual section comes first (closest to the
+    // cursor). The contextual menu's selection clicks (color / font /
+    // size / B/I/U) route through onAction so the active-state visuals
+    // refresh on every click when pinned.
+    const activeTool = opts.getActiveTool()
+    if (activeTool.renderContextualMenu) {
+      activeTool.renderContextualMenu(root, onAction)
+    }
+
+    // TOOL row.
+    if (root.childNodes.length > 0) root.appendChild(separator())
+    root.appendChild(sectionLabel('Tool'))
+    const toolsRow = pillRow()
+    for (const t of TOOLS) {
+      toolsRow.appendChild(
+        pill({
+          label: t.label,
+          title: t.enabled ? undefined : 'Coming soon',
+          active: t.id === activeTool.id,
+          disabled: !t.enabled,
+          onClick: t.enabled
+            ? () => {
+                opts.onSelectTool(t.id)
+                onAction()
+              }
+            : undefined,
+        }),
+      )
+    }
+    root.appendChild(toolsRow)
+
+    // VIEW section — pen-friendly pills, matching the TOOL / BRUSH rows.
+    root.appendChild(separator())
+    root.appendChild(sectionLabel('View'))
+    const viewRow = pillRow()
+    viewRow.appendChild(
       pill({
-        label: t.label,
-        title: t.enabled ? undefined : 'Coming soon',
-        active: t.id === activeTool.id,
-        disabled: !t.enabled,
-        onClick: t.enabled
-          ? () => {
-              opts.onSelectTool(t.id)
-              noteSelection()
-            }
-          : undefined,
+        label: 'Reset zoom',
+        onClick: () => {
+          opts.onResetZoom()
+          onAction()
+        },
+      }),
+    )
+    viewRow.appendChild(
+      pill({
+        label: 'Fit to view',
+        onClick: () => {
+          opts.onZoomToFit()
+          onAction()
+        },
+      }),
+    )
+    viewRow.appendChild(
+      pill({
+        label: 'Grid…',
+        title: 'Grid options',
+        onClick: () => {
+          // Grid… opens another popover; the single-instance rule will
+          // replace this menu regardless of pin state. Use dismiss for
+          // honesty.
+          dismiss()
+          openOptionsMenu(opts.at)
+        },
+      }),
+    )
+    root.appendChild(viewRow)
+
+    // EXPORT row — single pill that opens the export popover (scope +
+    // format). Symmetric with Cmd/Ctrl+E. M2 § 6.7.6 + feel-test pass:
+    // removed the three-format quick row because it bypassed the scope
+    // choice; one path now handles both scope ('Visible' / 'All') and
+    // format consistently.
+    root.appendChild(separator())
+    root.appendChild(sectionLabel('Export'))
+    const exportRow = pillRow()
+    exportRow.appendChild(
+      pill({
+        label: 'Export…',
+        onClick: () => {
+          // Export… opens another popover — same dismiss-on-navigation
+          // rationale as Grid… above.
+          dismiss()
+          opts.onExport()
+        },
+      }),
+    )
+    root.appendChild(exportRow)
+
+    // Settings — pen-friendly entry point matching the toolpill gear
+    // and the Cmd/Ctrl+, shortcut. Above CLEAR so the destructive row
+    // stays anchored at the bottom. Opens a side panel (not a
+    // popover), so a pinned tool menu can coexist — use onAction.
+    root.appendChild(separator())
+    root.appendChild(
+      fullItem('Settings…', () => {
+        opts.togglePanel()
+        onAction()
+      }),
+    )
+
+    // Destructive — at the bottom, separated.
+    root.appendChild(separator())
+    root.appendChild(
+      fullItem('Clear board…', () => {
+        dismiss()
+        opts.onClear()
       }),
     )
   }
-  root.appendChild(toolsRow)
 
-  // VIEW section — pen-friendly pills, matching the TOOL / BRUSH rows.
-  root.appendChild(separator())
-  root.appendChild(sectionLabel('View'))
-  const viewRow = pillRow()
-  viewRow.appendChild(
-    pill({
-      label: 'Reset zoom',
-      onClick: () => {
-        noteSelection()
-        opts.onResetZoom()
-      },
-    }),
-  )
-  viewRow.appendChild(
-    pill({
-      label: 'Fit to view',
-      onClick: () => {
-        noteSelection()
-        opts.onZoomToFit()
-      },
-    }),
-  )
-  viewRow.appendChild(
-    pill({
-      label: 'Grid…',
-      title: 'Grid options',
-      onClick: () => {
-        // Grid… opens another popover; the single-instance rule will
-        // replace this menu regardless of pin state. Use dismiss for
-        // honesty.
-        dismiss()
-        openOptionsMenu(opts.at)
-      },
-    }),
-  )
-  root.appendChild(viewRow)
+  const rebuildContent = (): void => {
+    root.replaceChildren()
+    buildContent()
+  }
 
-  // EXPORT row — single pill that opens the export popover (scope + format).
-  // Symmetric with Cmd/Ctrl+E. M2 § 6.7.6 + feel-test pass: removed the
-  // three-format quick row because it bypassed the scope choice; one path
-  // now handles both scope ('Visible' / 'All') and format consistently.
-  root.appendChild(separator())
-  root.appendChild(sectionLabel('Export'))
-  const exportRow = pillRow()
-  exportRow.appendChild(
-    pill({
-      label: 'Export…',
-      onClick: () => {
-        // Export… opens another popover — same dismiss-on-navigation
-        // rationale as Grid… above.
-        dismiss()
-        opts.onExport()
-      },
-    }),
-  )
-  root.appendChild(exportRow)
-
-  // Settings — pen-friendly entry point matching the toolpill gear and the
-  // Cmd/Ctrl+, shortcut. Above CLEAR so the destructive row stays anchored
-  // at the bottom. Opens a side panel (not a popover), so a pinned tool
-  // menu can coexist — use noteSelection.
-  root.appendChild(separator())
-  root.appendChild(
-    fullItem('Settings…', () => {
-      noteSelection()
-      opts.togglePanel()
-    }),
-  )
-
-  // Destructive — at the bottom, separated.
-  root.appendChild(separator())
-  root.appendChild(
-    fullItem('Clear board…', () => {
-      dismiss()
-      opts.onClear()
-    }),
-  )
+  buildContent()
 
   popoverRef.current = showPopover({
     anchor: opts.at,
