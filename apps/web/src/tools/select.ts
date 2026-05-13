@@ -150,6 +150,10 @@ export interface SelectTool extends Tool {
    *  this method only updates internal selection state. Silently does
    *  nothing if no image with `id` exists or it is soft-deleted. */
   selectImageById(id: string): void
+  /** Symmetric to selectImageById for text objects. Used by the
+   *  Cmd+V text-paste path so the freshly-created TextObject is
+   *  pre-selected for immediate positioning. */
+  selectTextById(id: string): void
   /** Soft-delete the currently-selected object (image OR text) and emit
    *  the matching delete-image / delete-text op. Returns true if
    *  anything was deleted. */
@@ -1168,6 +1172,14 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       // Any in-flight drag from a prior pointer interaction is stale
       // when the selection is force-changed externally; drop it so the
       // next pointerdown starts cleanly.
+      drag = null
+      deps.markCommittedDirty()
+    },
+
+    selectTextById(id: string): void {
+      const t = deps.getTexts().find((x) => x.id === id)
+      if (!t || t.deleted) return
+      selected = { kind: 'text', id }
       drag = null
       deps.markCommittedDirty()
     },

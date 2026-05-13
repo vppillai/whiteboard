@@ -73,6 +73,12 @@ import {
   getColor,
   getEffectiveBrushConfig,
   getSettings,
+  getTextBold,
+  getTextColor,
+  getTextFont,
+  getTextItalic,
+  getTextSize,
+  getTextUnderline,
   onChange as onSettingsChange,
   setBrushId,
   setColor,
@@ -81,6 +87,7 @@ import { createPanelContent } from './settings/panel-content'
 import { dismissSidePanel, isSidePanelOpen, showSidePanel } from './sidepanel'
 import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
 import { type StrokeStore, createLocalStrokeStore } from './strokestore'
+import { resizeToFit as resizeTextToFit } from './textgeom'
 import { type TextStore, createLocalTextStore } from './textstore'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { openToolMenu } from './toolmenu'
@@ -701,6 +708,68 @@ async function main(): Promise<void> {
   )
 
   // ---------------------------------------------------------------------
+  //  Text-paste helpers — Cmd/Ctrl+V with non-image text on the
+  //  clipboard creates a new TextObject at the cursor. Mirrors the
+  //  image-paste flow (one op pushed, auto-switch to Select + select).
+  //  Multi-line strings (with `\n`) become multi-line text. Whitespace-
+  //  only paste is ignored.
+  // ---------------------------------------------------------------------
+  const readTextFromClipboardEvent = (dt: DataTransfer | null): string | null => {
+    if (!dt) return null
+    const t = dt.getData('text/plain')
+    return t || null
+  }
+
+  const readTextFromAsyncClipboard = async (): Promise<string | null> => {
+    if (!navigator.clipboard?.readText) return null
+    try {
+      const t = await navigator.clipboard.readText()
+      return t || null
+    } catch {
+      // Permission denied / not in user gesture / etc.
+      return null
+    }
+  }
+
+  const makeTextPasteId = (): string =>
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? `t_${crypto.randomUUID()}`
+      : `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+
+  const pasteTextAtBoard = (content: string, board: { x: number; y: number }): void => {
+    const id = makeTextPasteId()
+    const t: TextObject = {
+      id,
+      content,
+      font: {
+        family: getTextFont(),
+        size: getTextSize(),
+        bold: getTextBold(),
+        italic: getTextItalic(),
+        underline: getTextUnderline(),
+      },
+      color: getTextColor(),
+      transform: { x: board.x, y: board.y, w: 0, h: 0 },
+      z: nextTextZ(),
+      createdAt: Date.now(),
+    }
+    const fitted = resizeTextToFit(t)
+    const final = { ...t, transform: fitted.transform }
+    texts.push(final)
+    persistText(final)
+    pushUndoOp({ kind: 'create-text', textId: id })
+    committedDirty = true
+    // Auto-switch to Select with the new text selected — mirrors the
+    // image-paste UX so the user can drag the new text into place
+    // immediately. Same TDZ-safe pattern as `onPasteSuccess` for
+    // images: the closure body only runs on user input, after all
+    // tools and setTool are populated.
+    setTool('select')
+    selectTool.selectTextById(id)
+    showInfoToast('Text pasted')
+  }
+
+  // ---------------------------------------------------------------------
   //  Image paste — three input paths feeding one PasteImage op (see
   //  imagepaste.ts):
   //    - 'paste' event on document (Ctrl/Cmd+V; standard browser flow)
@@ -751,6 +820,17 @@ async function main(): Promise<void> {
       if (fallback) {
         e.preventDefault()
         await pasteImageFromBlob(fallback, pasteAt(), imagePasteCtx)
+        return
+      }
+      // No image on the clipboard — try plain text. Pasting text onto
+      // the canvas creates a new TextObject at the cursor with the
+      // user's sticky-default font / size / color. Multi-line text
+      // (with `\n` separators) becomes a multi-line text object;
+      // whitespace-only paste is ignored.
+      const text = readTextFromClipboardEvent(dt) ?? (await readTextFromAsyncClipboard())
+      if (text?.trim()) {
+        e.preventDefault()
+        pasteTextAtBoard(text, pasteAt())
       }
     })()
   }
