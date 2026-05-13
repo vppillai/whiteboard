@@ -1,36 +1,47 @@
 /**
- * Select tool — for manipulating non-stroke objects (images + texts at
- * v1.2; future floating objects inherit). While Select is active:
+ * Select tool — universal pointer for manipulating any single board
+ * object (image, text, stroke). While Select is active:
  *
- *   - Click an object (reverse-z first-hit, texts above images) → it
- *     becomes selected.
+ *   - Click an object (reverse-z first-hit, priority texts > images >
+ *     strokes) → it becomes selected.
  *   - Hover an object body → cursor changes to `move`; hover a handle →
  *     directional resize cursor. Hover the rotation handle → rotate
- *     cursor.
- *   - Drag the body → translate. Drag a corner handle → resize from the
- *     opposite corner; image: anchor-preserving rect resize, text:
- *     font-size scaling (since text rect is content-derived, not
- *     directly set). Drag an edge handle (image only) → 1-axis resize.
- *     Shift on a corner image constrains the aspect ratio.
+ *     cursor. (Strokes have no handles — body hover only.)
+ *   - Drag the body → translate. For images / texts: drag a corner
+ *     handle → resize from the opposite corner; image gets
+ *     anchor-preserving rect resize, text gets font-size scaling (since
+ *     the text rect is content-derived, not directly set). Drag an
+ *     edge handle on a text (E/W only) → adjust wrapWidth; on an image
+ *     (all 8) → 1-axis resize. Shift on a corner image constrains
+ *     the aspect ratio.
  *   - Drag the rotation handle → rotate. Double-click rotation handle →
- *     reset to 0°.
+ *     reset to 0°. (Texts rotate too; strokes don't.)
  *   - Click empty space → deselect.
  *   - Delete / Backspace removes (soft-delete) with undo.
  *
- * Pen / Eraser / Lasso treat objects as inert — no hit-test, no handles.
- * Selection state is held inside the tool and discarded on tool switch.
+ * Pen / Eraser / Lasso treat all objects as inert — no hit-test, no
+ * handles. Selection state is held inside the tool and discarded on
+ * tool switch (committing any in-flight drag op first — see
+ * `cleanup()`).
  *
- * Rendering: outline + 8 handles on the live layer. Outline scales with
- * zoom (drawn in board space). Handles are constant *pixel* size so they
- * don't disappear when zoomed out — drawn in screen space, positioned
- * from board → screen via the camera transform.
+ * Rendering: live-layer paint dispatched per kind. Floating objects
+ * (image, text) get an outline + 8/6 handles + rotation handle; strokes
+ * get a perfect-freehand outline halo + dashed bbox. Outline scales
+ * with zoom (drawn in board space). Handles are constant *pixel* size
+ * so they don't disappear when zoomed out — drawn in screen space,
+ * positioned from board → screen via the camera transform.
  *
- * Selection model: a discriminated union `Selection = { kind, id }`
- * works across images and texts. A `getView()` helper resolves it to a
- * live `ObjectView` that exposes `{ transform, rotation }` uniformly.
- * The handle math and rotate math operate on the view — they don't care
- * what kind of object is selected. Type-specific code (resize semantics,
- * op-kind emission, delete) branches on `selection.kind`.
+ * Selection model: a 3-variant discriminated union `Selection = {
+ * kind, id }` (image | text | stroke). A `getView()` helper resolves
+ * it to a live `ObjectView` exposing `{ transform, rotation }`
+ * uniformly. The handle math, rotate math, and hover-cursor logic
+ * operate on the view — they don't care what kind of object is
+ * selected. Kind-specific code lives in three places: per-kind drag
+ * commits (`commitImageDrag` / `commitStrokeDrag` / `commitTextDrag`),
+ * per-kind selection paint (`drawStrokeSelection` /
+ * `drawFloatingObjectSelection`), and `objectAt` hit-test order.
+ * Adding a 4th object kind is therefore one helper per concern, not a
+ * fan-out across every interaction handler.
  */
 
 import type { ImageObject, Stroke, TextFontFamily, TextObject } from '@whiteboard/shared'
@@ -175,9 +186,15 @@ export interface SelectTool extends Tool {
    *  Cmd+V text-paste path so the freshly-created TextObject is
    *  pre-selected for immediate positioning. */
   selectTextById(id: string): void
-  /** Soft-delete the currently-selected object (image OR text) and emit
-   *  the matching delete-image / delete-text op. Returns true if
-   *  anything was deleted. */
+  /** Symmetric to selectImageById/selectTextById for strokes. Today the
+   *  external selection-by-id callers are paste flows (no stroke
+   *  equivalent), but the symmetric API is here so future callers
+   *  (e.g. "jump to stroke from history panel") don't need a backdoor
+   *  into module state. */
+  selectStrokeById(id: string): void
+  /** Soft-delete the currently-selected object (image OR text OR stroke)
+   *  and emit the matching delete-image / delete-text / delete op.
+   *  Returns true if anything was deleted. */
   deleteSelected(): boolean
 }
 
@@ -483,13 +500,127 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     return Math.abs(p.x - boardX) <= tol && Math.abs(p.y - boardY) <= tol
   }
 
+  /** Did the rect change between drag-start snapshot and current state? */
+  function transformChanged(
+    before: ImageObject['transform'],
+    after: ImageObject['transform'],
+  ): boolean {
+    return (
+      before.x !== after.x || before.y !== after.y || before.w !== after.w || before.h !== after.h
+    )
+  }
+
+  /** Image-kind drag commit. Emits rotate-image OR transform-image. */
+  function commitImageDrag(d: DragState, img: ImageObject, isRotation: boolean): void {
+    if (isRotation) {
+      const afterR = img.rotation ?? 0
+      if (d.beforeRotation !== afterR) {
+        deps.pushOp({
+          kind: 'rotate-image',
+          imageId: img.id,
+          before: d.beforeRotation,
+          after: afterR,
+        })
+      }
+      return
+    }
+    // Move or resize → transform-image (both end up overwriting the rect).
+    const after = { ...img.transform }
+    if (transformChanged(d.before, after)) {
+      deps.pushOp({ kind: 'transform-image', imageId: img.id, before: d.before, after })
+    }
+  }
+
   /**
-   * Finalize the current drag — push the appropriate op (or skip if the
-   * live state is identical to the snapshot) and clear `drag`. Called from
-   * both onPointerUp (normal release) and pointercancel-style entry paths
-   * (browser revoked the pointer mid-drag, window blur, OS gesture steal).
-   * Without this shared path, a pointercancel left `drag` non-null and
-   * the live transform mutations un-recorded in undo.
+   * Stroke-kind drag commit. Only `move` is supported (no resize / rotate
+   * semantics for freehand geometry).
+   *
+   * Key invariant: samples were mutated directly during the drag (see
+   * onPointerMove stroke branch). The `move` op handler in ops.ts ALSO
+   * translates samples on apply / unapply. Pushing the op via
+   * deps.pushOp records it in the undo stack WITHOUT calling applyOp —
+   * otherwise we'd double-translate on commit. Undo / redo work
+   * correctly because the op's apply/unapply are symmetric (translate
+   * by +dx vs -dx).
+   */
+  function commitStrokeDrag(d: DragState, stroke: Stroke): void {
+    const applied = d.strokeMoveApplied
+    if (!applied || (applied.dx === 0 && applied.dy === 0)) return
+    deps.pushOp({
+      kind: 'move',
+      strokeIds: [stroke.id],
+      dx: applied.dx,
+      dy: applied.dy,
+    })
+  }
+
+  /** Text-kind drag commit. Emits rotate-text, edit-text (resize), or
+   *  transform-text (move). Resize for text covers two flavors:
+   *    - Corner drag: scales font.size → font payload change.
+   *    - E/W edge drag: mutates wrapWidth → wrapWidth payload change.
+   *  Both are captured in `beforeTextSnapshot` (taken at drag-start)
+   *  vs current state. wrapWidth is in the change predicate so the
+   *  E/W drag's undo path correctly restores the auto-width vs
+   *  wrap-width layout. */
+  function commitTextDrag(
+    d: DragState,
+    t: TextObject,
+    isRotation: boolean,
+    isResize: boolean,
+  ): void {
+    if (isRotation) {
+      const afterR = t.rotation ?? 0
+      if (d.beforeRotation !== afterR) {
+        deps.pushOp({
+          kind: 'rotate-text',
+          textId: t.id,
+          before: d.beforeRotation,
+          after: afterR,
+        })
+      }
+      return
+    }
+    if (isResize) {
+      if (!d.beforeTextSnapshot) {
+        throw new Error('select: text resize commit missing beforeTextSnapshot')
+      }
+      const after = {
+        content: t.content,
+        font: { ...t.font },
+        color: t.color,
+        wrapWidth: t.wrapWidth,
+      }
+      const before = d.beforeTextSnapshot
+      const changed =
+        before.font.size !== after.font.size ||
+        before.font.family !== after.font.family ||
+        before.font.bold !== after.font.bold ||
+        before.font.italic !== after.font.italic ||
+        before.font.underline !== after.font.underline ||
+        before.wrapWidth !== after.wrapWidth
+      if (changed) {
+        deps.pushOp({ kind: 'edit-text', textId: t.id, before, after })
+      }
+      return
+    }
+    // Move → transform-text
+    const after = { ...t.transform }
+    if (transformChanged(d.before, after)) {
+      deps.pushOp({ kind: 'transform-text', textId: t.id, before: d.before, after })
+    }
+  }
+
+  /**
+   * Finalize the current drag — dispatch to the per-kind commit helper
+   * and clear `drag`. Called from both onPointerUp (normal release) and
+   * pointercancel-style entry paths (browser revoked the pointer mid-
+   * drag, window blur, OS gesture steal). Without this shared path, a
+   * pointercancel left `drag` non-null and the live transform
+   * mutations un-recorded in undo.
+   *
+   * Dispatching to per-kind helpers (instead of branching inline) means
+   * adding a 4th object kind is one helper + one dispatch case rather
+   * than another ~30-line branch in a 130-line function.
    */
   function commitDrag(e: PointerEvent | null): void {
     if (!drag) return
@@ -504,124 +635,111 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     const isResize = typeof d.kind === 'object' && 'resize' in d.kind
 
     if (view.selection.kind === 'image') {
-      const img = view.obj as ImageObject
-      if (isRotation) {
-        const afterR = img.rotation ?? 0
-        if (d.beforeRotation !== afterR) {
-          deps.pushOp({
-            kind: 'rotate-image',
-            imageId: img.id,
-            before: d.beforeRotation,
-            after: afterR,
-          })
-        }
-      } else {
-        // Move or resize → transform-image
-        const after = { ...img.transform }
-        if (
-          d.before.x !== after.x ||
-          d.before.y !== after.y ||
-          d.before.w !== after.w ||
-          d.before.h !== after.h
-        ) {
-          deps.pushOp({
-            kind: 'transform-image',
-            imageId: img.id,
-            before: d.before,
-            after,
-          })
-        }
-      }
-      return
+      commitImageDrag(d, view.obj as ImageObject, isRotation)
+    } else if (view.selection.kind === 'stroke') {
+      commitStrokeDrag(d, view.obj as Stroke)
+    } else {
+      commitTextDrag(d, view.obj as TextObject, isRotation, isResize)
+    }
+  }
+
+  /** Paint the stroke-selection affordance: a perfect-freehand outline
+   *  halo in the accent color + a dashed bounding box. No handles —
+   *  strokes don't carry rect-shaped affordances and the underlying
+   *  geometry is the per-sample freehand outline. Matches Lasso's
+   *  selection visual so the two tools feel consistent. */
+  function drawStrokeSelection(view: ObjectView, ctx: ToolContext): void {
+    const c = ctx.liveLayer.ctx
+    const accent = resolveAccent(c)
+    applyCamera(ctx.liveLayer, ctx.camera, ctx.dpr)
+    const stroke = view.obj as Stroke
+    const path = getStrokePath(stroke, [], true)
+    const scale = ctx.camera.scale
+    c.save()
+    if (path) {
+      c.strokeStyle = accent
+      c.lineWidth = 3 / scale
+      c.lineJoin = 'round'
+      c.lineCap = 'round'
+      c.stroke(path)
+    }
+    // Dashed bbox so the user has a clear "selected" rectangle even
+    // for thin strokes whose halo blends with the stroke ink.
+    const { x: bx, y: by, w: bw, h: bh } = view.transform
+    c.strokeStyle = accent
+    c.lineWidth = 1 / scale
+    c.setLineDash([6 / scale, 4 / scale])
+    c.strokeRect(bx, by, bw, bh)
+    c.restore()
+  }
+
+  /** Paint the image/text-selection affordance: rotated outline, the
+   *  appropriate handle set (8 for image, 6 for text), and the rotation
+   *  handle. Image and text share this code because the math is
+   *  identical — both reduce to `{ transform, rotation }` via ObjectView. */
+  function drawFloatingObjectSelection(view: ObjectView, ctx: ToolContext): void {
+    const c = ctx.liveLayer.ctx
+    const accent = resolveAccent(c)
+    const { x, y, w, h } = view.transform
+    const r = view.rotation
+
+    // Outline — drawn rotated around rect center.
+    applyCamera(ctx.liveLayer, ctx.camera, ctx.dpr)
+    c.save()
+    if (r !== 0) {
+      c.translate(x + w / 2, y + h / 2)
+      c.rotate(r)
+      c.translate(-(x + w / 2), -(y + h / 2))
+    }
+    c.strokeStyle = accent
+    c.lineWidth = 1 / ctx.camera.scale
+    c.strokeRect(x, y, w, h)
+    c.restore()
+
+    // Handles in screen space — constant pixel size regardless of zoom.
+    c.save()
+    c.setTransform(ctx.dpr, 0, 0, ctx.dpr, 0, 0)
+    const positions = handlePositions(view.transform, view.rotation)
+    const boardToScreen = (p: { x: number; y: number }): { x: number; y: number } => ({
+      x: (p.x - ctx.camera.x) * ctx.camera.scale,
+      y: (p.y - ctx.camera.y) * ctx.camera.scale,
+    })
+    // Texts: 4 corners + 2 horizontal edges (E/W for wrap-width).
+    // Vertical edges (N/S) are hidden because text height is
+    // content-derived. Images: all 8.
+    const visibleHandles =
+      view.selection.kind === 'text'
+        ? (['nw', 'ne', 'se', 'sw', 'e', 'w'] as const)
+        : (['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const)
+    for (const hid of visibleHandles) {
+      const s = boardToScreen(positions[hid])
+      c.fillStyle = '#ffffff'
+      c.fillRect(s.x - HANDLE_PX / 2 - 1, s.y - HANDLE_PX / 2 - 1, HANDLE_PX + 2, HANDLE_PX + 2)
+      c.fillStyle = accent
+      c.fillRect(s.x - HANDLE_PX / 2, s.y - HANDLE_PX / 2, HANDLE_PX, HANDLE_PX)
     }
 
-    if (view.selection.kind === 'stroke') {
-      // Stroke branch — only `move` is supported (no resize / rotate
-      // semantics for freehand geometry).
-      //
-      // Key invariant: samples were mutated directly during the drag
-      // (see onPointerMove stroke branch). The `move` op handler in
-      // ops.ts ALSO translates samples on apply / unapply. Pushing the
-      // op via deps.pushOp records it in the undo stack WITHOUT calling
-      // applyOp — otherwise we'd double-translate on commit. Undo /
-      // redo work correctly because the op's apply/unapply are
-      // symmetric (translate by +dx vs -dx).
-      const stroke = view.obj as Stroke
-      const applied = d.strokeMoveApplied
-      if (applied && (applied.dx !== 0 || applied.dy !== 0)) {
-        deps.pushOp({
-          kind: 'move',
-          strokeIds: [stroke.id],
-          dx: applied.dx,
-          dy: applied.dy,
-        })
-      }
-      return
-    }
-
-    // Text branch
-    const t = view.obj as TextObject
-    if (isRotation) {
-      const afterR = t.rotation ?? 0
-      if (d.beforeRotation !== afterR) {
-        deps.pushOp({
-          kind: 'rotate-text',
-          textId: t.id,
-          before: d.beforeRotation,
-          after: afterR,
-        })
-      }
-      return
-    }
-    if (isResize) {
-      // Resize for text emits edit-text in two flavors:
-      //   - Corner drag: scales font.size → font payload change.
-      //   - E/W edge drag: mutates wrapWidth → wrapWidth payload change.
-      // Both are captured in `beforeTextSnapshot` (taken at drag-start)
-      // vs current state. wrapWidth is in the change predicate so the
-      // E/W drag's undo path correctly restores the auto-width vs
-      // wrap-width layout — without this the op silently disappeared.
-      if (!d.beforeTextSnapshot) {
-        throw new Error('select: text resize commit missing beforeTextSnapshot')
-      }
-      const after = {
-        content: t.content,
-        font: { ...t.font },
-        color: t.color,
-        wrapWidth: t.wrapWidth,
-      }
-      const changed =
-        d.beforeTextSnapshot.font.size !== after.font.size ||
-        d.beforeTextSnapshot.font.family !== after.font.family ||
-        d.beforeTextSnapshot.font.bold !== after.font.bold ||
-        d.beforeTextSnapshot.font.italic !== after.font.italic ||
-        d.beforeTextSnapshot.font.underline !== after.font.underline ||
-        d.beforeTextSnapshot.wrapWidth !== after.wrapWidth
-      if (changed) {
-        deps.pushOp({
-          kind: 'edit-text',
-          textId: t.id,
-          before: d.beforeTextSnapshot,
-          after,
-        })
-      }
-      return
-    }
-    // Move → transform-text
-    const after = { ...t.transform }
-    if (
-      d.before.x !== after.x ||
-      d.before.y !== after.y ||
-      d.before.w !== after.w ||
-      d.before.h !== after.h
-    ) {
-      deps.pushOp({
-        kind: 'transform-text',
-        textId: t.id,
-        before: d.before,
-        after,
-      })
-    }
+    // Rotation handle + connecting line, anchored above the N (top-
+    // center) of the rect. For texts (which don't render the N handle
+    // itself), the connecting line still starts at the top-center
+    // position — visually consistent.
+    const rotPos = boardToScreen(rotationHandlePos(view.transform, view.rotation, ctx.camera.scale))
+    const nPos = boardToScreen(positions.n)
+    c.strokeStyle = accent
+    c.lineWidth = 1
+    c.beginPath()
+    c.moveTo(nPos.x, nPos.y)
+    c.lineTo(rotPos.x, rotPos.y)
+    c.stroke()
+    c.fillStyle = '#ffffff'
+    c.beginPath()
+    c.arc(rotPos.x, rotPos.y, HANDLE_PX / 2 + 1.5, 0, Math.PI * 2)
+    c.fill()
+    c.fillStyle = accent
+    c.beginPath()
+    c.arc(rotPos.x, rotPos.y, HANDLE_PX / 2, 0, Math.PI * 2)
+    c.fill()
+    c.restore()
   }
 
   function updateHoverCursor(ctx: ToolContext, boardX: number, boardY: number): void {
@@ -1085,102 +1203,11 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       const view = getView()
       if (!view) return
 
-      const c = ctx.liveLayer.ctx
-      const accent = resolveAccent(c)
-
-      // Stroke selection: paint a halo along the perfect-freehand outline
-      // (matches Lasso's selection visual so the two tools feel
-      // consistent) + a dashed bbox in the accent color. No corner /
-      // edge / rotation handles — strokes don't carry rect-shaped
-      // affordances and the underlying geometry is the per-sample
-      // freehand outline.
       if (view.selection.kind === 'stroke') {
-        applyCamera(ctx.liveLayer, ctx.camera, ctx.dpr)
-        const stroke = view.obj as Stroke
-        const path = getStrokePath(stroke, [], true)
-        const scale = ctx.camera.scale
-        c.save()
-        if (path) {
-          c.strokeStyle = accent
-          c.lineWidth = 3 / scale
-          c.lineJoin = 'round'
-          c.lineCap = 'round'
-          c.stroke(path)
-        }
-        // Dashed bbox so the user has a clear "selected" rectangle even
-        // for thin strokes whose halo blends with the stroke ink.
-        const { x: bx, y: by, w: bw, h: bh } = view.transform
-        c.strokeStyle = accent
-        c.lineWidth = 1 / scale
-        c.setLineDash([6 / scale, 4 / scale])
-        c.strokeRect(bx, by, bw, bh)
-        c.restore()
-        return
+        drawStrokeSelection(view, ctx)
+      } else {
+        drawFloatingObjectSelection(view, ctx)
       }
-
-      const { x, y, w, h } = view.transform
-      const r = view.rotation
-
-      // Outline — drawn rotated around rect center. Same code path for
-      // image + text since the math is identical (transform + rotation).
-      applyCamera(ctx.liveLayer, ctx.camera, ctx.dpr)
-      c.save()
-      if (r !== 0) {
-        c.translate(x + w / 2, y + h / 2)
-        c.rotate(r)
-        c.translate(-(x + w / 2), -(y + h / 2))
-      }
-      c.strokeStyle = accent
-      c.lineWidth = 1 / ctx.camera.scale
-      c.strokeRect(x, y, w, h)
-      c.restore()
-
-      // Handles in screen space — constant pixel size regardless of zoom.
-      c.save()
-      c.setTransform(ctx.dpr, 0, 0, ctx.dpr, 0, 0)
-      const positions = handlePositions(view.transform, view.rotation)
-      const boardToScreen = (p: { x: number; y: number }): { x: number; y: number } => ({
-        x: (p.x - ctx.camera.x) * ctx.camera.scale,
-        y: (p.y - ctx.camera.y) * ctx.camera.scale,
-      })
-      // Texts: 4 corners + 2 horizontal edges (E/W for wrap-width).
-      // Vertical edges (N/S) are hidden because text height is
-      // content-derived. Images: all 8.
-      const visibleHandles =
-        view.selection.kind === 'text'
-          ? (['nw', 'ne', 'se', 'sw', 'e', 'w'] as const)
-          : (['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const)
-      for (const hid of visibleHandles) {
-        const s = boardToScreen(positions[hid])
-        c.fillStyle = '#ffffff'
-        c.fillRect(s.x - HANDLE_PX / 2 - 1, s.y - HANDLE_PX / 2 - 1, HANDLE_PX + 2, HANDLE_PX + 2)
-        c.fillStyle = accent
-        c.fillRect(s.x - HANDLE_PX / 2, s.y - HANDLE_PX / 2, HANDLE_PX, HANDLE_PX)
-      }
-
-      // Rotation handle + connecting line, anchored above the N (top-
-      // center) of the rect. For texts (which don't render the N handle
-      // itself), the connecting line still starts at the top-center
-      // position — visually consistent.
-      const rotPos = boardToScreen(
-        rotationHandlePos(view.transform, view.rotation, ctx.camera.scale),
-      )
-      const nPos = boardToScreen(positions.n)
-      c.strokeStyle = accent
-      c.lineWidth = 1
-      c.beginPath()
-      c.moveTo(nPos.x, nPos.y)
-      c.lineTo(rotPos.x, rotPos.y)
-      c.stroke()
-      c.fillStyle = '#ffffff'
-      c.beginPath()
-      c.arc(rotPos.x, rotPos.y, HANDLE_PX / 2 + 1.5, 0, Math.PI * 2)
-      c.fill()
-      c.fillStyle = accent
-      c.beginPath()
-      c.arc(rotPos.x, rotPos.y, HANDLE_PX / 2, 0, Math.PI * 2)
-      c.fill()
-      c.restore()
     },
 
     renderContextualMenu(host, dismiss): void {
@@ -1372,6 +1399,14 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       const t = deps.getTexts().find((x) => x.id === id)
       if (!t || t.deleted) return
       selected = { kind: 'text', id }
+      drag = null
+      deps.markCommittedDirty()
+    },
+
+    selectStrokeById(id: string): void {
+      const s = deps.getStrokes().find((x) => x.id === id)
+      if (!s || s.deleted) return
+      selected = { kind: 'stroke', id }
       drag = null
       deps.markCommittedDirty()
     },
