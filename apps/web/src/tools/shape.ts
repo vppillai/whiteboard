@@ -348,8 +348,11 @@ export function createShapeTool(deps: ShapeToolDeps): ShapeTool {
       // ── Fill toggle (outline / filled icons) ────────────────────
       // Outline-only by default; toggling on tints the interior at the
       // sticky `shapeFillOpacity` (default 0.25). Lines / arrows don't
-      // visually carry fill — the toggle is still shown so the setting
-      // survives sub-mode switches (the v1.4 "no clutter" brief).
+      // visually carry fill — when the current sub-mode is line/arrow
+      // the Fill toggle and Fill opacity slider are *disabled* (rendered
+      // but greyed out) so the user can see they exist and toggle still
+      // affects rect / ellipse sub-modes once switched.
+      const supportsFill = activeKind !== 'line' && activeKind !== 'arrow'
       host.appendChild(sectionLabel('Fill'))
       const fillRow = pillRow()
       const fillOn = getShapeFillEnabled()
@@ -358,10 +361,13 @@ export function createShapeTool(deps: ShapeToolDeps): ShapeTool {
           label: 'Outline only',
           icon: iconFillOutline(),
           active: !fillOn,
-          onClick: () => {
-            setShapeFillEnabled(false)
-            dismiss()
-          },
+          disabled: !supportsFill,
+          onClick: supportsFill
+            ? () => {
+                setShapeFillEnabled(false)
+                dismiss()
+              }
+            : undefined,
         }),
       )
       fillRow.appendChild(
@@ -369,10 +375,13 @@ export function createShapeTool(deps: ShapeToolDeps): ShapeTool {
           label: 'Filled',
           icon: iconFillSolid(),
           active: fillOn,
-          onClick: () => {
-            setShapeFillEnabled(true)
-            dismiss()
-          },
+          disabled: !supportsFill,
+          onClick: supportsFill
+            ? () => {
+                setShapeFillEnabled(true)
+                dismiss()
+              }
+            : undefined,
         }),
       )
       host.appendChild(fillRow)
@@ -380,13 +389,13 @@ export function createShapeTool(deps: ShapeToolDeps): ShapeTool {
       // ── Fill opacity slider (only meaningful when filled) ───────
       // Affects newly-drawn shapes (each shape snapshots the sticky
       // opacity at creation; the slider doesn't retroactively re-tint
-      // existing shapes). When fill is off, the slider is disabled so
-      // the user sees the control exists but it has no effect right now.
+      // existing shapes). Disabled when fill is off OR the current
+      // sub-mode is line/arrow (no fill semantics there).
       host.appendChild(sectionLabel('Fill opacity'))
       const opacityRow = buildFillOpacitySlider({
         get: getShapeFillOpacity,
         set: setShapeFillOpacity,
-        disabled: !fillOn,
+        disabled: !supportsFill || !fillOn,
       })
       host.appendChild(opacityRow)
     },

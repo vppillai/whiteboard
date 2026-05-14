@@ -59,12 +59,23 @@ function makeSvg(...children: SVGElement[]): SVGElement {
 
 // ── Tool icons ────────────────────────────────────────────────────────────
 
-/** Draw / pen — a stylized pen / nib. */
+/** Draw — a marker / brush drawing a stroke. The body (rounded shaft +
+ *  angled tip) sits in the upper-right, and the curved stroke trail at
+ *  the lower-left reads as "ink being laid down" rather than the bare
+ *  pen-nib silhouette of an idle tool. v1.4 redesign per user feedback. */
 export function iconPen(): SVGElement {
   return makeSvg(
-    svgEl('path', { d: 'M 4 20 L 20 4' }),
-    svgEl('path', { d: 'M 16 8 L 20 4 L 18 10' }),
-    svgEl('circle', { cx: 4, cy: 20, r: 1.2, fill: 'currentColor', stroke: 'none' }),
+    // Marker body — a rounded shaft pointing toward the lower-left tip.
+    svgEl('path', {
+      d: 'M 13 5 L 19 11 L 11 19 L 5 19 L 5 13 Z',
+      fill: 'currentColor',
+      'fill-opacity': 0.18,
+    }),
+    svgEl('path', { d: 'M 13 5 L 19 11 L 11 19 L 5 19 L 5 13 Z' }),
+    // Cap / ferrule line near the body's top so it reads as a marker.
+    svgEl('path', { d: 'M 14 6 L 18 10' }),
+    // Ink trail curving away from the tip — the "drawing" feel.
+    svgEl('path', { d: 'M 5 19 C 5 21, 8 21.5, 10 21' }),
   )
 }
 
@@ -83,13 +94,24 @@ export function iconShape(): SVGElement {
   )
 }
 
-/** Eraser — a rotated rectangle suggesting a rubber. */
+/** Eraser — a rubber block at an angle with a dashed underline
+ *  suggesting the cleared area. The body has two distinct sections
+ *  (rubber tip + holder) so it reads as an eraser, not just a square. */
 export function iconEraser(): SVGElement {
   return makeSvg(
+    // Body — angled rectangle that runs from upper-right to lower-left.
     svgEl('path', {
-      d: 'M 13 4 L 20 11 L 11 20 L 4 20 L 4 13 Z',
+      d: 'M 17 4 L 21 8 L 9 20 L 5 16 Z',
+      fill: 'currentColor',
+      'fill-opacity': 0.18,
     }),
-    svgEl('path', { d: 'M 8 16 L 13 11' }),
+    svgEl('path', { d: 'M 17 4 L 21 8 L 9 20 L 5 16 Z' }),
+    // Divider between the rubber tip and the holder — gives the eraser
+    // its characteristic two-tone band.
+    svgEl('path', { d: 'M 13 8 L 17 12' }),
+    // Cleared-area underline — short dashes below the eraser tip suggest
+    // what was just erased.
+    svgEl('path', { d: 'M 3 21 L 14 21', 'stroke-dasharray': '2 2' }),
   )
 }
 

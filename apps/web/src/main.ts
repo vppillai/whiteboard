@@ -965,19 +965,31 @@ async function main(): Promise<void> {
         getActiveTool: () => tool.current,
         onSelectTool: setTool,
         onResetZoom: () => {
+          // "Reset zoom" should land the user at the canonical origin
+          // view — scale 1 AND the pan at (0, 0). The prior scale-only
+          // behavior left users at scale 1 but still panned somewhere,
+          // which read as "nothing happened" when they hit reset
+          // expecting a true reset. v1.4 fix.
           resetZoom(camera)
+          camera.x = 0
+          camera.y = 0
           onCameraChange()
         },
         onZoomToFit: () => {
           // Empty board → reset zoom (fitToContent returns false on
           // empty). Fall through so "Fit to view" always does something
-          // visible rather than no-op'ing on a fresh canvas.
+          // visible rather than no-op'ing on a fresh canvas. v1.4
+          // extension: pass shapes too so a shapes-only board fits.
           const fit = fitToContent(
             camera,
-            { strokes, images, texts },
+            { strokes, images, texts, shapes },
             { width: target.width, height: target.height },
           )
-          if (!fit) resetZoom(camera)
+          if (!fit) {
+            resetZoom(camera)
+            camera.x = 0
+            camera.y = 0
+          }
           onCameraChange()
         },
         onClear: clearFlow.request,
@@ -1156,7 +1168,11 @@ async function main(): Promise<void> {
       undo,
       redo,
       zoomReset: () => {
+        // Cmd/Ctrl+0: same "true reset" semantics as the right-click
+        // pill — scale 1 plus pan back to origin.
         resetZoom(camera)
+        camera.x = 0
+        camera.y = 0
         onCameraChange()
       },
       zoomIn: () => {
@@ -1169,14 +1185,18 @@ async function main(): Promise<void> {
       },
       zoomToFit: () => {
         // Same fallback as the right-click "Fit to view" pill — empty
-        // board resets zoom so the keyboard shortcut is never a silent
-        // no-op.
+        // board resets to origin so the keyboard shortcut is never a
+        // silent no-op. v1.4: include shapes in the fit bounds.
         const fit = fitToContent(
           camera,
-          { strokes, images, texts },
+          { strokes, images, texts, shapes },
           { width: target.width, height: target.height },
         )
-        if (!fit) resetZoom(camera)
+        if (!fit) {
+          resetZoom(camera)
+          camera.x = 0
+          camera.y = 0
+        }
         onCameraChange()
       },
       clear: clearFlow.request,

@@ -1482,6 +1482,11 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     host.appendChild(separator())
 
     // Fill toggle (icons: empty rect / filled rect).
+    // Lines / arrows don't visually carry fill — disable both the
+    // toggle and the opacity slider for those kinds so the user
+    // sees the controls exist but they don't fire confusing ops on
+    // unfillable shapes.
+    const supportsFill = sh.shape !== 'line' && sh.shape !== 'arrow'
     host.appendChild(sectionLabel('Fill'))
     const fillRow = pillRow()
     const fillOn = !!sh.fill
@@ -1490,12 +1495,15 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         label: 'Outline only',
         icon: iconFillOutline(),
         active: !fillOn,
-        onClick: () => {
-          applyEdit((s) => {
-            s.fill = undefined
-          })
-          dismiss()
-        },
+        disabled: !supportsFill,
+        onClick: supportsFill
+          ? () => {
+              applyEdit((s) => {
+                s.fill = undefined
+              })
+              dismiss()
+            }
+          : undefined,
       }),
     )
     fillRow.appendChild(
@@ -1503,26 +1511,28 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         label: 'Filled',
         icon: iconFillSolid(),
         active: fillOn,
-        onClick: () => {
-          applyEdit((s) => {
-            s.fill = s.color
-            // Newly-filled shape gets the sticky opacity if it didn't
-            // already carry one — so toggling Outline→Filled inherits
-            // the current default rather than the legacy 0.25 constant.
-            if (s.fillOpacity === undefined) s.fillOpacity = getShapeFillOpacity()
-          })
-          dismiss()
-        },
+        disabled: !supportsFill,
+        onClick: supportsFill
+          ? () => {
+              applyEdit((s) => {
+                s.fill = s.color
+                // Newly-filled shape gets the sticky opacity if it didn't
+                // already carry one — so toggling Outline→Filled inherits
+                // the current default rather than the legacy 0.25 constant.
+                if (s.fillOpacity === undefined) s.fillOpacity = getShapeFillOpacity()
+              })
+              dismiss()
+            }
+          : undefined,
       }),
     )
     host.appendChild(fillRow)
 
-    // Fill opacity slider — live-edits the selected shape. Disabled when
-    // fill is off (the user sees the control exists but it has no effect
-    // until they toggle Filled). Uses 'input' for live feedback; each
-    // movement emits an edit-shape op so undo restores the prior alpha
-    // step-by-step. That's noisy in undo but matches the user mental
-    // model: each visible change is undoable.
+    // Fill opacity slider — live-edits the selected shape. Disabled
+    // when (a) the kind doesn't support fill (line/arrow), OR (b)
+    // fill is off. Each slider movement emits an edit-shape op so
+    // undo restores the prior alpha — noisy but matches the user
+    // mental model where every visible change is undoable.
     host.appendChild(sectionLabel('Fill opacity'))
     const sliderRow = document.createElement('div')
     sliderRow.className = 'whiteboard-tools-row whiteboard-fillopacity-row'
@@ -1533,7 +1543,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     slider.step = '0.05'
     slider.value = String(sh.fillOpacity ?? getShapeFillOpacity())
     slider.className = 'whiteboard-fillopacity-slider'
-    slider.disabled = !fillOn
+    slider.disabled = !supportsFill || !fillOn
     slider.setAttribute('aria-label', 'Fill opacity')
     const readout = document.createElement('span')
     readout.className = 'whiteboard-fillopacity-readout'
