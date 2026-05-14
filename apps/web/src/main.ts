@@ -38,6 +38,12 @@ import type { BrushConfig, ImageObject, Sample, Stroke, TextObject } from '@whit
 import { BRUSH_IDS, BRUSH_PRESETS } from './brushes'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
 import { createClearFlow } from './clearflow'
+import {
+  type ClipboardStrokeBundle,
+  blobToDataUrl,
+  buildClipboardHtml,
+  extractStrokesFromHtml,
+} from './clipboardstrokes'
 import { CURATED_COLORS, cyclePaletteIndex, openColorPicker } from './colorpicker'
 import { exitDistractionFree, isDistractionFree, toggleDistractionFree } from './distractionfree'
 import { attachEraserHold } from './eraserhold'
@@ -694,6 +700,68 @@ async function main(): Promise<void> {
     showInfoToast('Text pasted')
   }
 
+  /** Generate a fresh stroke id. Mirrors `pen.ts`'s makeId — keeping a
+   *  local copy avoids cross-tool import for this one paste-path call. */
+  const makePastedStrokeId = (): string =>
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+
+  /** Paste a whiteboard-native stroke bundle at the given board point.
+   *  Each pasted stroke gets a fresh id (so it doesn't collide with the
+   *  source stroke if both are on the canvas) and its samples are
+   *  translated by `(cursor - bundle.origin)` so the bbox top-left
+   *  lands at the cursor while relative layout among the pasted strokes
+   *  is preserved.
+   *
+   *  startedAt gets bumped to a monotone-sequenced `now + i` so the
+   *  render-order sort key stays stable AND the pasted strokes
+   *  consistently render above the originals (later startedAt wins).
+   *
+   *  One `create` op pushed per stroke — same shape as the live-draw
+   *  path. N undo steps for N pasted strokes, matching the per-item
+   *  convention used by v1.1 image batch and the Cmd+A multi-delete. */
+  const pasteStrokeBundle = (
+    bundle: ClipboardStrokeBundle,
+    board: { x: number; y: number },
+  ): void => {
+    if (bundle.strokes.length === 0) return
+    const dx = board.x - bundle.origin.x
+    const dy = board.y - bundle.origin.y
+    const now = Date.now()
+    const newSelection: { kind: 'stroke'; id: string }[] = []
+    for (let i = 0; i < bundle.strokes.length; i++) {
+      const src = bundle.strokes[i]
+      if (!src) continue
+      const id = makePastedStrokeId()
+      const translatedSamples = src.samples.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy }))
+      const translatedStamps = src.erasedStamps?.map((s) => ({ ...s, x: s.x + dx, y: s.y + dy }))
+      const pasted: Stroke = {
+        ...src,
+        id,
+        samples: translatedSamples,
+        erasedStamps: translatedStamps,
+        startedAt: now + i,
+        deleted: undefined,
+      }
+      strokes.push(pasted)
+      void strokeStore.save(pasted).catch((err) => {
+        console.warn('whiteboard/web: failed to persist pasted stroke:', err)
+      })
+      pushUndoOp({ kind: 'create', strokeId: id })
+      newSelection.push({ kind: 'stroke', id })
+    }
+    committedDirty = true
+    // Auto-switch to Select and pre-select the pasted strokes — same
+    // affordance as image / text paste so the user can immediately
+    // adjust position with another drag.
+    setTool('select')
+    selectTool.selectByIds(newSelection)
+    showInfoToast(
+      bundle.strokes.length === 1 ? 'Stroke pasted' : `${bundle.strokes.length} strokes pasted`,
+    )
+  }
+
   // ---------------------------------------------------------------------
   //  Image paste — three input paths feeding one PasteImage op (see
   //  imagepaste.ts):
@@ -719,11 +787,24 @@ async function main(): Promise<void> {
     // falls back to viewport center.
     const pasteAt = (): { x: number; y: number } => toBoard(lastPointer.x, lastPointer.y)
     void (async () => {
+      const dt = e.clipboardData
+      // Whiteboard-native paste first: if the clipboard's text/html slot
+      // carries a `data-whiteboard-v1` marker, the user is pasting a
+      // selection that was copied FROM this whiteboard. Restore as
+      // vector strokes at the cursor rather than as a raster PNG.
+      const html = dt?.getData('text/html')
+      if (html) {
+        const bundle = extractStrokesFromHtml(html)
+        if (bundle) {
+          e.preventDefault()
+          pasteStrokeBundle(bundle, pasteAt())
+          return
+        }
+      }
       // Try the synchronous ClipboardEvent path first when clipboardData
       // is non-null. This catches drag-drop, file managers, screenshot
       // utilities that populate `dataTransfer.files` / `dataTransfer.items`
       // with `kind === 'file'`.
-      const dt = e.clipboardData
       if (dt) {
         const blob = await readImageFromDataTransfer(dt)
         if (blob) {
@@ -796,14 +877,32 @@ async function main(): Promise<void> {
     onToast: showInfoToast,
   }
 
-  /** Render the Select tool's current selection (single OR multi) as a
-   *  PNG blob. Filters each kind by the selection, computes the union
-   *  bbox, and exports with transparent background so the pasted
-   *  drawing lands cleanly into Google Docs / Slack / Confluence / etc.
-   *  — the user's hostside document supplies the background. dpr=2
-   *  matches the PDF embed quality so the pasted image is crisp on
-   *  retina / 4K. Returns null for empty selection. */
-  const renderSelectMultiAsPng = async (): Promise<Blob | null> => {
+  /** Compute the unrotated, unpadded bbox top-left of the strokes'
+   *  combined sample cloud — used as the `origin` field of the
+   *  whiteboard-native clipboard bundle so paste-back can translate to
+   *  the cursor while preserving relative layout. Differs from
+   *  `computeBoardBounds`'s output, which carries EXPORT_MARGIN for
+   *  PNG breathing room. */
+  const strokesOrigin = (ss: Stroke[]): { x: number; y: number } | null => {
+    let minX = Number.POSITIVE_INFINITY
+    let minY = Number.POSITIVE_INFINITY
+    for (const s of ss) {
+      for (const p of s.samples) {
+        if (p.x < minX) minX = p.x
+        if (p.y < minY) minY = p.y
+      }
+    }
+    if (!Number.isFinite(minX)) return null
+    return { x: minX, y: minY }
+  }
+
+  /** Snapshot of the current Select selection categorized by kind. */
+  interface SelectionSnapshot {
+    strokes: Stroke[]
+    images: ImageObject[]
+    texts: TextObject[]
+  }
+  const collectSelection = (): SelectionSnapshot | null => {
     const sels = selectTool.getSelections()
     if (sels.length === 0) return null
     const strokeIds = new Set<string>()
@@ -814,95 +913,116 @@ async function main(): Promise<void> {
       else if (s.kind === 'image') imageIds.add(s.id)
       else textIds.add(s.id)
     }
-    const selectedStrokes = strokes.filter((s) => strokeIds.has(s.id) && !s.deleted)
-    const selectedImages = images.filter((i) => imageIds.has(i.id) && !i.deleted)
-    const selectedTexts = texts.filter((t) => textIds.has(t.id) && !t.deleted)
-    if (selectedStrokes.length === 0 && selectedImages.length === 0 && selectedTexts.length === 0) {
+    return {
+      strokes: strokes.filter((s) => strokeIds.has(s.id) && !s.deleted),
+      images: images.filter((i) => imageIds.has(i.id) && !i.deleted),
+      texts: texts.filter((t) => textIds.has(t.id) && !t.deleted),
+    }
+  }
+
+  /** Render the categorized selection to a PNG blob using the shared
+   *  export pipeline. Transparent background so the paste lands cleanly
+   *  in Google Docs / Slack / Confluence. */
+  const renderSelectionAsPng = async (snap: SelectionSnapshot): Promise<Blob | null> => {
+    if (snap.strokes.length === 0 && snap.images.length === 0 && snap.texts.length === 0) {
       return null
     }
     const { computeBoardBounds } = await import('./export/bounds')
     const { exportPNG } = await import('./export/png')
-    const bounds = computeBoardBounds(selectedStrokes, selectedImages, selectedTexts)
+    const bounds = computeBoardBounds(snap.strokes, snap.images, snap.texts)
     if (!bounds) return null
-    return exportPNG(selectedStrokes, selectedImages, selectedTexts, bounds, getSettings(), null, {
+    return exportPNG(snap.strokes, snap.images, snap.texts, bounds, getSettings(), null, {
       dpr: 2,
       transparentBg: true,
     })
   }
 
-  const onCopy = (e: ClipboardEvent): void => {
-    if (isTextEditableTarget(e.target)) return
+  /** Write the strokes-only "whiteboard-native" clipboard payload:
+   *  ClipboardItem with both `image/png` (for external paste targets)
+   *  and `text/html` carrying a `data-whiteboard-v1` attribute (for
+   *  paste back into the whiteboard as vector strokes). Returns true
+   *  on success — callers gate cut-then-delete on this. */
+  const writeStrokesBundleToClipboard = async (
+    pngBlob: Blob,
+    bundle: ClipboardStrokeBundle,
+    onToast: (msg: string) => void,
+  ): Promise<boolean> => {
+    try {
+      const dataUrl = await blobToDataUrl(pngBlob)
+      const html = buildClipboardHtml(bundle, dataUrl)
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'image/png': pngBlob,
+          'text/html': new Blob([html], { type: 'text/html' }),
+        }),
+      ])
+      onToast(
+        bundle.strokes.length === 1 ? 'Stroke copied' : `${bundle.strokes.length} strokes copied`,
+      )
+      return true
+    } catch (err) {
+      console.warn('whiteboard/web: stroke-bundle clipboard write failed:', err)
+      // Fall back to PNG-only — at least the external paste path works.
+      return writePngBlobToClipboard(pngBlob, onToast)
+    }
+  }
 
-    if (tool.current === selectTool) {
-      const sels = selectTool.getSelections()
-      // Multi-selection (or any selection that includes strokes / texts)
-      // → render as PNG. The single-image fast path below keeps the
-      // raw-bytes route for an image-only single selection.
-      if (sels.length > 1) {
-        e.preventDefault()
-        void (async () => {
-          const blob = await renderSelectMultiAsPng()
-          if (blob) await writePngBlobToClipboard(blob, showInfoToast)
-        })()
-        return
-      }
-      // Single-image selection → copy the original image bytes (full
-      // quality round-trip, faster, and preserves original format).
-      const img = selectTool.getSelectedImage()
-      if (img) {
-        e.preventDefault()
-        void writeImageToClipboard(img, clipboardImageDeps)
-        return
-      }
-      // Single non-image selection (text or stroke) → render as PNG.
-      if (sels.length === 1) {
-        e.preventDefault()
-        void (async () => {
-          const blob = await renderSelectMultiAsPng()
-          if (blob) await writePngBlobToClipboard(blob, showInfoToast)
-        })()
+  /** Unified copy/cut for the Select tool. Path selection:
+   *    - Single image      → raw bytes (best fidelity round-trip)
+   *    - Strokes-only      → whiteboard-native bundle + PNG (vector
+   *                          round-trip inside the whiteboard; PNG for
+   *                          external apps)
+   *    - Anything else     → PNG-only (mixed kinds or pure image/text
+   *                          multi — image bytes can't be round-tripped
+   *                          via the bundle without a separate blob
+   *                          slot, deferred)
+   *
+   *  Returns true on success so cut callers can gate the delete. */
+  const performSelectCopy = async (): Promise<boolean> => {
+    const snap = collectSelection()
+    if (!snap) return false
+
+    // Single-image fast path: raw bytes, preserves original format.
+    if (snap.images.length === 1 && snap.strokes.length === 0 && snap.texts.length === 0) {
+      const img = snap.images[0]
+      if (img) return writeImageToClipboard(img, clipboardImageDeps)
+    }
+
+    const pngBlob = await renderSelectionAsPng(snap)
+    if (!pngBlob) return false
+
+    // Strokes-only → write native bundle + PNG.
+    if (snap.strokes.length > 0 && snap.images.length === 0 && snap.texts.length === 0) {
+      const origin = strokesOrigin(snap.strokes)
+      if (origin) {
+        const bundle: ClipboardStrokeBundle = { v: 1, strokes: snap.strokes, origin }
+        return writeStrokesBundleToClipboard(pngBlob, bundle, showInfoToast)
       }
     }
+
+    // Mixed / non-stroke → PNG only.
+    return writePngBlobToClipboard(pngBlob, showInfoToast)
+  }
+
+  const onCopy = (e: ClipboardEvent): void => {
+    if (isTextEditableTarget(e.target)) return
+    if (tool.current !== selectTool) return
+    if (selectTool.getSelections().length === 0) return
+    e.preventDefault()
+    void performSelectCopy()
   }
 
   const onCut = (e: ClipboardEvent): void => {
     if (isTextEditableTarget(e.target)) return
-
-    if (tool.current === selectTool) {
-      const sels = selectTool.getSelections()
-      if (sels.length > 1) {
-        e.preventDefault()
-        void (async () => {
-          const blob = await renderSelectMultiAsPng()
-          if (!blob) return
-          const written = await writePngBlobToClipboard(blob, showInfoToast)
-          // Only delete after the clipboard write succeeded — same data-
-          // loss-prevention rule as the single-image cut path.
-          if (written) selectTool.deleteSelected()
-        })()
-        return
-      }
-      // Single-image fast path: image bytes.
-      const img = selectTool.getSelectedImage()
-      if (img) {
-        e.preventDefault()
-        void (async () => {
-          const written = await writeImageToClipboard(img, clipboardImageDeps)
-          if (written) selectTool.deleteSelected()
-        })()
-        return
-      }
-      // Single non-image (text or stroke) → PNG.
-      if (sels.length === 1) {
-        e.preventDefault()
-        void (async () => {
-          const blob = await renderSelectMultiAsPng()
-          if (!blob) return
-          const written = await writePngBlobToClipboard(blob, showInfoToast)
-          if (written) selectTool.deleteSelected()
-        })()
-      }
-    }
+    if (tool.current !== selectTool) return
+    if (selectTool.getSelections().length === 0) return
+    e.preventDefault()
+    void (async () => {
+      const ok = await performSelectCopy()
+      // Only delete after the clipboard write succeeded — data-loss-
+      // prevention rule that's been here since v1.1's image cut.
+      if (ok) selectTool.deleteSelected()
+    })()
   }
   document.addEventListener('copy', onCopy)
   document.addEventListener('cut', onCut)

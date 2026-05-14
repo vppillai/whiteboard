@@ -258,6 +258,11 @@ export interface SelectTool extends Tool {
    *  kinds (strokes + images + texts). Used by Cmd+A. Caller is
    *  responsible for switching the active tool to Select first. */
   selectAll(): void
+  /** Replace the selection with an explicit list. Used by the
+   *  whiteboard-native paste flow so a freshly-pasted group of strokes
+   *  is pre-selected for immediate positioning. Items whose underlying
+   *  object is missing / deleted are silently skipped. */
+  selectByIds(items: readonly Selection[]): void
   /** Drop any current selection. Used by Esc when a selection is
    *  active. Distinct from cleanup() — clearSelection doesn't switch
    *  tools or interact with the in-flight drag (use cleanup for that). */
@@ -1854,6 +1859,26 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       }
       for (const t of deps.getTexts()) {
         if (!t.deleted) next.push({ kind: 'text', id: t.id })
+      }
+      selected = next
+      drag = null
+      deps.markCommittedDirty()
+    },
+
+    selectByIds(items: readonly Selection[]): void {
+      commitDrag(null)
+      const next: Selection[] = []
+      for (const item of items) {
+        if (item.kind === 'image') {
+          const img = deps.getImages().find((i) => i.id === item.id)
+          if (img && !img.deleted) next.push(item)
+        } else if (item.kind === 'text') {
+          const t = deps.getTexts().find((x) => x.id === item.id)
+          if (t && !t.deleted) next.push(item)
+        } else {
+          const s = deps.getStrokes().find((x) => x.id === item.id)
+          if (s && !s.deleted) next.push(item)
+        }
       }
       selected = next
       drag = null
