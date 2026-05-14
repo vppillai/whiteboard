@@ -45,7 +45,14 @@
  */
 
 import './style.css'
-import type { BrushConfig, ImageObject, Sample, Stroke, TextObject } from '@whiteboard/shared'
+import type {
+  BrushConfig,
+  ImageObject,
+  Sample,
+  ShapeObject,
+  Stroke,
+  TextObject,
+} from '@whiteboard/shared'
 import { BRUSH_IDS, BRUSH_PRESETS } from './brushes'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
 import { createClearFlow } from './clearflow'
@@ -260,6 +267,7 @@ async function main(): Promise<void> {
   // above the current max so newly-pasted images stack on top.
   const images: ImageObject[] = []
   const texts: TextObject[] = []
+  const shapes: ShapeObject[] = []
   // Shared next-z sequence for images + texts so the user-visible stack
   // order interleaves naturally between object types. New objects always
   // appear above all existing ones.
@@ -375,6 +383,10 @@ async function main(): Promise<void> {
     saveImageMeta: persistImageMeta,
     texts,
     saveText: persistText,
+    shapes,
+    // Persistence wires through ShapeStore in SH3. For now ops mutate
+    // the in-memory shapes array; no IDB writes happen yet.
+    saveShape: () => {},
     markDirty: () => {
       committedDirty = true
     },
