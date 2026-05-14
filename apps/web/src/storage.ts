@@ -103,6 +103,19 @@ function getDb(): Promise<IDBDatabase> {
       }
       req.onsuccess = () => resolve(req.result)
       req.onerror = () => reject(req.error)
+      // If another tab holds an older-version connection open, the
+      // upgrade is BLOCKED and neither onsuccess nor onerror fires —
+      // boot would hang silently. Reject loudly so the load try/catch
+      // can warn and the user sees a console message instead of a
+      // mysterious blank canvas. Diagnosed during M3 (shape tool work)
+      // when a v4-holding tab blocked a v5 upgrade.
+      req.onblocked = () => {
+        reject(
+          new Error(
+            'whiteboard/storage: IDB upgrade blocked — close other tabs of this app and reload',
+          ),
+        )
+      }
     })
   }
   return dbPromise
