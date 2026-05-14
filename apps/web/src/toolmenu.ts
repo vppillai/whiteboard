@@ -22,6 +22,20 @@
  *   Clear board…
  */
 
+import {
+  iconClear,
+  iconEraser,
+  iconExport,
+  iconFitView,
+  iconGrid,
+  iconLaser,
+  iconPen,
+  iconResetZoom,
+  iconSelect,
+  iconSettings,
+  iconShape,
+  iconText,
+} from './menu-icons'
 import { fullItem, pill, pillRow, sectionLabel, separator } from './menu-ui'
 import { openOptionsMenu } from './optionsmenu'
 import { type Popover, showPopover } from './popover'
@@ -30,20 +44,28 @@ import type { Tool, ToolId } from './tools'
 interface ToolDef {
   id: ToolId
   label: string
+  icon: () => SVGElement
+  shortcut: string
   enabled: boolean
 }
 
 // Right-click tool order — user-requested grouping: input verbs first
-// (pen, text), then mark-removal (eraser), then selection / transform
-// (select). Laser sits at the end as a presentation accent.
+// (pen, text, shape), then mark-removal (eraser), then selection /
+// transform (select). Laser sits at the end as a presentation accent.
+// Per the v1.4 menu-icon pass, every tool button shows just its icon;
+// hover-tooltip reveals "Draw (B)" / "Shape (R/O/A/L)" / etc.
 const TOOLS: readonly ToolDef[] = [
-  { id: 'pen', label: 'Draw', enabled: true },
-  { id: 'text', label: 'Text', enabled: true },
-  { id: 'shape', label: 'Shape', enabled: true },
-  { id: 'eraser', label: 'Eraser', enabled: true },
-  { id: 'select', label: 'Select', enabled: true },
-  { id: 'laser', label: 'Laser', enabled: true },
+  { id: 'pen', label: 'Draw', icon: iconPen, shortcut: 'B', enabled: true },
+  { id: 'text', label: 'Text', icon: iconText, shortcut: 'T', enabled: true },
+  { id: 'shape', label: 'Shape', icon: iconShape, shortcut: 'R · O · A · L', enabled: true },
+  { id: 'eraser', label: 'Eraser', icon: iconEraser, shortcut: 'Shift+E', enabled: true },
+  { id: 'select', label: 'Select', icon: iconSelect, shortcut: 'V / S', enabled: true },
+  { id: 'laser', label: 'Laser', icon: iconLaser, shortcut: 'P', enabled: true },
 ]
+
+/** Tool buttons are split into two equal rows so the 6 wide pills don't
+ *  feel cramped — 3 + 3 with 2× the per-pill area. v1.4 layout pass. */
+const TOOLS_PER_ROW = 3
 
 export interface ToolMenuOptions {
   at: { x: number; y: number }
@@ -105,35 +127,44 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
       activeTool.renderContextualMenu(root, onAction)
     }
 
-    // TOOL row.
+    // TOOL section — icon pills in 2 rows of 3 so each tool gets a
+    // generous tap target. Hover-tooltip reveals "Draw (B)" etc. Per
+    // the v1.4 menu-icon pass: icon-only, name + shortcut on hover.
     if (root.childNodes.length > 0) root.appendChild(separator())
     root.appendChild(sectionLabel('Tool'))
-    const toolsRow = pillRow()
-    for (const t of TOOLS) {
-      toolsRow.appendChild(
-        pill({
-          label: t.label,
-          title: t.enabled ? undefined : 'Coming soon',
-          active: t.id === activeTool.id,
-          disabled: !t.enabled,
-          onClick: t.enabled
-            ? () => {
-                opts.onSelectTool(t.id)
-                onAction()
-              }
-            : undefined,
-        }),
-      )
+    for (let i = 0; i < TOOLS.length; i += TOOLS_PER_ROW) {
+      const row = pillRow()
+      const slice = TOOLS.slice(i, i + TOOLS_PER_ROW)
+      for (const t of slice) {
+        row.appendChild(
+          pill({
+            label: t.label,
+            icon: t.icon(),
+            shortcut: t.shortcut,
+            title: t.enabled ? undefined : `${t.label} — coming soon`,
+            active: t.id === activeTool.id,
+            disabled: !t.enabled,
+            onClick: t.enabled
+              ? () => {
+                  opts.onSelectTool(t.id)
+                  onAction()
+                }
+              : undefined,
+          }),
+        )
+      }
+      root.appendChild(row)
     }
-    root.appendChild(toolsRow)
 
-    // VIEW section — pen-friendly pills, matching the TOOL / BRUSH rows.
+    // VIEW section — icon pills with hover tooltips for zoom and grid.
     root.appendChild(separator())
     root.appendChild(sectionLabel('View'))
     const viewRow = pillRow()
     viewRow.appendChild(
       pill({
         label: 'Reset zoom',
+        icon: iconResetZoom(),
+        shortcut: '⌘0',
         onClick: () => {
           opts.onResetZoom()
           onAction()
@@ -143,6 +174,8 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
     viewRow.appendChild(
       pill({
         label: 'Fit to view',
+        icon: iconFitView(),
+        shortcut: '⌘1',
         onClick: () => {
           opts.onZoomToFit()
           onAction()
@@ -151,8 +184,8 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
     )
     viewRow.appendChild(
       pill({
-        label: 'Grid…',
-        title: 'Grid options',
+        label: 'Grid options',
+        icon: iconGrid(),
         onClick: () => {
           // Grid… opens another popover. Multi-popover coexistence
           // (popover.ts) means same-tag-replaces, different-tag-
@@ -166,17 +199,17 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
     )
     root.appendChild(viewRow)
 
-    // EXPORT row — single pill that opens the export popover (scope +
-    // format). Symmetric with Cmd/Ctrl+E. M2 § 6.7.6 + feel-test pass:
-    // removed the three-format quick row because it bypassed the scope
-    // choice; one path now handles both scope ('Visible' / 'All') and
-    // format consistently.
+    // EXPORT / SETTINGS / CLEAR rows — use the full-item helper's icon
+    // variant: left icon, label center, shortcut right-aligned and dim.
+    // Reads as a familiar app-menu list rather than a row of pills, and
+    // the names stay legible (export / settings / clear aren't intuitive
+    // from icon alone).
     root.appendChild(separator())
-    root.appendChild(sectionLabel('Export'))
-    const exportRow = pillRow()
-    exportRow.appendChild(
-      pill({
+    root.appendChild(
+      fullItem({
         label: 'Export…',
+        icon: iconExport(),
+        shortcut: '⌘E',
         onClick: () => {
           // Export… opens another popover. Same coexistence rules as
           // Grid… above — pinned tools menu survives via different tag.
@@ -185,29 +218,31 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
         },
       }),
     )
-    root.appendChild(exportRow)
 
-    // Settings — pen-friendly entry point matching the toolpill gear
-    // and the Cmd/Ctrl+, shortcut. Above CLEAR so the destructive row
-    // stays anchored at the bottom. Opens a side panel (not a
-    // popover), so a pinned tool menu can coexist — use onAction.
     root.appendChild(separator())
     root.appendChild(
-      fullItem('Settings…', () => {
-        opts.togglePanel()
-        onAction()
+      fullItem({
+        label: 'Settings…',
+        icon: iconSettings(),
+        shortcut: '⌘,',
+        onClick: () => {
+          opts.togglePanel()
+          onAction()
+        },
       }),
     )
 
-    // Destructive — at the bottom, separated. Uses onAction so a
-    // pinned menu survives the Clear flow being requested (the
-    // clearFlow opens a confirm dialog, not a popover, so coexistence
-    // is fine).
+    // Destructive — at the bottom, separated.
     root.appendChild(separator())
     root.appendChild(
-      fullItem('Clear board…', () => {
-        opts.onClear()
-        onAction()
+      fullItem({
+        label: 'Clear board…',
+        icon: iconClear(),
+        shortcut: '⌘⇧K',
+        onClick: () => {
+          opts.onClear()
+          onAction()
+        },
       }),
     )
   }

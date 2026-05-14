@@ -529,24 +529,25 @@ body {
 
 .whiteboard-tools-palette {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 6px;
+  /* v1.4: denser palette — 8 columns shrinks each swatch from ~47 px
+   * to ~28 px in the default menu width, freeing room for the
+   * surrounding rows (Stroke width, Fill, Fill opacity slider) and
+   * keeping the menu compact. */
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
 }
 
 /* Right-click menu swatch: fills its grid column (width: 100% over a
- * `repeat(5, 1fr)` grid), with `aspect-ratio: 1` to stay square as the
+ * `repeat(8, 1fr)` grid), with `aspect-ratio: 1` to stay square as the
  * menu width grows. `min-width: 0` is the standard fix for letting a
  * grid item shrink below its intrinsic content size (browsers default
- * grid items to `min-width: auto`, which can break the 1fr math). The
- * resulting swatches scale with the menu's `min-width` (currently 280
- * px → ~47 px tall swatches) instead of being a fixed 26 px in a wider
- * cell with wasted padding. */
+ * grid items to `min-width: auto`, which can break the 1fr math). */
 .whiteboard-color-swatch-small {
   width: 100%;
   height: auto;
   aspect-ratio: 1;
   min-width: 0;
-  border-radius: 8px;
+  border-radius: 6px;
 }
 
 .whiteboard-tools-row {
@@ -583,6 +584,30 @@ body {
   cursor: not-allowed;
 }
 
+/* Icon-mode pill: shows a single SVG centered, no text. Used by every
+ * right-click button that has a meaningful glyph (tools, shape sub-
+ * modes, fill toggle, stroke width). Hover-tooltip on the button
+ * supplies the name + shortcut.
+ *
+ * Tool buttons sit in 2 rows of 3 (per the v1.4 layout pass), so each
+ * pill gets a generous tap target — vertical padding goes from the
+ * text-pill default (7 px) to 10 px and the icon scales up to 22 px. */
+.whiteboard-tool-pill-icon {
+  padding: 10px 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  line-height: 0;
+}
+
+.whiteboard-tool-pill-icon > svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+  pointer-events: none;
+}
+
 .whiteboard-tool-item {
   display: block;
   width: 100%;
@@ -599,6 +624,100 @@ body {
 
 .whiteboard-tool-item:hover {
   background: var(--pill-bg);
+}
+
+/* Icon-bearing variant of .whiteboard-tool-item — left icon, label
+ * middle, shortcut hint right-aligned and dim. Used by the right-click
+ * View / Export / Settings / Clear rows so each has a glyph + name +
+ * shortcut at a glance. */
+.whiteboard-tool-item-with-icon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.whiteboard-tool-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  color: var(--banner-fg);
+  opacity: 0.85;
+}
+
+.whiteboard-tool-item-icon > svg {
+  width: 18px;
+  height: 18px;
+}
+
+.whiteboard-tool-item-label {
+  flex: 1 1 auto;
+}
+
+.whiteboard-tool-item-shortcut {
+  flex: 0 0 auto;
+  opacity: 0.55;
+  font: 10px / 1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.02em;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: var(--pill-bg);
+}
+
+/* Fill-opacity slider row — used by the Shape tool contextual menu and
+ * the Select tool's shape-selected menu. Native range input themed to
+ * fit the dark/light tool menu surface. */
+.whiteboard-fillopacity-row {
+  align-items: center;
+  gap: 8px;
+}
+
+.whiteboard-fillopacity-slider {
+  flex: 1 1 auto;
+  height: 4px;
+  background: var(--hud-border);
+  border-radius: 2px;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+  margin: 0;
+}
+
+.whiteboard-fillopacity-slider:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.whiteboard-fillopacity-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--banner-fg);
+  border: 2px solid var(--banner-bg);
+  cursor: pointer;
+}
+
+.whiteboard-fillopacity-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--banner-fg);
+  border: 2px solid var(--banner-bg);
+  cursor: pointer;
+}
+
+.whiteboard-fillopacity-readout {
+  flex: 0 0 auto;
+  font: 11px / 1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.02em;
+  min-width: 38px;
+  text-align: right;
+  color: var(--banner-fg);
+  opacity: 0.85;
 }
 
 .whiteboard-tool-sep {

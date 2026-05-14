@@ -100,6 +100,11 @@ export interface SettingsV1 {
   shapeColor: string
   shapeStrokeWidth: number
   shapeFillEnabled: boolean
+  /** Alpha multiplier applied to a shape's fill when fill is enabled.
+   *  Sticky session preference — default 0.25 reads as a soft tint
+   *  behind the outline. Range 0.05..1.0 (a 0 fill would be
+   *  indistinguishable from outline-only). v1.4. */
+  shapeFillOpacity: number
   syncedAt?: number
   remoteId?: string
 }
@@ -140,6 +145,7 @@ function defaultV1(): SettingsV1 {
     shapeColor: 'ink', // NEW (v1.4): stroke + fill color for shapes
     shapeStrokeWidth: 2, // NEW (v1.4): mid-weight default
     shapeFillEnabled: false, // NEW (v1.4): outline-only by default
+    shapeFillOpacity: 0.25, // NEW (v1.4): translucent tint default
   }
 }
 
@@ -224,6 +230,12 @@ export function migrate(input: unknown): SettingsV1 {
         : DEFAULTS.shapeStrokeWidth,
     shapeFillEnabled:
       typeof v.shapeFillEnabled === 'boolean' ? v.shapeFillEnabled : DEFAULTS.shapeFillEnabled,
+    shapeFillOpacity:
+      typeof v.shapeFillOpacity === 'number' &&
+      v.shapeFillOpacity >= 0.05 &&
+      v.shapeFillOpacity <= 1
+        ? v.shapeFillOpacity
+        : DEFAULTS.shapeFillOpacity,
     syncedAt: typeof v.syncedAt === 'number' ? v.syncedAt : undefined,
     remoteId: typeof v.remoteId === 'string' ? v.remoteId : undefined,
   }
@@ -535,6 +547,19 @@ export function getShapeFillEnabled(): boolean {
 export function setShapeFillEnabled(value: boolean): void {
   if (state.shapeFillEnabled === value) return
   state.shapeFillEnabled = value
+  persist()
+  emit()
+}
+
+export function getShapeFillOpacity(): number {
+  return state.shapeFillOpacity
+}
+export function setShapeFillOpacity(value: number): void {
+  // Clamp to [0.05, 1.0] — 0 would be indistinguishable from outline-
+  // only, > 1 makes no sense as an opacity multiplier.
+  const clamped = Math.max(0.05, Math.min(1, value))
+  if (state.shapeFillOpacity === clamped) return
+  state.shapeFillOpacity = clamped
   persist()
   emit()
 }

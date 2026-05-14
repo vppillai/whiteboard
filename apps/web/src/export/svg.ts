@@ -21,9 +21,10 @@ import { FONT_CSS, TEXT_PADDING_X, TEXT_PADDING_Y, measureText, textAABB } from 
 import { resolveInkColor } from '../theme'
 import type { Bounds } from './bounds'
 
-/** Alpha for filled shapes — matches FILL_ALPHA in rendershapes.ts so
- *  the SVG export and on-screen render visually match. */
-const SHAPE_FILL_ALPHA = 0.25
+/** Default fill alpha — matches DEFAULT_FILL_ALPHA in rendershapes.ts.
+ *  Used when a shape doesn't carry its own `fillOpacity`. Per-shape
+ *  opacity is honored below. */
+const SHAPE_DEFAULT_FILL_ALPHA = 0.25
 /** Arrow head sizing — same constants as rendershapes.ts. */
 const ARROW_HEAD_LENGTH_PER_STROKE = 4
 const ARROW_HEAD_ANGLE = Math.PI / 6
@@ -222,7 +223,9 @@ function shapeToSvg(s: ShapeObject): string {
       : ` transform="rotate(${fmt((r * 180) / Math.PI)} ${fmt(cx)} ${fmt(cy)})"`
   const stroke = escapeAttr(resolveInkColor(s.color))
   const fillToken = s.fill ? escapeAttr(resolveInkColor(s.fill)) : 'none'
-  const fillOpacity = s.fill ? ` fill-opacity="${fmt(SHAPE_FILL_ALPHA)}"` : ''
+  const fillOpacity = s.fill
+    ? ` fill-opacity="${fmt(s.fillOpacity ?? SHAPE_DEFAULT_FILL_ALPHA)}"`
+    : ''
   const strokeWidth = fmt(s.strokeWidth)
 
   if (s.shape === 'rect') {

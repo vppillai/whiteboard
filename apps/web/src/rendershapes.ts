@@ -54,12 +54,13 @@ const ROTATION_EPSILON = 1e-9
 const ARROW_HEAD_LENGTH_PER_STROKE = 4
 /** Arrow-head half-angle (radians). ~30° opening looks natural. */
 const ARROW_HEAD_ANGLE = Math.PI / 6
-/** Alpha multiplier applied to fill (when present). The Shape tool's
- *  "fill enabled" toggle stores `fill = stroke color` — same token, no
- *  separate fill-color setting (kept off the user-facing menu per the
- *  v1.4 brief). Translucent fill reads as a tint behind the outline
- *  rather than a flat block, which keeps the underlying ink visible. */
-const FILL_ALPHA = 0.25
+/** Default alpha multiplier applied to fill when a shape doesn't carry
+ *  its own `fillOpacity`. Pre-v1.4-late shapes (the field is optional)
+ *  fall back here so re-loads of older boards still render correctly.
+ *  Per-shape `fillOpacity` was added so the user can mix soft tints
+ *  and saturated fills on the same board via the Shape tool menu's
+ *  slider. */
+const DEFAULT_FILL_ALPHA = 0.25
 
 export function renderShapes(params: RenderShapesParams): void {
   const { shapes, layer, camera, viewBBox, resolveColor, isMultiSelected } = params
@@ -149,7 +150,7 @@ function drawRect(ctx: CanvasRenderingContext2D, s: ShapeObject, fill: string | 
   if (fill) {
     ctx.fillStyle = fill
     const prevAlpha = ctx.globalAlpha
-    ctx.globalAlpha = prevAlpha * FILL_ALPHA
+    ctx.globalAlpha = prevAlpha * (s.fillOpacity ?? DEFAULT_FILL_ALPHA)
     ctx.fillRect(nx, ny, nw, nh)
     ctx.globalAlpha = prevAlpha
   }
@@ -167,7 +168,7 @@ function drawEllipse(ctx: CanvasRenderingContext2D, s: ShapeObject, fill: string
   if (fill) {
     ctx.fillStyle = fill
     const prevAlpha = ctx.globalAlpha
-    ctx.globalAlpha = prevAlpha * FILL_ALPHA
+    ctx.globalAlpha = prevAlpha * (s.fillOpacity ?? DEFAULT_FILL_ALPHA)
     ctx.fill()
     ctx.globalAlpha = prevAlpha
   }

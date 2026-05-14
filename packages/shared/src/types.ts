@@ -233,4 +233,11 @@ export interface ShapeObject extends BoardObject {
   /** Optional fill color token. Absent / 'none' = outline-only. Line /
    *  arrow kinds ignore this. */
   fill?: string
+  /** Optional fill-opacity multiplier in [0.05, 1.0]. Applied as a
+   *  globalAlpha during the fill pass so the shape reads as a tint
+   *  behind the outline. Absent → renderer's default (currently 0.25).
+   *  Stored per-shape so users can mix soft tints and saturated fills
+   *  on the same board; the Shape tool's contextual menu writes the
+   *  sticky default that new shapes inherit at creation. v1.4. */
+  fillOpacity?: number
 }

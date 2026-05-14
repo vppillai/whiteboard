@@ -35,6 +35,15 @@
 import type { ShapeKind, ShapeObject } from '@whiteboard/shared'
 import { CURATED_COLORS as PALETTE } from '../colorpicker'
 import { makeShapeId } from '../ids'
+import {
+  iconFillOutline,
+  iconFillSolid,
+  iconShapeArrow,
+  iconShapeEllipse,
+  iconShapeLine,
+  iconShapeRect,
+  iconStrokeWidth,
+} from '../menu-icons'
 import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
 import type { Op } from '../ops'
 import { applyCamera, clearLayer } from '../render'
@@ -42,10 +51,12 @@ import { drawInFlightShape } from '../rendershapes'
 import {
   getShapeColor,
   getShapeFillEnabled,
+  getShapeFillOpacity,
   getShapeKind,
   getShapeStrokeWidth,
   setShapeColor,
   setShapeFillEnabled,
+  setShapeFillOpacity,
   setShapeKind,
   setShapeStrokeWidth,
 } from '../settings'
@@ -59,14 +70,69 @@ const MIN_BOARD_PX = 2
 /** Stroke-width options surfaced in the contextual menu (board pixels). */
 const STROKE_WIDTH_OPTIONS: readonly number[] = [1, 2, 4, 8]
 
-/** Shape sub-mode labels for the menu. Order matches the keymap (R/O/A/L
- *  in the v1.4 brief) so the row reads in the same sequence the user
- *  learns the shortcuts. */
-const KIND_OPTIONS: readonly { id: ShapeKind; label: string; title: string }[] = [
-  { id: 'rect', label: 'Rect', title: 'Rectangle (R)' },
-  { id: 'ellipse', label: 'Oval', title: 'Ellipse (O)' },
-  { id: 'arrow', label: 'Arrow', title: 'Arrow (A)' },
-  { id: 'line', label: 'Line', title: 'Line (L)' },
+/** Fill-opacity slider range (clamped to the same bounds the settings
+ *  module enforces). Step is fine enough for smooth feel but coarse
+ *  enough that the live label reads as a clean two-decimal number. */
+const OPACITY_MIN = 0.05
+const OPACITY_MAX = 1.0
+const OPACITY_STEP = 0.05
+
+interface OpacitySliderDeps {
+  get(): number
+  set(v: number): void
+  disabled: boolean
+}
+
+/** Build a labeled opacity slider row. Lives outside renderContextual-
+ *  Menu so the Select tool's shape menu can reuse the same widget
+ *  (write semantics there: write per-shape via edit-shape op, not the
+ *  sticky setting). */
+function buildFillOpacitySlider(deps: OpacitySliderDeps): HTMLDivElement {
+  const row = document.createElement('div')
+  row.className = 'whiteboard-tools-row whiteboard-fillopacity-row'
+
+  const slider = document.createElement('input')
+  slider.type = 'range'
+  slider.min = String(OPACITY_MIN)
+  slider.max = String(OPACITY_MAX)
+  slider.step = String(OPACITY_STEP)
+  slider.value = String(deps.get())
+  slider.className = 'whiteboard-fillopacity-slider'
+  slider.disabled = deps.disabled
+  slider.setAttribute('aria-label', 'Fill opacity')
+
+  const readout = document.createElement('span')
+  readout.className = 'whiteboard-fillopacity-readout'
+  const renderValue = (v: number): string => `${Math.round(v * 100)}%`
+  readout.textContent = renderValue(deps.get())
+
+  slider.addEventListener('input', () => {
+    const v = Number(slider.value)
+    deps.set(v)
+    readout.textContent = renderValue(v)
+  })
+
+  row.appendChild(slider)
+  row.appendChild(readout)
+  return row
+}
+
+/** Shape sub-mode entries for the contextual menu. Order matches the
+ *  keymap (R/O/A/L per the v1.4 brief). Each entry carries a label
+ *  (becomes the hover tooltip + aria-name), a single-key shortcut
+ *  hint, and an icon factory — the right-click pill renders as an
+ *  icon and reveals "Rectangle (R)" on hover, per the v1.4 menu-icon
+ *  pass. */
+const KIND_OPTIONS: readonly {
+  id: ShapeKind
+  label: string
+  shortcut: string
+  icon: () => SVGElement
+}[] = [
+  { id: 'rect', label: 'Rectangle', shortcut: 'R', icon: iconShapeRect },
+  { id: 'ellipse', label: 'Ellipse', shortcut: 'O', icon: iconShapeEllipse },
+  { id: 'arrow', label: 'Arrow', shortcut: 'A', icon: iconShapeArrow },
+  { id: 'line', label: 'Line', shortcut: 'L', icon: iconShapeLine },
 ]
 
 export interface ShapeToolDeps {
@@ -126,12 +192,16 @@ export function createShapeTool(deps: ShapeToolDeps): ShapeTool {
       color,
       strokeWidth: getShapeStrokeWidth(),
       // Fill token = stroke color; the renderer applies a translucent
-      // FILL_ALPHA so the shape reads as a tint behind the outline.
-      // Lines and arrows never carry a fill in v1 — the field is ignored
+      // alpha so the shape reads as a tint behind the outline. Lines
+      // and arrows never carry a fill in v1 — the field is ignored
       // by their draw paths but we still record it for round-trip
       // consistency across kinds (a future "convert kind" op shouldn't
       // need to recompute style).
       fill: fillEnabled ? color : undefined,
+      // Snapshot the sticky opacity at creation so future slider
+      // changes don't retroactively re-tint existing shapes — each
+      // shape keeps the opacity it was drawn with.
+      fillOpacity: fillEnabled ? getShapeFillOpacity() : undefined,
       z: deps.nextZ(),
       createdAt: Date.now(),
     }
@@ -207,26 +277,10 @@ export function createShapeTool(deps: ShapeToolDeps): ShapeTool {
     },
 
     renderContextualMenu(host, dismiss) {
-      // ── Sub-mode picker ─────────────────────────────────────────
-      host.appendChild(sectionLabel('Shape'))
-      const kindRow = pillRow()
-      const activeKind = getShapeKind()
-      for (const opt of KIND_OPTIONS) {
-        kindRow.appendChild(
-          pill({
-            label: opt.label,
-            title: opt.title,
-            active: activeKind === opt.id,
-            onClick: () => {
-              setShapeKind(opt.id)
-              dismiss()
-            },
-          }),
-        )
-      }
-      host.appendChild(kindRow)
-
-      host.appendChild(separator())
+      // Section order (per the v1.4 user brief):
+      //   Color (swatch) → Shape sub-mode → Stroke width → Fill toggle
+      //   → Fill opacity (only when fill is enabled)
+      // Color first matches the user's "shapes below swatch" feedback.
 
       // ── Color ───────────────────────────────────────────────────
       host.appendChild(sectionLabel('Color'))
@@ -248,7 +302,29 @@ export function createShapeTool(deps: ShapeToolDeps): ShapeTool {
 
       host.appendChild(separator())
 
-      // ── Stroke width ────────────────────────────────────────────
+      // ── Sub-mode picker (icons + hover tooltip) ─────────────────
+      host.appendChild(sectionLabel('Shape'))
+      const kindRow = pillRow()
+      const activeKind = getShapeKind()
+      for (const opt of KIND_OPTIONS) {
+        kindRow.appendChild(
+          pill({
+            label: opt.label,
+            icon: opt.icon(),
+            shortcut: opt.shortcut,
+            active: activeKind === opt.id,
+            onClick: () => {
+              setShapeKind(opt.id)
+              dismiss()
+            },
+          }),
+        )
+      }
+      host.appendChild(kindRow)
+
+      host.appendChild(separator())
+
+      // ── Stroke width (icon = line at corresponding thickness) ───
       host.appendChild(sectionLabel('Stroke width'))
       const widthRow = pillRow()
       const activeWidth = getShapeStrokeWidth()
@@ -256,6 +332,7 @@ export function createShapeTool(deps: ShapeToolDeps): ShapeTool {
         widthRow.appendChild(
           pill({
             label: `${w}px`,
+            icon: iconStrokeWidth(w),
             active: activeWidth === w,
             onClick: () => {
               setShapeStrokeWidth(w)
@@ -268,18 +345,18 @@ export function createShapeTool(deps: ShapeToolDeps): ShapeTool {
 
       host.appendChild(separator())
 
-      // ── Fill toggle ─────────────────────────────────────────────
-      // Outline-only by default; toggling on tints the interior with
-      // the same color at FILL_ALPHA (renderer constant). Lines and
-      // arrows don't visually carry fill — the toggle is still shown
-      // because the user might switch sub-modes mid-session and we
-      // want one persistent setting per the v1.4 "no clutter" brief.
+      // ── Fill toggle (outline / filled icons) ────────────────────
+      // Outline-only by default; toggling on tints the interior at the
+      // sticky `shapeFillOpacity` (default 0.25). Lines / arrows don't
+      // visually carry fill — the toggle is still shown so the setting
+      // survives sub-mode switches (the v1.4 "no clutter" brief).
       host.appendChild(sectionLabel('Fill'))
       const fillRow = pillRow()
       const fillOn = getShapeFillEnabled()
       fillRow.appendChild(
         pill({
           label: 'Outline only',
+          icon: iconFillOutline(),
           active: !fillOn,
           onClick: () => {
             setShapeFillEnabled(false)
@@ -290,6 +367,7 @@ export function createShapeTool(deps: ShapeToolDeps): ShapeTool {
       fillRow.appendChild(
         pill({
           label: 'Filled',
+          icon: iconFillSolid(),
           active: fillOn,
           onClick: () => {
             setShapeFillEnabled(true)
@@ -298,6 +376,19 @@ export function createShapeTool(deps: ShapeToolDeps): ShapeTool {
         }),
       )
       host.appendChild(fillRow)
+
+      // ── Fill opacity slider (only meaningful when filled) ───────
+      // Affects newly-drawn shapes (each shape snapshots the sticky
+      // opacity at creation; the slider doesn't retroactively re-tint
+      // existing shapes). When fill is off, the slider is disabled so
+      // the user sees the control exists but it has no effect right now.
+      host.appendChild(sectionLabel('Fill opacity'))
+      const opacityRow = buildFillOpacitySlider({
+        get: getShapeFillOpacity,
+        set: setShapeFillOpacity,
+        disabled: !fillOn,
+      })
+      host.appendChild(opacityRow)
     },
 
     setKind(kind) {

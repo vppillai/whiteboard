@@ -79,10 +79,12 @@ import type {
 } from '@whiteboard/shared'
 import { CURATED_COLORS as PALETTE } from '../colorpicker'
 import { imageAABB, imageCenter, pointInImage, rotateAroundPoint } from '../imagegeom'
+import { iconFillOutline, iconFillSolid, iconStrokeWidth } from '../menu-icons'
 import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
 import type { Op, TransformManyItem } from '../ops'
 import { applyCamera, clearLayer } from '../render'
 import { pointInShape, shapeAABB } from '../rendershapes'
+import { getShapeFillOpacity } from '../settings'
 import { getStrokeBBox, getStrokePath, invalidateStrokeBBox } from '../stroke'
 import { TEXT_PADDING_X, pointInText, resizeToFit, textAABB } from '../textgeom'
 import type { Tool, ToolContext } from './types'
@@ -1412,11 +1414,17 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     sh: ShapeObject,
     dismiss: () => void,
   ): void {
-    type EditPayload = { color: string; strokeWidth: number; fill: string | undefined }
+    type EditPayload = {
+      color: string
+      strokeWidth: number
+      fill: string | undefined
+      fillOpacity: number | undefined
+    }
     const snapshotEdit = (s: ShapeObject): EditPayload => ({
       color: s.color,
       strokeWidth: s.strokeWidth,
       fill: s.fill,
+      fillOpacity: s.fillOpacity,
     })
     const applyEdit = (mutate: (s: ShapeObject) => void): void => {
       commitDrag(null)
@@ -1428,6 +1436,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       deps.markCommittedDirty()
     }
 
+    // Color first (per v1.4 brief — "shapes below swatch").
     host.appendChild(sectionLabel('Color'))
     const palette = paletteGrid()
     for (const c of PALETTE) {
@@ -1450,12 +1459,14 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
 
     host.appendChild(separator())
 
+    // Stroke width — icon = line preview at the corresponding thickness.
     host.appendChild(sectionLabel('Stroke width'))
     const widthRow = pillRow()
     for (const w of [1, 2, 4, 8] as const) {
       widthRow.appendChild(
         pill({
           label: `${w}px`,
+          icon: iconStrokeWidth(w),
           active: sh.strokeWidth === w,
           onClick: () => {
             applyEdit((s) => {
@@ -1470,12 +1481,14 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
 
     host.appendChild(separator())
 
+    // Fill toggle (icons: empty rect / filled rect).
     host.appendChild(sectionLabel('Fill'))
     const fillRow = pillRow()
     const fillOn = !!sh.fill
     fillRow.appendChild(
       pill({
         label: 'Outline only',
+        icon: iconFillOutline(),
         active: !fillOn,
         onClick: () => {
           applyEdit((s) => {
@@ -1488,16 +1501,54 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     fillRow.appendChild(
       pill({
         label: 'Filled',
+        icon: iconFillSolid(),
         active: fillOn,
         onClick: () => {
           applyEdit((s) => {
             s.fill = s.color
+            // Newly-filled shape gets the sticky opacity if it didn't
+            // already carry one — so toggling Outline→Filled inherits
+            // the current default rather than the legacy 0.25 constant.
+            if (s.fillOpacity === undefined) s.fillOpacity = getShapeFillOpacity()
           })
           dismiss()
         },
       }),
     )
     host.appendChild(fillRow)
+
+    // Fill opacity slider — live-edits the selected shape. Disabled when
+    // fill is off (the user sees the control exists but it has no effect
+    // until they toggle Filled). Uses 'input' for live feedback; each
+    // movement emits an edit-shape op so undo restores the prior alpha
+    // step-by-step. That's noisy in undo but matches the user mental
+    // model: each visible change is undoable.
+    host.appendChild(sectionLabel('Fill opacity'))
+    const sliderRow = document.createElement('div')
+    sliderRow.className = 'whiteboard-tools-row whiteboard-fillopacity-row'
+    const slider = document.createElement('input')
+    slider.type = 'range'
+    slider.min = '0.05'
+    slider.max = '1.0'
+    slider.step = '0.05'
+    slider.value = String(sh.fillOpacity ?? getShapeFillOpacity())
+    slider.className = 'whiteboard-fillopacity-slider'
+    slider.disabled = !fillOn
+    slider.setAttribute('aria-label', 'Fill opacity')
+    const readout = document.createElement('span')
+    readout.className = 'whiteboard-fillopacity-readout'
+    const renderValue = (v: number): string => `${Math.round(v * 100)}%`
+    readout.textContent = renderValue(Number(slider.value))
+    slider.addEventListener('input', () => {
+      const v = Number(slider.value)
+      readout.textContent = renderValue(v)
+      applyEdit((s) => {
+        s.fillOpacity = v
+      })
+    })
+    sliderRow.appendChild(slider)
+    sliderRow.appendChild(readout)
+    host.appendChild(sliderRow)
   }
 
   return {

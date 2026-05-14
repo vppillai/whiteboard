@@ -47,6 +47,7 @@ const baseSettings: SettingsV1 = {
   shapeColor: 'ink',
   shapeStrokeWidth: 2,
   shapeFillEnabled: false,
+  shapeFillOpacity: 0.25,
 }
 
 describe('export/svg', () => {
