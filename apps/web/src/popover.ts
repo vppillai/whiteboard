@@ -268,13 +268,37 @@ export function showPopover(opts: PopoverOptions): Popover {
   return popover
 }
 
-/** Dismisses EVERY currently-alive popover, including pinned ones.
- *  Used by Esc (the universal close-all) and by distraction-free mode
- *  enter. Returns true if any popover was dismissed. Iterates in
- *  reverse so each dismiss can safely splice itself out of the array. */
+/** Dismisses every NON-PINNED popover. Returns true if any popover
+ *  was dismissed. Pinned popovers are skipped — they only close via
+ *  the X button or `dismissAllPopoversForced` (distraction-free mode
+ *  enter etc., where a global state shift overrides the pin).
+ *
+ *  v1.4 change: pre-v1.4 this always dismissed pinned too, so any Esc
+ *  through main.ts → cancel → dismissAllPopovers() killed pinned
+ *  menus. The popover's own Esc handler already respected pin; this
+ *  was the second dismissal path that the user was hitting.
+ *
+ *  Iterates a snapshot of the registry so each dismiss can safely
+ *  splice itself out without invalidating iteration. */
 export function dismissAllPopovers(): boolean {
   if (activeRegistry.length === 0) return false
-  // Snapshot the list before iterating — dismiss() mutates the registry.
+  const snapshot = activeRegistry.slice()
+  let dismissed = false
+  for (const entry of snapshot) {
+    if (entry.popover.isPinned()) continue
+    entry.popover.dismiss()
+    dismissed = true
+  }
+  return dismissed
+}
+
+/** Dismisses every popover regardless of pin state. Used by global
+ *  state transitions where the pin choice doesn't apply — e.g.
+ *  distraction-free mode enter (the chrome itself disappears) or
+ *  clear-board confirmations (the user is intentionally tearing
+ *  down). Returns true if any popover was dismissed. v1.4. */
+export function dismissAllPopoversForced(): boolean {
+  if (activeRegistry.length === 0) return false
   const snapshot = activeRegistry.slice()
   for (const entry of snapshot) {
     entry.popover.dismiss()

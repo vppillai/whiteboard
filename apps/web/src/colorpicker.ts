@@ -7,7 +7,7 @@
  * in the side panel's Custom swatches section.
  */
 
-import { type Popover, dismissAllPopovers, showPopover } from './popover'
+import { type Popover, findPopoverByTag, showPopover } from './popover'
 import {
   getColor,
   getCustomSwatches,
@@ -99,17 +99,17 @@ export function openColorPicker(at: { x: number; y: number }): Popover {
   }
 
   const openSwatchAddSubpopover = (): void => {
-    const wasPinned = popoverRef.current?.isPinned() ?? false
+    // Dismiss only the swatch-add subpopover; the parent color picker
+    // stays open. Its `onChange` subscription auto-rebuilds the
+    // palette so a newly-added swatch shows up immediately. Pre-v1.4
+    // this path nuked all popovers and re-opened the picker, which
+    // killed the pin and produced a visual flicker. v1.4 fix.
     const subRoot = createSwatchAdd({
       onAdded: () => {
-        dismissAllPopovers()
-        const next = openColorPicker(at)
-        next.setPinned(wasPinned)
+        findPopoverByTag('swatch-add')?.dismiss()
       },
       onCancel: () => {
-        dismissAllPopovers()
-        const next = openColorPicker(at)
-        next.setPinned(wasPinned)
+        findPopoverByTag('swatch-add')?.dismiss()
       },
     })
     showPopover({

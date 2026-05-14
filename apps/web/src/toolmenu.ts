@@ -287,18 +287,22 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
 
 const PINNED_STORAGE_KEY = 'whiteboard:toolmenu-pinned'
 
+/** Pin state lives in localStorage so the preference survives browser
+ *  restarts — the user explicitly asked for cross-session persistence,
+ *  not just per-tab. SessionStorage was the v1.4-initial choice and
+ *  proved too narrow. Falls back to in-memory false on private-mode
+ *  storage failures. */
 function readPersistedPinned(): boolean {
   try {
-    return sessionStorage.getItem(PINNED_STORAGE_KEY) === 'true'
+    return localStorage.getItem(PINNED_STORAGE_KEY) === 'true'
   } catch {
-    // SecurityError in private-mode etc. — treat as unpinned.
     return false
   }
 }
 
 function writePersistedPinned(pinned: boolean): void {
   try {
-    sessionStorage.setItem(PINNED_STORAGE_KEY, pinned ? 'true' : 'false')
+    localStorage.setItem(PINNED_STORAGE_KEY, pinned ? 'true' : 'false')
   } catch {
     // ignore storage failures (private mode / quota)
   }

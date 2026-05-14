@@ -103,32 +103,33 @@ export function iconShape(): SVGElement {
   )
 }
 
-/** Eraser — a pink-pencil-eraser silhouette tilted to the right with a
- *  metal ferrule band near the top, plus an "erased" curl below
- *  suggesting eraser shavings / cleared marks. The two-section body
- *  (rubber + ferrule) is the universal eraser cue; the curl at the
- *  bottom-left disambiguates this from any other tilted-block shape.
- *  v1.4 second redesign per user feedback. */
+/** Eraser — fat pink-pencil-eraser silhouette tilted to the right with
+ *  a metal ferrule band, plus an "erased" curl below suggesting eraser
+ *  shavings. The wide rubber body is the universal eraser cue; the
+ *  ferrule disambiguates from a generic tilted block; the shaving
+ *  curl says "this is what just erased something." v1.4 third
+ *  redesign per user feedback ("needs to be fatter"). */
 export function iconEraser(): SVGElement {
-  // Body — a thicker, more visible angled rectangle running from
-  // upper-right (rubber top) to lower-left (eraser tip).
+  // Fat body — a parallelogram running from upper-right to lower-left.
+  // Width across the short axis is now ~6 board units (vs ~3 before),
+  // giving the icon a chunky, unmistakably-eraser silhouette.
   const body = svgEl('path', {
-    d: 'M 18 3 L 21 6 L 8 19 L 5 19 L 5 16 Z',
+    d: 'M 17 2 L 22 7 L 9 20 L 4 20 L 4 15 Z',
     fill: 'currentColor',
-    'fill-opacity': 0.2,
+    'fill-opacity': 0.22,
   })
   const bodyOutline = svgEl('path', {
-    d: 'M 18 3 L 21 6 L 8 19 L 5 19 L 5 16 Z',
+    d: 'M 17 2 L 22 7 L 9 20 L 4 20 L 4 15 Z',
   })
-  // Two parallel cross-lines simulate the metal ferrule banding —
-  // the distinctive visual that says "pencil eraser" rather than
-  // "generic rubber block."
-  const ferrule1 = svgEl('path', { d: 'M 14 7 L 17 10' })
-  const ferrule2 = svgEl('path', { d: 'M 16 5 L 19 8' })
+  // Single thicker ferrule band — the metal ring that wraps the rubber
+  // tip on a pencil eraser. Drawn as a parallelogram slice so it reads
+  // as a banding feature rather than just a line.
+  const ferruleA = svgEl('path', { d: 'M 13 6 L 18 11' })
+  const ferruleB = svgEl('path', { d: 'M 15 4 L 20 9' })
   // Eraser-shaving curl at the lower-left — a small comma below the
-  // eraser tip, suggesting bits of just-removed pencil.
-  const shaving = svgEl('path', { d: 'M 4 21 Q 2 21, 3 19' })
-  return makeSvg(body, bodyOutline, ferrule1, ferrule2, shaving)
+  // eraser tip, hinting at the cleared material.
+  const shaving = svgEl('path', { d: 'M 3 21.5 Q 1 21, 2 19' })
+  return makeSvg(body, bodyOutline, ferruleA, ferruleB, shaving)
 }
 
 /** Select — arrow cursor. */
