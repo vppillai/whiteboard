@@ -6,7 +6,9 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 ## [Unreleased]
 
-**Post-v1.2 polish + 4-lane review hardening.** Three follow-on features land on top of v1.2.0: click-to-select strokes in the Select tool, `Cmd/Ctrl+V` of clipboard text on the canvas creates a TextObject, and a Google Docs paste path (async image-fallback when DataTransfer is empty). Plus the Tier-A / Tier-B fixes from a 4-lane parallel code review of the v1.2 batch.
+## [1.3.0] — 2026-05-13
+
+**Lasso → Select absorption + whiteboard-native clipboard + 4-lane review hardening.** Two major UX overhauls — the Lasso tool's selection model merges into the Select tool (single, multi, marquee all live there now), and `Cmd/Ctrl+C` / `Cmd/Ctrl+V` round-trip strokes + texts as vectors when pasting back inside the whiteboard (still PNG into external apps). Two parallel 4-lane critical code reviews fed substantial refactors: drag-state discriminated union, op-pipeline `transform-many` composite for the upcoming sync, clipboard subsystem extracted into its own module. Several small Tier-A bug fixes shipped along the way.
 
 ### Added
 
