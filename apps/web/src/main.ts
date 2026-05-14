@@ -81,6 +81,7 @@ import { type Op, type OpContext, applyOp, unapplyOp } from './ops'
 import { openOptionsMenu } from './optionsmenu'
 import { attachPan } from './pan'
 import { runPerftest } from './perftest'
+import { createWarnAndContinuePersist } from './persist-callbacks'
 import { createHelpPill } from './pill'
 import { attachPointer } from './pointer'
 import { dismissAllPopovers, findPopoverByTag } from './popover'
@@ -390,35 +391,36 @@ async function main(): Promise<void> {
   // every move/resize/rotate, so consolidating the closure keeps the error
   // policy (currently: warn-and-continue) in one place — future changes
   // like surfacing a toast or retry only touch this line.
-  const persistImageMeta = (img: ImageObject): void => {
-    void imageStore.updateMeta(img).catch((err) => {
-      console.warn('whiteboard/web: failed to persist image metadata:', err)
-    })
-  }
+  const persistImageMeta = createWarnAndContinuePersist<ImageObject>(
+    imageStore.updateMeta.bind(imageStore),
+    'whiteboard/web: failed to persist image metadata:',
+  )
 
   // Same pattern for text records — single closure used by opCtx and the
   // Text tool. Errors are warn-and-continue (matching strokes / images).
-  const persistText = (t: TextObject): void => {
-    void textStore.update(t).catch((err) => {
-      console.warn('whiteboard/web: failed to persist text:', err)
-    })
-  }
+  const persistText = createWarnAndContinuePersist<TextObject>(
+    textStore.update.bind(textStore),
+    'whiteboard/web: failed to persist text:',
+  )
 
   // Same pattern for shape records — single closure used by opCtx (and the
   // Shape tool, in SH5). Errors are warn-and-continue.
-  const persistShape = (s: ShapeObject): void => {
-    void shapeStore.update(s).catch((err) => {
-      console.warn('whiteboard/web: failed to persist shape:', err)
-    })
-  }
+  const persistShape = createWarnAndContinuePersist<ShapeObject>(
+    shapeStore.update.bind(shapeStore),
+    'whiteboard/web: failed to persist shape:',
+  )
+  const persistStroke = createWarnAndContinuePersist<Stroke>(
+    strokeStore.save.bind(strokeStore),
+    'whiteboard/web: failed to persist stroke:',
+  )
+  const persistSelectStroke = createWarnAndContinuePersist<Stroke>(
+    strokeStore.save.bind(strokeStore),
+    'whiteboard/web: failed to persist stroke (Select move/delete):',
+  )
 
   const opCtx: OpContext = {
     strokes,
-    saveStroke: (s) => {
-      void strokeStore.save(s).catch((err) => {
-        console.warn('whiteboard/web: failed to persist stroke:', err)
-      })
-    },
+    saveStroke: persistStroke,
     images,
     saveImageMeta: persistImageMeta,
     texts,
@@ -471,9 +473,7 @@ async function main(): Promise<void> {
         // First-run hint fades on first stroke commit. Idempotent — no-ops
         // after the first call and after the localStorage flag is set.
         dismissFirstRunHint()
-        void strokeStore.save(stroke).catch((err) => {
-          console.warn('whiteboard/web: failed to persist stroke:', err)
-        })
+        persistStroke(stroke)
       },
     },
   })
@@ -496,14 +496,7 @@ async function main(): Promise<void> {
     getShapes: () => shapes,
     saveShape: persistShape,
     getStrokes: () => strokes,
-    // Stroke persistence — same warn-and-continue policy as
-    // persistImageMeta / persistText. Used by the Select tool's
-    // stroke-drag path (per-tick saves) and stroke-delete path.
-    saveStroke: (s) => {
-      void strokeStore.save(s).catch((err) => {
-        console.warn('whiteboard/web: failed to persist stroke (Select move/delete):', err)
-      })
-    },
+    saveStroke: persistSelectStroke,
     pushOp: (op) => pushUndoOp(op),
     markCommittedDirty: () => {
       committedDirty = true
