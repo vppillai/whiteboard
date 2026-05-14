@@ -56,7 +56,7 @@ export interface ToolContext {
   getLastPointer(): { x: number; y: number }
 }
 
-export type ToolId = 'pen' | 'eraser' | 'laser' | 'text' | 'select'
+export type ToolId = 'pen' | 'eraser' | 'laser' | 'text' | 'select' | 'shape'
 
 export interface Tool {
   id: ToolId

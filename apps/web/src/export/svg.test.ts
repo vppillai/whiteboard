@@ -43,6 +43,10 @@ const baseSettings: SettingsV1 = {
   textItalic: false,
   textUnderline: false,
   textColor: 'ink',
+  shapeKind: 'rect',
+  shapeColor: 'ink',
+  shapeStrokeWidth: 2,
+  shapeFillEnabled: false,
 }
 
 describe('export/svg', () => {

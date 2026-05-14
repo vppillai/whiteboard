@@ -9,7 +9,7 @@
  * existing strokes); any other value is treated as a literal CSS color.
  */
 
-import type { BrushConfig, TextFontFamily } from '@whiteboard/shared'
+import type { BrushConfig, ShapeKind, TextFontFamily } from '@whiteboard/shared'
 import { BRUSH_PRESETS, type BrushId, isValidBrushId } from './brushes'
 
 export type GridType = 'dots' | 'lines' | 'ruled' | 'none'
@@ -91,6 +91,15 @@ export interface SettingsV1 {
   textItalic: boolean
   textUnderline: boolean
   textColor: string
+  /** Sticky-session defaults for the Shape tool (rect / ellipse / line /
+   *  arrow). Single shared color, strokeWidth, and fill toggle apply
+   *  across all four sub-modes — the user explicitly asked for "no user-
+   *  facing clutter" (v1.4 brief). shapeKind remembers the last picked
+   *  sub-mode so re-entering the tool lands on the same shape. */
+  shapeKind: ShapeKind
+  shapeColor: string
+  shapeStrokeWidth: number
+  shapeFillEnabled: boolean
   syncedAt?: number
   remoteId?: string
 }
@@ -127,6 +136,10 @@ function defaultV1(): SettingsV1 {
     textItalic: false,
     textUnderline: false,
     textColor: 'ink',
+    shapeKind: 'rect', // NEW (v1.4): default sub-mode for Shape tool
+    shapeColor: 'ink', // NEW (v1.4): stroke + fill color for shapes
+    shapeStrokeWidth: 2, // NEW (v1.4): mid-weight default
+    shapeFillEnabled: false, // NEW (v1.4): outline-only by default
   }
 }
 
@@ -197,6 +210,20 @@ export function migrate(input: unknown): SettingsV1 {
     textItalic: typeof v.textItalic === 'boolean' ? v.textItalic : DEFAULTS.textItalic,
     textUnderline: typeof v.textUnderline === 'boolean' ? v.textUnderline : DEFAULTS.textUnderline,
     textColor: typeof v.textColor === 'string' ? v.textColor : DEFAULTS.textColor,
+    shapeKind:
+      v.shapeKind === 'rect' ||
+      v.shapeKind === 'ellipse' ||
+      v.shapeKind === 'line' ||
+      v.shapeKind === 'arrow'
+        ? v.shapeKind
+        : DEFAULTS.shapeKind,
+    shapeColor: typeof v.shapeColor === 'string' ? v.shapeColor : DEFAULTS.shapeColor,
+    shapeStrokeWidth:
+      typeof v.shapeStrokeWidth === 'number' && v.shapeStrokeWidth > 0
+        ? v.shapeStrokeWidth
+        : DEFAULTS.shapeStrokeWidth,
+    shapeFillEnabled:
+      typeof v.shapeFillEnabled === 'boolean' ? v.shapeFillEnabled : DEFAULTS.shapeFillEnabled,
     syncedAt: typeof v.syncedAt === 'number' ? v.syncedAt : undefined,
     remoteId: typeof v.remoteId === 'string' ? v.remoteId : undefined,
   }
@@ -463,6 +490,51 @@ export function getTextColor(): string {
 export function setTextColor(value: string): void {
   if (state.textColor === value) return
   state.textColor = value
+  persist()
+  emit()
+}
+
+// ─── Shape sticky defaults (v1.4) ──────────────────────────────────────────
+// One getter + one setter per field. Shape tool reads these for the next
+// new shape; menu interactions (sub-mode picker, color, stroke width, fill
+// toggle) write back here so the next new shape inherits the user's choices.
+
+export function getShapeKind(): ShapeKind {
+  return state.shapeKind
+}
+export function setShapeKind(value: ShapeKind): void {
+  if (state.shapeKind === value) return
+  state.shapeKind = value
+  persist()
+  emit()
+}
+
+export function getShapeColor(): string {
+  return state.shapeColor
+}
+export function setShapeColor(value: string): void {
+  if (state.shapeColor === value) return
+  state.shapeColor = value
+  persist()
+  emit()
+}
+
+export function getShapeStrokeWidth(): number {
+  return state.shapeStrokeWidth
+}
+export function setShapeStrokeWidth(value: number): void {
+  if (state.shapeStrokeWidth === value) return
+  state.shapeStrokeWidth = value
+  persist()
+  emit()
+}
+
+export function getShapeFillEnabled(): boolean {
+  return state.shapeFillEnabled
+}
+export function setShapeFillEnabled(value: boolean): void {
+  if (state.shapeFillEnabled === value) return
+  state.shapeFillEnabled = value
   persist()
   emit()
 }

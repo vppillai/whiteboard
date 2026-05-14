@@ -122,6 +122,7 @@ import {
   createLaserTool,
   createPenTool,
   createSelectTool,
+  createShapeTool,
   createTextTool,
 } from './tools'
 import { clearView, loadView, makeViewSaver } from './viewstate'
@@ -281,10 +282,12 @@ async function main(): Promise<void> {
     let max = 0
     for (const img of images) if (!img.deleted && img.z > max) max = img.z
     for (const t of texts) if (!t.deleted && t.z > max) max = t.z
+    for (const sh of shapes) if (!sh.deleted && sh.z > max) max = sh.z
     return max + 1
   }
   const nextImageZ = nextObjectZ
   const nextTextZ = nextObjectZ
+  const nextShapeZ = nextObjectZ
 
   try {
     const { images: persistedImages, compactedBlobRefs } = await imageStore.load()
@@ -528,12 +531,24 @@ async function main(): Promise<void> {
     onEscExit: () => setTool(previousToolId ?? 'pen'),
   })
 
+  const shapeTool = createShapeTool({
+    getShapes: () => shapes,
+    nextZ: nextShapeZ,
+    pushOp: pushUndoOp,
+    saveShape: persistShape,
+    markCommittedDirty: () => {
+      committedDirty = true
+    },
+    resolveColor: resolveInkColor,
+  })
+
   const allTools: Record<ToolId, Tool> = {
     pen: penTool,
     eraser: eraserTool,
     select: selectTool,
     laser: laserTool,
     text: textTool,
+    shape: shapeTool,
   }
   const tool: { current: Tool } = { current: penTool }
   // Apply the initial tool's cursor — `setTool` only fires on changes, so
