@@ -46,12 +46,12 @@
 
 import type { ImageObject, Stroke, TextFontFamily, TextObject } from '@whiteboard/shared'
 import { CURATED_COLORS as PALETTE } from '../colorpicker'
-import { imageCenter, pointInImage, rotateAroundPoint } from '../imagegeom'
+import { imageAABB, imageCenter, pointInImage, rotateAroundPoint } from '../imagegeom'
 import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
 import type { Op } from '../ops'
 import { applyCamera, clearLayer } from '../render'
 import { getStrokeBBox, getStrokePath, invalidateStrokeBBox } from '../stroke'
-import { TEXT_PADDING_X, pointInText, resizeToFit } from '../textgeom'
+import { TEXT_PADDING_X, pointInText, resizeToFit, textAABB } from '../textgeom'
 import type { Tool, ToolContext } from './types'
 
 type Selection =
@@ -114,6 +114,31 @@ interface MultiDragState {
   startBoard: { x: number; y: number }
   items: MultiDragItem[]
 }
+
+/**
+ * Drag-rectangle selection state. Activated by pointer-down on EMPTY
+ * canvas; the rectangle is painted on the live layer during the drag
+ * and hit-tests against all objects on release. Shift held during
+ * the drag makes the selection additive (unioned with existing
+ * selection rather than replacing).
+ *
+ * `live` flips true only after the pointer moves past MARQUEE_NOOP_PX
+ * — until then, the drag is a "candidate" that might still be a click
+ * (which is the empty-space-deselect path). This avoids painting a
+ * 1px marquee for tap-only intent.
+ */
+interface MarqueeDragState {
+  startBoard: { x: number; y: number }
+  currentBoard: { x: number; y: number }
+  startScreen: { x: number; y: number }
+  live: boolean
+  additive: boolean
+}
+
+/** Screen-pixel distance threshold to upgrade marquee from candidate
+ *  to live. Generous because pen-on-tablet drift is significant on
+ *  Wacom Intuos at default sensitivity. */
+const MARQUEE_NOOP_PX = 4
 
 interface DragState {
   selection: Selection
@@ -258,6 +283,9 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
   // object code paths unchanged; multi-drag is a parallel branch that
   // bypasses the handle / rotate / resize machinery.
   let multiDrag: MultiDragState | null = null
+  // Drag-rectangle selection (marquee). Mutually exclusive with `drag`
+  // and `multiDrag` — only one drag-class state is active at a time.
+  let marquee: MarqueeDragState | null = null
 
   /** Returns the single-selected item when exactly one object is
    *  selected; null when empty or multi. Used by all paths that need
@@ -673,6 +701,103 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     const after = { ...t.transform }
     if (transformChanged(d.before, after)) {
       deps.pushOp({ kind: 'transform-text', textId: t.id, before: d.before, after })
+    }
+  }
+
+  /** Paint the live marquee rectangle on the live layer. Dashed accent
+   *  outline + a faint accent fill. Drawn in board space so it scales
+   *  with the camera (the rect is always 1px-stroke at any zoom). */
+  function drawMarquee(m: MarqueeDragState, ctx: ToolContext): void {
+    const box = marqueeAABB(m)
+    const c = ctx.liveLayer.ctx
+    const accent = resolveAccent(c)
+    applyCamera(ctx.liveLayer, ctx.camera, ctx.dpr)
+    const scale = ctx.camera.scale
+    c.save()
+    c.fillStyle = accent
+    c.globalAlpha = 0.08
+    c.fillRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
+    c.globalAlpha = 1
+    c.strokeStyle = accent
+    c.lineWidth = 1 / scale
+    c.setLineDash([4 / scale, 4 / scale])
+    c.strokeRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
+    c.restore()
+  }
+
+  /** Normalize a marquee rect (allowing drag in any direction) into an
+   *  AABB in board space. */
+  function marqueeAABB(m: MarqueeDragState): {
+    minX: number
+    minY: number
+    maxX: number
+    maxY: number
+  } {
+    return {
+      minX: Math.min(m.startBoard.x, m.currentBoard.x),
+      minY: Math.min(m.startBoard.y, m.currentBoard.y),
+      maxX: Math.max(m.startBoard.x, m.currentBoard.x),
+      maxY: Math.max(m.startBoard.y, m.currentBoard.y),
+    }
+  }
+
+  /** Does any sample of the stroke fall inside the marquee AABB? Mirrors
+   *  the Lasso tool's hit semantics for consistency — a stroke that
+   *  passes through the rect counts as selected, even if its sample
+   *  cloud isn't fully enclosed. */
+  function strokeIntersectsMarquee(
+    stroke: Stroke,
+    box: { minX: number; minY: number; maxX: number; maxY: number },
+  ): boolean {
+    for (const p of stroke.samples) {
+      if (p.x >= box.minX && p.x <= box.maxX && p.y >= box.minY && p.y <= box.maxY) {
+        return true
+      }
+    }
+    return false
+  }
+
+  /** Does the object's AABB intersect the marquee AABB? Used for images
+   *  and texts (rect-vs-rect overlap). Partial overlap is enough —
+   *  matches the user expectation that "the marquee touched it." */
+  function aabbIntersects(
+    a: { minX: number; minY: number; maxX: number; maxY: number },
+    b: { minX: number; minY: number; maxX: number; maxY: number },
+  ): boolean {
+    return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY
+  }
+
+  /** Finalize a live marquee: hit-test every object and merge with the
+   *  current selection (additive) or replace it. */
+  function finalizeMarquee(m: MarqueeDragState): void {
+    const box = marqueeAABB(m)
+    const hits: Selection[] = []
+    for (const s of deps.getStrokes()) {
+      if (s.deleted) continue
+      if (strokeIntersectsMarquee(s, box)) hits.push({ kind: 'stroke', id: s.id })
+    }
+    for (const img of deps.getImages()) {
+      if (img.deleted) continue
+      const ib = imageAABB(img)
+      if (aabbIntersects(ib, box)) hits.push({ kind: 'image', id: img.id })
+    }
+    for (const t of deps.getTexts()) {
+      if (t.deleted) continue
+      const tb = textAABB(t)
+      if (aabbIntersects(tb, box)) hits.push({ kind: 'text', id: t.id })
+    }
+    if (m.additive) {
+      // Union with existing selection — dedupe by kind+id.
+      const seen = new Set(selected.map((s) => `${s.kind}:${s.id}`))
+      for (const h of hits) {
+        const key = `${h.kind}:${h.id}`
+        if (!seen.has(key)) {
+          selected.push(h)
+          seen.add(key)
+        }
+      }
+    } else {
+      selected = hits
     }
   }
 
@@ -1194,6 +1319,20 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
           lastTextDownAt = Number.NEGATIVE_INFINITY
           lastTextDownId = null
         }
+        // Shift+click toggles the hit object in/out of the current
+        // selection without starting a drag — pen-friendly equivalent
+        // of marquee-multi-select for one-at-a-time picking.
+        if (e.shiftKey) {
+          const idx = selected.findIndex((s) => s.kind === hit.kind && s.id === hit.id)
+          if (idx >= 0) {
+            selected = [...selected.slice(0, idx), ...selected.slice(idx + 1)]
+          } else {
+            selected = [...selected, hit]
+          }
+          ctx.markCommittedDirty()
+          return
+        }
+
         // Is the hit object already part of a MULTI-selection? If so,
         // start a multi-move drag — every selected object translates
         // together. The selection itself isn't replaced, so the user
@@ -1232,20 +1371,41 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         }
       }
 
-      // Clicked empty space → deselect. Also clear the double-click
-      // window so a "click text → click empty → quick-click same text"
-      // sequence doesn't unexpectedly open the editor (the empty-space
-      // click is a genuine reset of intent).
+      // Empty-space pointer-down — could be either (a) a click that
+      // means "deselect," or (b) the start of a marquee drag. We defer
+      // the decision: start a candidate marquee. If the pointer moves
+      // past MARQUEE_NOOP_PX before release, it becomes a live marquee
+      // and finalizes on release. If not, onPointerUp treats it as a
+      // click and deselects.
       lastTextDownAt = Number.NEGATIVE_INFINITY
       lastTextDownId = null
-      if (selected.length > 0) {
-        selected = []
-        ctx.markCommittedDirty()
+      marquee = {
+        startBoard: { x: bx, y: by },
+        currentBoard: { x: bx, y: by },
+        startScreen: { x: e.clientX, y: e.clientY },
+        live: false,
+        additive: e.shiftKey,
       }
+      ;(e.target as Element).setPointerCapture?.(e.pointerId)
     },
 
     onPointerMove(e, ctx): void {
       const { x: bx, y: by } = ctx.toBoard(e.clientX, e.clientY)
+
+      // Marquee drag — promote candidate to live once past threshold,
+      // then update the live rect each tick.
+      if (marquee) {
+        if (!marquee.live) {
+          const ddx = e.clientX - marquee.startScreen.x
+          const ddy = e.clientY - marquee.startScreen.y
+          if (Math.hypot(ddx, ddy) > MARQUEE_NOOP_PX) {
+            marquee.live = true
+          }
+        }
+        marquee.currentBoard = { x: bx, y: by }
+        if (marquee.live) ctx.markCommittedDirty()
+        return
+      }
 
       // Multi-object move tick — translate every selected object by the
       // running delta from drag start.
@@ -1401,12 +1561,34 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     },
 
     onPointerUp(e, ctx): void {
+      // Marquee finalize: pick hit objects (or clear if it was a tap).
+      if (marquee) {
+        const m = marquee
+        marquee = null
+        ;(e.target as Element | null)?.releasePointerCapture?.(e.pointerId)
+        if (m.live) {
+          finalizeMarquee(m)
+        } else {
+          // Pointer-down + immediate release on empty space = click
+          // intent → deselect.
+          if (selected.length > 0) selected = []
+        }
+        ctx.markCommittedDirty()
+        return
+      }
       commitDrag(e)
       ctx.markCommittedDirty()
     },
 
     redraw(ctx): void {
       clearLayer(ctx.liveLayer)
+
+      // Live marquee rect — painted regardless of selection state so
+      // the user sees the drag-rectangle even on an empty board.
+      if (marquee?.live) {
+        drawMarquee(marquee, ctx)
+      }
+
       if (selected.length === 0) return
 
       // Single-selection (the common case): full transform UI on the
@@ -1605,6 +1787,9 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       selected = []
       drag = null
       multiDrag = null
+      // Marquee is purely visual / hit-test state — no op to commit;
+      // dropping it on tool change is correct.
+      marquee = null
     },
 
     getSelectedImage(): ImageObject | null {
@@ -1681,6 +1866,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       selected = []
       drag = null
       multiDrag = null
+      marquee = null
       deps.markCommittedDirty()
     },
 
