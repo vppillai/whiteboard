@@ -207,16 +207,11 @@ export function showPopover(opts: PopoverOptions): Popover {
     drag = { dx: e.clientX - rect.left, dy: e.clientY - rect.top, pointerId: e.pointerId }
     header.setPointerCapture(e.pointerId)
     header.style.cursor = 'grabbing'
-    // Once user drags, become pinned — they want to keep this popover open
-    // to interact with it from a new position. v1.4 fix: also fire
-    // onPinnedChange so external state (e.g. toolmenu's localStorage
-    // mirror) stays in sync — the previous direct mutation here
-    // bypassed the callback and diverged the persisted pin flag.
-    if (!pinned) {
-      pinned = true
-      syncPinUI()
-      opts.onPinnedChange?.(pinned)
-    }
+    // Dragging is just a reposition — it does NOT auto-pin the
+    // popover. Auto-pinning on drag was confusing because the user
+    // who just wanted to nudge the menu out of the way ended up with
+    // a permanently-pinned menu they had to manually unpin. Pin is
+    // user-initiated only (header pin button). v1.4 review fix.
   })
   header.addEventListener('pointermove', (e: PointerEvent) => {
     if (!drag || e.pointerId !== drag.pointerId) return

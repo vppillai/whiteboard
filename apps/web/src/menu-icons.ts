@@ -103,33 +103,40 @@ export function iconShape(): SVGElement {
   )
 }
 
-/** Eraser — fat pink-pencil-eraser silhouette tilted to the right with
- *  a metal ferrule band, plus an "erased" curl below suggesting eraser
- *  shavings. The wide rubber body is the universal eraser cue; the
- *  ferrule disambiguates from a generic tilted block; the shaving
- *  curl says "this is what just erased something." v1.4 third
- *  redesign per user feedback ("needs to be fatter"). */
+/** Eraser — block-eraser silhouette: a broad rectangle tilted slightly
+ *  to the right, with a FLAT lower edge (the rubber surface that meets
+ *  the paper) and a darker band near the top suggesting the cardboard
+ *  wrap that holds the rubber. Distinctly NOT a pencil shape — broad
+ *  body, no pointed tip. Erased-area dashes below the rubber edge
+ *  reinforce the "this tool removes marks" reading. v1.4 fourth
+ *  redesign per user feedback ("broader, flat tip, doesn't look like
+ *  a pen"). */
 export function iconEraser(): SVGElement {
-  // Fat body — a parallelogram running from upper-right to lower-left.
-  // Width across the short axis is now ~6 board units (vs ~3 before),
-  // giving the icon a chunky, unmistakably-eraser silhouette.
+  // Broad rectangular body — wider than tall (the universal block-
+  // eraser proportion). Tilted ~10° right so the icon doesn't read
+  // as a perfect rectangle (which would look like a generic crate).
+  // Bottom edge is FLAT and horizontal — that's the eraser surface.
   const body = svgEl('path', {
-    d: 'M 17 2 L 22 7 L 9 20 L 4 20 L 4 15 Z',
+    d: 'M 4 8 L 19 6 L 20 17 L 5 19 Z',
     fill: 'currentColor',
     'fill-opacity': 0.22,
   })
   const bodyOutline = svgEl('path', {
-    d: 'M 17 2 L 22 7 L 9 20 L 4 20 L 4 15 Z',
+    d: 'M 4 8 L 19 6 L 20 17 L 5 19 Z',
   })
-  // Single thicker ferrule band — the metal ring that wraps the rubber
-  // tip on a pencil eraser. Drawn as a parallelogram slice so it reads
-  // as a banding feature rather than just a line.
-  const ferruleA = svgEl('path', { d: 'M 13 6 L 18 11' })
-  const ferruleB = svgEl('path', { d: 'M 15 4 L 20 9' })
-  // Eraser-shaving curl at the lower-left — a small comma below the
-  // eraser tip, hinting at the cleared material.
-  const shaving = svgEl('path', { d: 'M 3 21.5 Q 1 21, 2 19' })
-  return makeSvg(body, bodyOutline, ferruleA, ferruleB, shaving)
+  // Cardboard-wrap band across the upper third — visually separates
+  // the holder from the rubber working surface below it. Two lines
+  // give it the characteristic stripe.
+  const band1 = svgEl('path', { d: 'M 4.3 11 L 19.3 9' })
+  const band2 = svgEl('path', { d: 'M 4.6 13 L 19.6 11' })
+  // Erased-area dashes below the flat bottom edge — three short
+  // marks suggesting the just-cleared surface. Dashes vs a solid
+  // line read as "remnants" rather than "another shape edge."
+  const cleared = svgEl('path', {
+    d: 'M 6 22 L 18 22',
+    'stroke-dasharray': '2 2',
+  })
+  return makeSvg(body, bodyOutline, band1, band2, cleared)
 }
 
 /** Select — arrow cursor. */

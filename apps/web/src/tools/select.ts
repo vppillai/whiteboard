@@ -245,6 +245,14 @@ interface SelectToolDeps {
    *  via the Text tool's `editTextById`. Decoupled from the Text tool
    *  reference itself so the Select tool stays unaware of its sibling. */
   onTextDoubleClick?: (id: string, ctx: ToolContext) => void
+  /** Fired after EVERY selection mutation (single pick, multi-select
+   *  toggle, marquee finalize, selectAll, clearSelection, delete,
+   *  selectByIds, etc.). Lets external state derived from the
+   *  selection refresh — main.ts wires this to the pinned tool menu's
+   *  rebuild hook so the right-click contextual section reflects the
+   *  newly-selected object's options (e.g. shape style row, text
+   *  font row). v1.4 review fix. */
+  onSelectionChange?: () => void
 }
 
 /** Distance from the top-center handle to the rotation handle, in screen
@@ -368,6 +376,17 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
   // mutual exclusion at the type level; see comment block above.
   let activeDrag: ActiveDrag | null = null
 
+  /** Update the selection array and fire deps.onSelectionChange.
+   *  Every site that mutates the selection routes through this helper
+   *  so external state (e.g. the pinned right-click menu's contextual
+   *  section, which depends on what's selected) stays in sync without
+   *  manual notification at each callsite. Cheap to call — the
+   *  callback is a no-op when external state has no derived view. */
+  function setSelection(next: Selection[]): void {
+    selected = next
+    deps.onSelectionChange?.()
+  }
+
   /** Returns the single-selected item when exactly one object is
    *  selected; null when empty or multi. Used by all paths that need
    *  single-object semantics (handles, contextual menu, image-clipboard
@@ -400,7 +419,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     }
     if (!alive) return
     commitDrag(null)
-    selected = [sel]
+    setSelection([sel])
     activeDrag = null
     deps.markCommittedDirty()
   }
@@ -953,15 +972,17 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     if (m.additive) {
       // Union with existing selection — dedupe by kind+id.
       const seen = new Set(selected.map((s) => `${s.kind}:${s.id}`))
+      const next = [...selected]
       for (const h of hits) {
         const key = `${h.kind}:${h.id}`
         if (!seen.has(key)) {
-          selected.push(h)
+          next.push(h)
           seen.add(key)
         }
       }
+      setSelection(next)
     } else {
-      selected = hits
+      setSelection(hits)
     }
   }
 
@@ -1764,9 +1785,9 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         if (e.shiftKey) {
           const idx = selected.findIndex((s) => s.kind === hit.kind && s.id === hit.id)
           if (idx >= 0) {
-            selected = [...selected.slice(0, idx), ...selected.slice(idx + 1)]
+            setSelection([...selected.slice(0, idx), ...selected.slice(idx + 1)])
           } else {
-            selected = [...selected, hit]
+            setSelection([...selected, hit])
           }
           ctx.markCommittedDirty()
           return
@@ -1787,7 +1808,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
 
         // Hit a single (or different) object: replace selection with
         // just that one and start the regular single-object drag.
-        selected = [hit]
+        setSelection([hit])
         const fresh = getView()
         if (fresh) {
           activeDrag = {
@@ -2275,7 +2296,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       // no-op when activeDrag is null, so this is safe on every
       // cleanup call.
       commitDrag(null)
-      selected = []
+      setSelection([])
       // commitDrag clears activeDrag for single/multi modes. The
       // marquee branch also clears it. This re-null is defensive in
       // case a future commitDrag path forgets — cheap insurance.
@@ -2337,7 +2358,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       for (const sh of deps.getShapes()) {
         if (!sh.deleted) next.push({ kind: 'shape', id: sh.id })
       }
-      selected = next
+      setSelection(next)
       activeDrag = null
       deps.markCommittedDirty()
     },
@@ -2360,7 +2381,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
           if (s && !s.deleted) next.push(item)
         }
       }
-      selected = next
+      setSelection(next)
       activeDrag = null
       deps.markCommittedDirty()
     },
@@ -2373,7 +2394,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       // next pointer-up.
       if (selected.length === 0 && !activeDrag) return
       commitDrag(null)
-      selected = []
+      setSelection([])
       activeDrag = null
       deps.markCommittedDirty()
     },
@@ -2434,7 +2455,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
           didDelete = true
         }
       }
-      selected = []
+      setSelection([])
       deps.markCommittedDirty()
       return didDelete
     },

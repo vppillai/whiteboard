@@ -520,6 +520,11 @@ async function main(): Promise<void> {
       setTool('text')
       textTool.editTextById(id, ctx)
     },
+    // Refresh the pinned right-click menu whenever the selection
+    // changes so its contextual section reflects the newly-selected
+    // object (shape style row, text font row, etc.). No-op when the
+    // menu isn't open. v1.4 review fix.
+    onSelectionChange: () => findPopoverByTag('tools')?.rebuild?.(),
   })
 
   const laserTool = createLaserTool({
