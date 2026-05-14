@@ -1,6 +1,6 @@
 /**
  * Tool abstraction. Each tool maps the same pen / mouse / touch input to a
- * different interaction (draw, erase, lasso-select, laser pointer, text).
+ * different interaction (draw, erase, select, laser pointer, text).
  * The pointer module routes events to the active tool; tools own all
  * tool-specific state, rendering, and menu UI.
  *
@@ -56,7 +56,7 @@ export interface ToolContext {
   getLastPointer(): { x: number; y: number }
 }
 
-export type ToolId = 'pen' | 'eraser' | 'lasso' | 'laser' | 'text' | 'select'
+export type ToolId = 'pen' | 'eraser' | 'laser' | 'text' | 'select'
 
 export interface Tool {
   id: ToolId

@@ -6,14 +6,14 @@
  * The gear opens the settings side panel (matches Cmd/Ctrl+, and the
  * right-click → Settings… menu row). Tapping the tool-name zone cycles
  * through the enabled tools — pen-friendly one-step activation that
- * complements `S` (lasso), `B` / `P` (draw), `T` (text), `V` (select),
+ * complements `B` / `P` (draw), `T` (text), `V` / `S` (select),
  * `L` (laser), `Shift+E` (sticky eraser), and the right-click → TOOL menu.
  *
  * Cycle order is the same as the right-click TOOL row's enabled tools:
- * `pen → text → eraser → lasso → select → laser → pen`. Both zones are
- * real `<button>`s so they get native focus / keyboard activation;
- * main.ts re-focuses `#app` after a click so subsequent keystrokes don't
- * go through the pill.
+ * `pen → text → eraser → select → laser → pen`. Both zones are real
+ * `<button>`s so they get native focus / keyboard activation; main.ts
+ * re-focuses `#app` after a click so subsequent keystrokes don't go
+ * through the pill.
  */
 
 import type { ToolId } from './tools/types'
@@ -21,16 +21,13 @@ import type { ToolId } from './tools/types'
 const TOOL_LABELS: Record<ToolId, string> = {
   pen: 'Draw',
   eraser: 'Eraser',
-  lasso: 'Lasso',
   select: 'Select',
   laser: 'Laser',
   text: 'Text',
 }
 
 /** Enabled tools, in cycle order. Mirror of `toolmenu.ts` TOOLS-with-enabled. */
-// Tool-pill cycle order — mirrors `toolmenu.ts` TOOLS for consistency
-// between right-click selection order and tap-to-cycle order.
-const CYCLE: readonly ToolId[] = ['pen', 'text', 'eraser', 'lasso', 'select', 'laser']
+const CYCLE: readonly ToolId[] = ['pen', 'text', 'eraser', 'select', 'laser']
 
 export interface ToolPillOptions {
   initial: ToolId

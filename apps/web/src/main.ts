@@ -89,13 +89,11 @@ import { openToolMenu } from './toolmenu'
 import { createToolPill } from './toolpill'
 import {
   type EraserTool,
-  type LassoTool,
   type Tool,
   type ToolContext,
   type ToolId,
   createEraserTool,
   createLaserTool,
-  createLassoTool,
   createPenTool,
   createSelectTool,
   createTextTool,
@@ -428,24 +426,6 @@ async function main(): Promise<void> {
     },
   })
 
-  const lassoTool: LassoTool = createLassoTool({
-    callbacks: {
-      getStrokes: () => strokes,
-      onDelete: (ids) => {
-        if (ids.length === 0) return
-        const op: Op = { kind: 'delete', strokeIds: ids }
-        applyOp(op, opCtx)
-        pushUndoOp(op)
-      },
-      onMove: (ids, dx, dy) => {
-        if (ids.length === 0 || (dx === 0 && dy === 0)) return
-        const op: Op = { kind: 'move', strokeIds: ids, dx, dy }
-        applyOp(op, opCtx)
-        pushUndoOp(op)
-      },
-    },
-  })
-
   const selectTool = createSelectTool({
     getImages: () => images,
     saveImageMeta: persistImageMeta,
@@ -499,10 +479,9 @@ async function main(): Promise<void> {
     onEscExit: () => setTool(previousToolId ?? 'pen'),
   })
 
-  const allTools: Record<'pen' | 'eraser' | 'lasso' | 'select' | 'laser' | 'text', Tool> = {
+  const allTools: Record<ToolId, Tool> = {
     pen: penTool,
     eraser: eraserTool,
-    lasso: lassoTool,
     select: selectTool,
     laser: laserTool,
     text: textTool,
@@ -556,14 +535,7 @@ async function main(): Promise<void> {
   document.body.appendChild(toolPill.el)
   const setTool = (id: ToolId): void => {
     if (tool.current.id === id) return
-    if (
-      id !== 'pen' &&
-      id !== 'eraser' &&
-      id !== 'lasso' &&
-      id !== 'select' &&
-      id !== 'laser' &&
-      id !== 'text'
-    )
+    if (id !== 'pen' && id !== 'eraser' && id !== 'select' && id !== 'laser' && id !== 'text')
       return
     // Capture the OUTGOING tool id as "previous" — but only when leaving
     // a non-text tool. The Text tool's Esc-handler uses this to return
@@ -824,26 +796,35 @@ async function main(): Promise<void> {
     onToast: showInfoToast,
   }
 
-  // Render the lasso-selected strokes to a PNG blob. Used by Cmd+C / Cmd+X
-  // when the user has strokes selected via lasso — produces a paste-anywhere
-  // raster of just those strokes (the surrounding canvas is transparent).
-  // dpr=2 matches the PDF embed quality so the pasted image is crisp on
-  // retina / 4K targets like Google Docs.
-  const renderLassoSelectionAsPng = async (): Promise<Blob | null> => {
-    const ids = lassoTool.getSelectedStrokeIds()
-    if (ids.length === 0) return null
-    const idSet = new Set(ids)
-    const selected = strokes.filter((s) => idSet.has(s.id) && !s.deleted)
-    if (selected.length === 0) return null
+  /** Render the Select tool's current selection (single OR multi) as a
+   *  PNG blob. Filters each kind by the selection, computes the union
+   *  bbox, and exports with transparent background so the pasted
+   *  drawing lands cleanly into Google Docs / Slack / Confluence / etc.
+   *  — the user's hostside document supplies the background. dpr=2
+   *  matches the PDF embed quality so the pasted image is crisp on
+   *  retina / 4K. Returns null for empty selection. */
+  const renderSelectMultiAsPng = async (): Promise<Blob | null> => {
+    const sels = selectTool.getSelections()
+    if (sels.length === 0) return null
+    const strokeIds = new Set<string>()
+    const imageIds = new Set<string>()
+    const textIds = new Set<string>()
+    for (const s of sels) {
+      if (s.kind === 'stroke') strokeIds.add(s.id)
+      else if (s.kind === 'image') imageIds.add(s.id)
+      else textIds.add(s.id)
+    }
+    const selectedStrokes = strokes.filter((s) => strokeIds.has(s.id) && !s.deleted)
+    const selectedImages = images.filter((i) => imageIds.has(i.id) && !i.deleted)
+    const selectedTexts = texts.filter((t) => textIds.has(t.id) && !t.deleted)
+    if (selectedStrokes.length === 0 && selectedImages.length === 0 && selectedTexts.length === 0) {
+      return null
+    }
     const { computeBoardBounds } = await import('./export/bounds')
     const { exportPNG } = await import('./export/png')
-    const bounds = computeBoardBounds(selected)
+    const bounds = computeBoardBounds(selectedStrokes, selectedImages, selectedTexts)
     if (!bounds) return null
-    // `transparentBg: true` strips the theme-colored background + grid so
-    // the pasted drawing lands cleanly into Google Docs / Slack /
-    // Confluence / etc. — the user's hostside document supplies the
-    // background.
-    return exportPNG(selected, [], [], bounds, getSettings(), null, {
+    return exportPNG(selectedStrokes, selectedImages, selectedTexts, bounds, getSettings(), null, {
       dpr: 2,
       transparentBg: true,
     })
@@ -852,54 +833,75 @@ async function main(): Promise<void> {
   const onCopy = (e: ClipboardEvent): void => {
     if (isTextEditableTarget(e.target)) return
 
-    // Lasso selection → render selected strokes to a PNG and write to
-    // clipboard. Lets the user paste a drawing into Docs / Confluence /
-    // Slack / etc., or back into this canvas as an image. Takes
-    // precedence over the Select-tool image-copy path because the user
-    // has to be IN lasso mode with a selection for this to fire — no
-    // ambiguity with Select.
-    if (tool.current === lassoTool && lassoTool.hasSelection()) {
-      e.preventDefault()
-      void (async () => {
-        const blob = await renderLassoSelectionAsPng()
-        if (blob) await writePngBlobToClipboard(blob, showInfoToast)
-      })()
-      return
-    }
-
-    // Select tool + image selected → copy the image bytes.
     if (tool.current === selectTool) {
+      const sels = selectTool.getSelections()
+      // Multi-selection (or any selection that includes strokes / texts)
+      // → render as PNG. The single-image fast path below keeps the
+      // raw-bytes route for an image-only single selection.
+      if (sels.length > 1) {
+        e.preventDefault()
+        void (async () => {
+          const blob = await renderSelectMultiAsPng()
+          if (blob) await writePngBlobToClipboard(blob, showInfoToast)
+        })()
+        return
+      }
+      // Single-image selection → copy the original image bytes (full
+      // quality round-trip, faster, and preserves original format).
       const img = selectTool.getSelectedImage()
-      if (!img) return
-      e.preventDefault()
-      void writeImageToClipboard(img, clipboardImageDeps)
+      if (img) {
+        e.preventDefault()
+        void writeImageToClipboard(img, clipboardImageDeps)
+        return
+      }
+      // Single non-image selection (text or stroke) → render as PNG.
+      if (sels.length === 1) {
+        e.preventDefault()
+        void (async () => {
+          const blob = await renderSelectMultiAsPng()
+          if (blob) await writePngBlobToClipboard(blob, showInfoToast)
+        })()
+      }
     }
   }
 
   const onCut = (e: ClipboardEvent): void => {
     if (isTextEditableTarget(e.target)) return
 
-    if (tool.current === lassoTool && lassoTool.hasSelection()) {
-      e.preventDefault()
-      void (async () => {
-        const blob = await renderLassoSelectionAsPng()
-        if (!blob) return
-        const written = await writePngBlobToClipboard(blob, showInfoToast)
-        // Only delete after the clipboard write succeeded — same data-
-        // loss-prevention rule as the image cut path.
-        if (written) lassoTool.deleteSelection()
-      })()
-      return
-    }
-
     if (tool.current === selectTool) {
+      const sels = selectTool.getSelections()
+      if (sels.length > 1) {
+        e.preventDefault()
+        void (async () => {
+          const blob = await renderSelectMultiAsPng()
+          if (!blob) return
+          const written = await writePngBlobToClipboard(blob, showInfoToast)
+          // Only delete after the clipboard write succeeded — same data-
+          // loss-prevention rule as the single-image cut path.
+          if (written) selectTool.deleteSelected()
+        })()
+        return
+      }
+      // Single-image fast path: image bytes.
       const img = selectTool.getSelectedImage()
-      if (!img) return
-      e.preventDefault()
-      void (async () => {
-        const written = await writeImageToClipboard(img, clipboardImageDeps)
-        if (written) selectTool.deleteSelected()
-      })()
+      if (img) {
+        e.preventDefault()
+        void (async () => {
+          const written = await writeImageToClipboard(img, clipboardImageDeps)
+          if (written) selectTool.deleteSelected()
+        })()
+        return
+      }
+      // Single non-image (text or stroke) → PNG.
+      if (sels.length === 1) {
+        e.preventDefault()
+        void (async () => {
+          const blob = await renderSelectMultiAsPng()
+          if (!blob) return
+          const written = await writePngBlobToClipboard(blob, showInfoToast)
+          if (written) selectTool.deleteSelected()
+        })()
+      }
     }
   }
   document.addEventListener('copy', onCopy)
@@ -1164,7 +1166,6 @@ async function main(): Promise<void> {
         setBrushId('pen')
       },
       selectEraserSticky: () => setTool('eraser'),
-      selectLassoTool: () => setTool('lasso'),
       selectSelectTool: () => setTool('select'),
       selectLaserTool: () => setTool('laser'),
       selectTextTool: () => setTool('text'),
@@ -1176,11 +1177,9 @@ async function main(): Promise<void> {
       toggleTextItalic: () => toggleTextFormat('italic'),
       toggleTextUnderline: () => toggleTextFormat('underline'),
       deleteSelection: () => {
-        // Multi-aware Select tool owns the single-and-multi delete path.
-        // Lasso retains its own bulk-stroke delete for now (until it's
-        // removed in Phase B6).
+        // Multi-aware Select tool owns the single-and-multi delete path
+        // for all object kinds (Lasso absorbed; ADR 0014).
         if (tool.current === selectTool && selectTool.deleteSelected()) return true
-        if (tool.current === lassoTool && lassoTool.deleteSelection()) return true
         return false
       },
       selectAll: () => {
@@ -1211,16 +1210,9 @@ async function main(): Promise<void> {
         if (clearFlow.cancel()) handled = true
         if (dismissAllPopovers()) handled = true
         // Esc clears any Select-tool selection (single or multi). Mirrors
-        // Esc in Lasso (clear in-progress / pending selection).
+        // Esc clears any Select-tool selection (single or multi).
         if (tool.current === selectTool && selectTool.getSelections().length > 0) {
           selectTool.clearSelection()
-          handled = true
-        }
-        // Esc in lasso mode falls back to the pen tool. The lasso's `cleanup`
-        // hook (called from `setTool`) clears any in-progress polygon and
-        // selection state, so switching is a clean reset.
-        if (tool.current === lassoTool) {
-          setTool('pen')
           handled = true
         }
         // Double-Esc toggle: if THIS Esc cancelled real state, reset the
@@ -1304,11 +1296,6 @@ async function main(): Promise<void> {
       clearLayer(target.strokes)
       applyCamera(target.strokes, camera, target.dpr)
 
-      // Strokes the lasso is live-moving are skipped here and ghost-painted
-      // on live by the lasso's `redraw()` at offset.
-      const dragState = tool.current === lassoTool ? lassoTool.getDragState() : null
-      const draggingIds = dragState?.ids
-
       // Pending stamps are read through the EraserTool's `getPendingStamps`
       // extension (in-flight wipe sweep not yet committed); skipped if a
       // different tool is active.
@@ -1316,7 +1303,6 @@ async function main(): Promise<void> {
 
       for (const s of strokes) {
         if (s.deleted) continue
-        if (draggingIds?.has(s.id)) continue
         if (!bboxesIntersect(getStrokeBBox(s), viewBBox)) continue
         const path = getStrokePath(s, [], true)
         if (!path) continue

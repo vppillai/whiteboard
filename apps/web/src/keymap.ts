@@ -37,11 +37,11 @@ export interface KeyHandlers {
   /** Activate the eraser tool persistently (sticky toggle). Bound to Shift+E
    *  because plain E is pure spring-loaded — see `eraserhold.ts`. */
   selectEraserSticky: () => void
-  /** Activate the lasso tool. Bound to `S`. */
-  selectLassoTool: () => void
-  /** Activate the Select tool for floating-object manipulation (images,
-   *  texts, and strokes). Bound to `V` — the Figma / Sketch / Excalidraw
-   *  convention for the universal pointer / select tool. */
+  /** Activate the Select tool for object manipulation (images, texts,
+   *  and strokes) — single-object and multi-object. Bound to `V` (the
+   *  Figma / Sketch / Excalidraw convention for the universal pointer
+   *  / select tool) AND `S` (preserved muscle memory from the v1.x
+   *  lasso tool, which Select absorbed in v1.3). */
   selectSelectTool: () => void
   /** Activate the laser pointer tool. Bound to `L`. Ephemeral fading
    *  trail for presentations; nothing persisted. */
@@ -57,12 +57,13 @@ export interface KeyHandlers {
   toggleTextBold: () => void
   toggleTextItalic: () => void
   toggleTextUnderline: () => void
-  /** Delete the active selection (lasso). Returns `true` if anything was
-   *  actually deleted; the dispatcher uses this to decide whether to
-   *  preventDefault (so Backspace doesn't trigger browser history-back). */
+  /** Delete the active Select-tool selection (single or multi). Returns
+   *  `true` if anything was actually deleted; the dispatcher uses this
+   *  to decide whether to preventDefault (so Backspace doesn't trigger
+   *  browser history-back). */
   deleteSelection: () => boolean
-  /** Select all non-deleted strokes via the lasso. Activates lasso if not
-   *  already active. */
+  /** Select all non-deleted objects across all kinds (strokes + images
+   *  + texts). Activates the Select tool if not already active. */
   selectAll: () => void
   /** Toggle the settings side panel (Cmd/Ctrl+,). Open if closed, dismiss if
    *  open — single-instance side panel handles the toggle semantics. */
@@ -162,9 +163,10 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       return
     }
 
-    // Delete / Backspace removes the lasso selection. preventDefault only on
-    // success so Backspace can still go-back when there's no selection (and
-    // when typed into a focused input — there are none in v1, but future-proof).
+    // Delete / Backspace removes the Select-tool selection. preventDefault
+    // only on success so Backspace can still go-back when there's no
+    // selection (and when typed into a focused input — there are none in
+    // v1, but future-proof).
     if (!meta && !alt && (e.key === 'Delete' || e.key === 'Backspace')) {
       if (handlers.deleteSelection()) e.preventDefault()
       return
@@ -201,13 +203,11 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
         handlers.selectPenDefault()
         return
       }
-      if (k === 's') {
-        handlers.selectLassoTool()
-        return
-      }
-      // V — Select tool (universal pointer for images / texts / strokes).
-      // Figma / Sketch / Excalidraw convention.
-      if (k === 'v') {
+      // V AND S — Select tool (universal pointer for any object kind).
+      // V follows the Figma / Sketch / Excalidraw convention; S is
+      // preserved muscle-memory from the v1.x lasso tool that Select
+      // absorbed in v1.3.
+      if (k === 'v' || k === 's') {
         handlers.selectSelectTool()
         return
       }

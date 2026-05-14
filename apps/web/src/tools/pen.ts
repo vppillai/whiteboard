@@ -1,5 +1,5 @@
 /**
- * Pen / drawing tool. The only tool that produces strokes; eraser, lasso,
+ * Pen / drawing tool. The only tool that produces strokes; eraser,
  * laser, text are separate `Tool` implementations.
  *
  * Owns:

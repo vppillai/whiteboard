@@ -19,7 +19,7 @@
  *   - Click empty space → deselect.
  *   - Delete / Backspace removes (soft-delete) with undo.
  *
- * Pen / Eraser / Lasso treat all objects as inert — no hit-test, no
+ * Pen / Eraser treat all objects as inert — no hit-test, no
  * handles. Selection state is held inside the tool and discarded on
  * tool switch (committing any in-flight drag op first — see
  * `cleanup()`).
