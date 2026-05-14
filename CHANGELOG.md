@@ -12,9 +12,11 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 - **Shape tool with rect / ellipse / line / arrow sub-modes.** Drag-to-create, Shift = constrain (square / circle / 45° lines). Sticky `shapeKind` remembers the last-picked sub-mode across tool re-entries.
 - **R / O / A / L keyboard shortcuts** activate the Shape tool AND set the sub-mode in one keystroke.
+- **Fill-opacity slider** (per-shape) in both the Shape tool's contextual menu and the Select-tool's shape menu. Default 25%; range 5%–100%. Each shape captures the sticky opacity at creation so the slider doesn't retroactively retint existing shapes. Slider commits ONE undoable op per drag (on pointerup), not per slider-step.
 - **Cmd+C / Cmd+V round-trips shapes** inside the whiteboard via the existing `data-whiteboard-v1` bundle (no schema break — `shapes` is an additive optional field). External paste targets still get a PNG.
 - **PNG / SVG / PDF exports include shapes.** SVG export emits native `<rect>`, `<ellipse>`, `<line>`, and `<line>+<polyline>` for arrow head — so the exported file stays editable as shapes in other vector tools.
-- **Select tool integrates shapes** as a first-class kind. Move / resize / rotate / multi-select / marquee / delete all work the same as for images / texts; the contextual menu picks up a Color / Stroke width / Fill row when a single shape is selected.
+- **Select tool integrates shapes** as a first-class kind. Move / resize / rotate / multi-select / marquee / delete all work the same as for images / texts; the contextual menu picks up a Color / Stroke width / Fill / Fill opacity row when a single shape is selected. Line/arrow resize is **endpoint-based** rather than AABB-based so dragging an end past its origin flips the line direction naturally.
+- **Right-click tool menu overhaul.** Icon-only pills with hover-tooltips (name + shortcut). Tool row split into 2 rows of 3. Shared swatch palette (curated + custom + "+") across every per-tool COLOR section, matching the standalone Color picker. Hover-revealed × badge on custom swatches deletes the color inline. Pinned menu persists across browser sessions (localStorage), survives Esc, auto-rebuilds when settings change, and auto-reappears at its saved anchor on page refresh. Tool changes via keyboard / double-Esc broadcast to the pinned menu so its contextual section refreshes for the new tool.
 
 ### Changed
 

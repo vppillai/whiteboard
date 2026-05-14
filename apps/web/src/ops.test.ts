@@ -263,21 +263,25 @@ describe('ops: shape op kinds', () => {
     expect(h.ctx.shapes[0]?.rotation).toBeUndefined()
   })
 
-  test('edit-shape swaps color / strokeWidth / fill', () => {
-    const h = mkShapeHarness([mkShape('s1', { color: 'ink', strokeWidth: 2, fill: undefined })])
+  test('edit-shape swaps color / strokeWidth / fill / fillOpacity', () => {
+    const h = mkShapeHarness([
+      mkShape('s1', { color: 'ink', strokeWidth: 2, fill: undefined, fillOpacity: undefined }),
+    ])
     const op: Op = {
       kind: 'edit-shape',
       shapeId: 's1',
-      before: { color: 'ink', strokeWidth: 2, fill: undefined },
-      after: { color: '#ff0000', strokeWidth: 4, fill: '#ffeeee' },
+      before: { color: 'ink', strokeWidth: 2, fill: undefined, fillOpacity: undefined },
+      after: { color: '#ff0000', strokeWidth: 4, fill: '#ffeeee', fillOpacity: 0.5 },
     }
     applyOp(op, h.ctx)
     expect(h.ctx.shapes[0]?.color).toBe('#ff0000')
     expect(h.ctx.shapes[0]?.strokeWidth).toBe(4)
     expect(h.ctx.shapes[0]?.fill).toBe('#ffeeee')
+    expect(h.ctx.shapes[0]?.fillOpacity).toBe(0.5)
     unapplyOp(op, h.ctx)
     expect(h.ctx.shapes[0]?.color).toBe('ink')
     expect(h.ctx.shapes[0]?.fill).toBeUndefined()
+    expect(h.ctx.shapes[0]?.fillOpacity).toBeUndefined()
   })
 
   test('transform-many carries shape variants alongside images / texts', () => {

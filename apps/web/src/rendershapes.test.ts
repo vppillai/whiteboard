@@ -131,4 +131,22 @@ describe('rendershapes: pointInShape', () => {
     // A point far from the rotated line should not hit.
     expect(pointInShape({ x: 200, y: 200 }, s, 1)).toBe(false)
   })
+
+  it('rotated line: points along the visually-rendered segment hit', () => {
+    // Horizontal line transform — pre-rotation it runs (10, 30) →
+    // (90, 30). Rotated 90° CCW around its center (50, 30), the visible
+    // segment is vertical at x=50, y from -10 to 70. Verify a sample
+    // of points along that visible segment all hit the test.
+    const s = mkShape({
+      shape: 'line',
+      transform: { x: 10, y: 30, w: 80, h: 0 },
+      rotation: Math.PI / 2,
+      strokeWidth: 2,
+    })
+    expect(pointInShape({ x: 50, y: 0 }, s, 1)).toBe(true) // midway up
+    expect(pointInShape({ x: 50, y: 30 }, s, 1)).toBe(true) // center
+    expect(pointInShape({ x: 50, y: 60 }, s, 1)).toBe(true) // midway down
+    // A point clearly off the rotated segment should miss.
+    expect(pointInShape({ x: 80, y: 30 }, s, 1)).toBe(false)
+  })
 })

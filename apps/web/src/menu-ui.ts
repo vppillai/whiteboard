@@ -70,8 +70,17 @@ export function pill(opts: PillOptions): HTMLButtonElement {
   }
   const title = composeTitle(opts)
   btn.title = title
-  btn.setAttribute('aria-label', opts.label)
-  if (opts.active) btn.classList.add('active')
+  // aria-label uses the composed title so screen readers announce
+  // "Rectangle, R" instead of just "Rectangle" — the shortcut is
+  // discoverable for keyboard users without sighted access to the
+  // tooltip. v1.4 review fix.
+  btn.setAttribute('aria-label', title)
+  if (opts.active) {
+    btn.classList.add('active')
+    btn.setAttribute('aria-pressed', 'true')
+  } else {
+    btn.setAttribute('aria-pressed', 'false')
+  }
   if (opts.disabled) {
     btn.classList.add('disabled')
     btn.disabled = true
@@ -96,15 +105,7 @@ export interface FullItemOptions {
   onClick: () => void
 }
 
-export function fullItem(
-  labelOrOpts: string | FullItemOptions,
-  onClick?: () => void,
-): HTMLButtonElement {
-  // Backward-compat: old (label, onClick) shape is preserved.
-  const opts: FullItemOptions =
-    typeof labelOrOpts === 'string'
-      ? { label: labelOrOpts, onClick: onClick ?? ((): void => undefined) }
-      : labelOrOpts
+export function fullItem(opts: FullItemOptions): HTMLButtonElement {
   const btn = document.createElement('button')
   btn.type = 'button'
   btn.className = 'whiteboard-tool-item'
@@ -129,33 +130,4 @@ export function fullItem(
   }
   btn.addEventListener('click', opts.onClick)
   return btn
-}
-
-export interface SwatchOptions {
-  color: string
-  /** Active highlight (e.g. matches the current brush color). */
-  active?: boolean
-  /** Title / aria-label override. Defaults to the color string. */
-  title?: string
-  onClick: () => void
-}
-
-export function swatch(opts: SwatchOptions): HTMLButtonElement {
-  const sw = document.createElement('button')
-  sw.type = 'button'
-  sw.className = 'whiteboard-color-swatch whiteboard-color-swatch-small'
-  sw.dataset.color = opts.color
-  sw.title = opts.title ?? (opts.color === 'ink' ? 'theme ink' : opts.color)
-  sw.setAttribute('aria-label', sw.title)
-  if (opts.color === 'ink') sw.classList.add('whiteboard-color-swatch-ink')
-  else sw.style.background = opts.color
-  if (opts.active) sw.classList.add('active')
-  sw.addEventListener('click', opts.onClick)
-  return sw
-}
-
-export function paletteGrid(): HTMLDivElement {
-  const el = document.createElement('div')
-  el.className = 'whiteboard-tools-palette'
-  return el
 }

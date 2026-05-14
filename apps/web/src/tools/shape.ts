@@ -26,14 +26,14 @@
  * code (drag → transform encode → commit op); only the in-flight render
  * dispatches on `kind`.
  *
- * Live-layer rendering reuses the same drawing primitives as the
- * committed-layer pass in renderShapes.ts via the `drawInFlightShape`
- * helper there — duplicated logic would risk drift between in-flight
- * preview and final committed look.
+ * Live-layer rendering reuses `drawShape` from renderShapes.ts so the
+ * in-flight preview and the final committed render are pixel-identical
+ * — no risk of "looks different after you finish drawing" drift.
  */
 
 import type { ShapeKind, ShapeObject } from '@whiteboard/shared'
 import { makeShapeId } from '../ids'
+import { buildFillOpacitySlider } from '../menu-fillopacity'
 import {
   iconFillOutline,
   iconFillSolid,
@@ -46,7 +46,7 @@ import {
 import { pill, pillRow, sectionLabel, separator } from '../menu-ui'
 import type { Op } from '../ops'
 import { applyCamera, clearLayer } from '../render'
-import { drawInFlightShape } from '../rendershapes'
+import { drawShape } from '../rendershapes'
 import {
   getShapeColor,
   getShapeFillEnabled,
@@ -69,53 +69,6 @@ const MIN_BOARD_PX = 2
 
 /** Stroke-width options surfaced in the contextual menu (board pixels). */
 const STROKE_WIDTH_OPTIONS: readonly number[] = [1, 2, 4, 8]
-
-/** Fill-opacity slider range (clamped to the same bounds the settings
- *  module enforces). Step is fine enough for smooth feel but coarse
- *  enough that the live label reads as a clean two-decimal number. */
-const OPACITY_MIN = 0.05
-const OPACITY_MAX = 1.0
-const OPACITY_STEP = 0.05
-
-interface OpacitySliderDeps {
-  get(): number
-  set(v: number): void
-  disabled: boolean
-}
-
-/** Build a labeled opacity slider row. Lives outside renderContextual-
- *  Menu so the Select tool's shape menu can reuse the same widget
- *  (write semantics there: write per-shape via edit-shape op, not the
- *  sticky setting). */
-function buildFillOpacitySlider(deps: OpacitySliderDeps): HTMLDivElement {
-  const row = document.createElement('div')
-  row.className = 'whiteboard-tools-row whiteboard-fillopacity-row'
-
-  const slider = document.createElement('input')
-  slider.type = 'range'
-  slider.min = String(OPACITY_MIN)
-  slider.max = String(OPACITY_MAX)
-  slider.step = String(OPACITY_STEP)
-  slider.value = String(deps.get())
-  slider.className = 'whiteboard-fillopacity-slider'
-  slider.disabled = deps.disabled
-  slider.setAttribute('aria-label', 'Fill opacity')
-
-  const readout = document.createElement('span')
-  readout.className = 'whiteboard-fillopacity-readout'
-  const renderValue = (v: number): string => `${Math.round(v * 100)}%`
-  readout.textContent = renderValue(deps.get())
-
-  slider.addEventListener('input', () => {
-    const v = Number(slider.value)
-    deps.set(v)
-    readout.textContent = renderValue(v)
-  })
-
-  row.appendChild(slider)
-  row.appendChild(readout)
-  return row
-}
 
 /** Shape sub-mode entries for the contextual menu. Order matches the
  *  keymap (R/O/A/L per the v1.4 brief). Each entry carries a label
@@ -215,7 +168,7 @@ export function createShapeTool(deps: ShapeToolDeps): ShapeTool {
     clearLayer(ctx.liveLayer)
     if (!drag) return
     applyCamera(ctx.liveLayer, ctx.camera, ctx.dpr)
-    drawInFlightShape(ctx.liveLayer.ctx, drag.shape, ctx.resolveColor)
+    drawShape(ctx.liveLayer.ctx, drag.shape, ctx.resolveColor)
   }
 
   return {
@@ -394,12 +347,16 @@ export function createShapeTool(deps: ShapeToolDeps): ShapeTool {
       // existing shapes). Disabled when fill is off OR the current
       // sub-mode is line/arrow (no fill semantics there).
       host.appendChild(sectionLabel('Fill opacity'))
-      const opacityRow = buildFillOpacitySlider({
-        get: getShapeFillOpacity,
-        set: setShapeFillOpacity,
-        disabled: !supportsFill || !fillOn,
-      })
-      host.appendChild(opacityRow)
+      host.appendChild(
+        buildFillOpacitySlider({
+          get: getShapeFillOpacity,
+          disabled: !supportsFill || !fillOn,
+          // No live preview: the sticky setter only affects FUTURE
+          // shapes, so there's nothing to redraw on the current
+          // canvas during the scrub.
+          onCommit: (v) => setShapeFillOpacity(v),
+        }),
+      )
     },
 
     setKind(kind) {

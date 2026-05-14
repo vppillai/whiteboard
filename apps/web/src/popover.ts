@@ -208,10 +208,14 @@ export function showPopover(opts: PopoverOptions): Popover {
     header.setPointerCapture(e.pointerId)
     header.style.cursor = 'grabbing'
     // Once user drags, become pinned — they want to keep this popover open
-    // to interact with it from a new position.
+    // to interact with it from a new position. v1.4 fix: also fire
+    // onPinnedChange so external state (e.g. toolmenu's localStorage
+    // mirror) stays in sync — the previous direct mutation here
+    // bypassed the callback and diverged the persisted pin flag.
     if (!pinned) {
       pinned = true
       syncPinUI()
+      opts.onPinnedChange?.(pinned)
     }
   })
   header.addEventListener('pointermove', (e: PointerEvent) => {

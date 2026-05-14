@@ -96,22 +96,11 @@ export function renderShapes(params: RenderShapesParams): void {
   }
 }
 
-/**
- * Public alias for `drawShape` — used by the Shape tool's live-layer
- * pointermove path to render the in-flight preview with the SAME draw
- * primitives the committed pass uses. Pulling it through a named export
- * (rather than inlining the dispatch in shape.ts) guarantees the live
- * preview never visually drifts from the final committed look.
- */
-export function drawInFlightShape(
-  ctx: CanvasRenderingContext2D,
-  s: ShapeObject,
-  resolveColor: (token: string) => string,
-): void {
-  drawShape(ctx, s, resolveColor)
-}
-
-function drawShape(
+/** Draw a single shape onto a 2D canvas context. Exported so the Shape
+ *  tool's live-layer pointermove can render the in-flight preview with
+ *  the SAME draw call the committed render pass uses — eliminates any
+ *  drift between the preview and the final committed look. */
+export function drawShape(
   ctx: CanvasRenderingContext2D,
   s: ShapeObject,
   resolveColor: (token: string) => string,

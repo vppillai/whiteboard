@@ -173,8 +173,11 @@ export type Op =
    * one undoable step. Coalesced at the contextual-menu interaction
    * scope. Stores the full before/after payload because individual
    * field deltas would multiply op kinds — the payload is small
-   * (three primitives) so simplicity wins. `fill` may be `undefined`
-   * (outline-only) or a color token; both round-trip cleanly.
+   * so simplicity wins. `fill` may be `undefined` (outline-only) or a
+   * color token; both round-trip cleanly. `fillOpacity` may be
+   * `undefined` (renderer applies its default alpha) or a number in
+   * [0.05, 1.0]. Carrying it on the op is what makes the fill-opacity
+   * slider in the Select-tool's shape menu fully undoable.
    */
   | {
       kind: 'edit-shape'
@@ -183,11 +186,13 @@ export type Op =
         color: string
         strokeWidth: number
         fill: string | undefined
+        fillOpacity: number | undefined
       }
       after: {
         color: string
         strokeWidth: number
         fill: string | undefined
+        fillOpacity: number | undefined
       }
     }
   /**
@@ -573,9 +578,10 @@ function setShapeRotation(ctx: OpContext, id: string, rotation: number): void {
   ctx.saveShape(s)
 }
 
-/** Apply an edit-shape op's payload (color / strokeWidth / fill) to the
- *  matching shape. Mirrors `setTextEdit` — stores the full payload because
- *  the field count is small and field-deltas would multiply op kinds. */
+/** Apply an edit-shape op's payload (color / strokeWidth / fill /
+ *  fillOpacity) to the matching shape. Mirrors `setTextEdit` — stores
+ *  the full payload because the field count is small and field-deltas
+ *  would multiply op kinds. */
 function setShapeEdit(
   ctx: OpContext,
   id: string,
@@ -583,6 +589,7 @@ function setShapeEdit(
     color: string
     strokeWidth: number
     fill: string | undefined
+    fillOpacity: number | undefined
   },
 ): void {
   const s = ctx.shapes.find((x) => x.id === id)
@@ -590,5 +597,6 @@ function setShapeEdit(
   s.color = payload.color
   s.strokeWidth = payload.strokeWidth
   s.fill = payload.fill
+  s.fillOpacity = payload.fillOpacity
   ctx.saveShape(s)
 }

@@ -78,6 +78,7 @@ import type {
   TextObject,
 } from '@whiteboard/shared'
 import { imageAABB, imageCenter, pointInImage, rotateAroundPoint } from '../imagegeom'
+import { buildFillOpacitySlider } from '../menu-fillopacity'
 import { iconFillOutline, iconFillSolid, iconStrokeWidth } from '../menu-icons'
 import { pill, pillRow, sectionLabel, separator } from '../menu-ui'
 import type { Op, TransformManyItem } from '../ops'
@@ -476,12 +477,18 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     }
   }
 
-  /** Top-most non-deleted object whose rotated rect (image / text) or
-   *  per-sample tolerance ring (stroke) contains the board-space point.
-   *  Priority order matches the visual stack (top → bottom):
-   *    1. Texts (above images per the render order)
-   *    2. Images
-   *    3. Strokes (drawn on top of images + texts on the composite, but
+  /** Top-most non-deleted object whose rotated rect (image / text /
+   *  shape) or per-sample tolerance ring (stroke) contains the
+   *  board-space point. Priority order matches the visual stack
+   *  (top → bottom):
+   *    1. Shapes — render ABOVE texts per renderShapes.ts ordering, so
+   *       a circle drawn over a label is clickable as the circle, not
+   *       the label underneath. The original v1.4 ordering checked
+   *       texts first; that contradicted the render stack and was
+   *       fixed during the v1.4 review pass.
+   *    2. Texts (above images per the render order)
+   *    3. Images
+   *    4. Strokes (drawn on top of images + texts on the composite, but
    *       semantically "behind" the floating objects for selection
    *       purposes — clicking a text-on-top-of-stroke should select the
    *       text, not the stroke beneath)
@@ -490,12 +497,6 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
    *  tolerance) — a pixel-perfect stroke-outline test would be more
    *  expensive without meaningfully improving the UX. */
   function objectAt(boardX: number, boardY: number, scale: number): Selection | null {
-    const texts = [...deps.getTexts()].filter((t) => !t.deleted).sort((a, b) => b.z - a.z)
-    for (const t of texts) {
-      if (pointInText({ x: boardX, y: boardY }, t)) {
-        return { kind: 'text', id: t.id }
-      }
-    }
     // Shapes — same screen-tolerance as strokes so thin lines / arrows
     // are reliably tap-selectable at any zoom. Rect / ellipse with fill
     // hit the whole interior; outline-only hit near the boundary.
@@ -505,6 +506,12 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     for (const sh of shapes) {
       if (pointInShape({ x: boardX, y: boardY }, sh, shapeTol)) {
         return { kind: 'shape', id: sh.id }
+      }
+    }
+    const texts = [...deps.getTexts()].filter((t) => !t.deleted).sort((a, b) => b.z - a.z)
+    for (const t of texts) {
+      if (pointInText({ x: boardX, y: boardY }, t)) {
+        return { kind: 'text', id: t.id }
       }
     }
     const imgs = [...deps.getImages()].filter((i) => !i.deleted).sort((a, b) => b.z - a.z)
@@ -1405,6 +1412,53 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     }
   }
 
+  /** Endpoint-based resize for line / arrow shapes. The dragged
+   *  corner becomes the new endpoint; the opposite corner (the
+   *  anchor) stays put in board space. Returns a transform with
+   *  `{ x, y }` at the anchor and `{ w, h }` as the pointer-relative
+   *  offset — sign-preserved, so dragging past the anchor flips the
+   *  line direction naturally. Rotation is honored by stashing the
+   *  anchor and pointer in the rotated-local frame, computing the
+   *  axis-aligned line there, and re-rotating the result.
+   *
+   *  Why this is different from the rect/ellipse `applyResize`:
+   *  lines/arrows encode direction in the sign of `transform.w/h`,
+   *  but `applyResize` takes `Math.abs` of the deltas. That throws
+   *  away the sign and locks the line at a minSide nub when the
+   *  user drags an end past its origin. Endpoint-based math avoids
+   *  the abs entirely. v1.4 fix. */
+  function applyLineResize(
+    rotation: number,
+    anchorBoard: { x: number; y: number },
+    pointerBoard: { x: number; y: number },
+  ): ImageObject['transform'] {
+    // For non-rotated lines the math is trivial: transform.{x,y} =
+    // anchor, transform.{w,h} = pointer - anchor.
+    if (rotation === 0) {
+      return {
+        x: anchorBoard.x,
+        y: anchorBoard.y,
+        w: pointerBoard.x - anchorBoard.x,
+        h: pointerBoard.y - anchorBoard.y,
+      }
+    }
+    // For rotated lines we need to express the endpoint as the
+    // pre-rotation offset from the anchor. Compute the delta in
+    // world coords, then inverse-rotate it into the shape's local
+    // frame. transform.{x,y} stays at the anchor; transform.{w,h}
+    // is the LOCAL offset to the new endpoint.
+    const cos = Math.cos(rotation)
+    const sin = Math.sin(rotation)
+    const vx = pointerBoard.x - anchorBoard.x
+    const vy = pointerBoard.y - anchorBoard.y
+    return {
+      x: anchorBoard.x,
+      y: anchorBoard.y,
+      w: vx * cos + vy * sin,
+      h: -vx * sin + vy * cos,
+    }
+  }
+
   /** Build the contextual menu for a shape selection (color / stroke
    *  width / fill toggle). Mirrors the Shape tool's own menu so style
    *  edits work in either mode. Each change emits an `edit-shape` op
@@ -1530,37 +1584,41 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     )
     host.appendChild(fillRow)
 
-    // Fill opacity slider — live-edits the selected shape. Disabled
-    // when (a) the kind doesn't support fill (line/arrow), OR (b)
-    // fill is off. Each slider movement emits an edit-shape op so
-    // undo restores the prior alpha — noisy but matches the user
-    // mental model where every visible change is undoable.
+    // Fill opacity slider — uses the shared `buildFillOpacitySlider`
+    // helper so the widget visual matches the Shape tool's menu.
+    // Live preview during `input` (mutates the shape + saves +
+    // marks dirty so the canvas re-renders). On `change` (pointerup
+    // / keyboard release) the helper supplies the scrub-start value
+    // so we emit exactly ONE edit-shape op per drag with the correct
+    // pre-scrub `before` payload.
     host.appendChild(sectionLabel('Fill opacity'))
-    const sliderRow = document.createElement('div')
-    sliderRow.className = 'whiteboard-tools-row whiteboard-fillopacity-row'
-    const slider = document.createElement('input')
-    slider.type = 'range'
-    slider.min = '0.05'
-    slider.max = '1.0'
-    slider.step = '0.05'
-    slider.value = String(sh.fillOpacity ?? getShapeFillOpacity())
-    slider.className = 'whiteboard-fillopacity-slider'
-    slider.disabled = !supportsFill || !fillOn
-    slider.setAttribute('aria-label', 'Fill opacity')
-    const readout = document.createElement('span')
-    readout.className = 'whiteboard-fillopacity-readout'
-    const renderValue = (v: number): string => `${Math.round(v * 100)}%`
-    readout.textContent = renderValue(Number(slider.value))
-    slider.addEventListener('input', () => {
-      const v = Number(slider.value)
-      readout.textContent = renderValue(v)
-      applyEdit((s) => {
-        s.fillOpacity = v
-      })
-    })
-    sliderRow.appendChild(slider)
-    sliderRow.appendChild(readout)
-    host.appendChild(sliderRow)
+    host.appendChild(
+      buildFillOpacitySlider({
+        get: () => sh.fillOpacity ?? getShapeFillOpacity(),
+        disabled: !supportsFill || !fillOn,
+        onPreview: (v) => {
+          sh.fillOpacity = v
+          deps.saveShape(sh)
+          deps.markCommittedDirty()
+        },
+        onCommit: (v, scrubStart) => {
+          if (scrubStart === null || v === scrubStart) return
+          const before: EditPayload = {
+            color: sh.color,
+            strokeWidth: sh.strokeWidth,
+            fill: sh.fill,
+            fillOpacity: scrubStart,
+          }
+          const after: EditPayload = {
+            color: sh.color,
+            strokeWidth: sh.strokeWidth,
+            fill: sh.fill,
+            fillOpacity: v,
+          }
+          deps.pushOp({ kind: 'edit-shape', shapeId: sh.id, before, after })
+        },
+      }),
+    )
   }
 
   return {
@@ -1889,23 +1947,36 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
             e.shiftKey,
           )
         } else if (view.selection.kind === 'shape') {
-          // Shapes have no natural aspect — shift = preserve the drag-
-          // start aspect (so lines / rects keep their proportions).
-          // minSide = 1 (vs the image default of 16) because lines /
-          // arrows legitimately have near-zero w or h in their
-          // direction encoding.
           const sh = view.obj as ShapeObject
-          const beforeAspect = drag.before.h !== 0 ? drag.before.w / drag.before.h : 1
-          sh.transform = applyResize(
-            drag.before,
-            drag.beforeRotation,
-            drag.kind.resize,
-            drag.kind.anchorBoard,
-            { x: bx, y: by },
-            beforeAspect,
-            e.shiftKey,
-            1,
-          )
+          if (sh.shape === 'line' || sh.shape === 'arrow') {
+            // Line / arrow resize is endpoint-based, not AABB-based:
+            // the dragged corner becomes the new endpoint, the
+            // opposite corner stays at the anchor. This is the only
+            // resize math that lets a user drag a line end PAST its
+            // origin and have the line flip direction (negative w/h
+            // in the transform). The AABB-based applyResize would
+            // take Math.abs of the deltas and lose the direction.
+            sh.transform = applyLineResize(drag.beforeRotation, drag.kind.anchorBoard, {
+              x: bx,
+              y: by,
+            })
+          } else {
+            // Rect / ellipse — AABB-based resize like images, but
+            // with no natural aspect (shift = preserve drag-start
+            // aspect) and minSide=1 so very thin rects don't get
+            // clamped up.
+            const beforeAspect = drag.before.h !== 0 ? drag.before.w / drag.before.h : 1
+            sh.transform = applyResize(
+              drag.before,
+              drag.beforeRotation,
+              drag.kind.resize,
+              drag.kind.anchorBoard,
+              { x: bx, y: by },
+              beforeAspect,
+              e.shiftKey,
+              1,
+            )
+          }
         } else {
           const t = view.obj as TextObject
           if (drag.beforeFontSize !== null && drag.beforeTextSnapshot !== null) {

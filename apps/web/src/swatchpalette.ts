@@ -86,13 +86,14 @@ function makeSwatch(color: string, isCustom: boolean, opts: SwatchPaletteOptions
   // accessible and DOM-legal. position: absolute on the badge anchors
   // it to the swatch's top-right corner via position: relative on
   // .whiteboard-color-swatch.
-  if (isCustom) sw.appendChild(makeDeleteBadge(color, opts))
+  if (isCustom) sw.appendChild(makeSwatchDeleteBadge(color, opts.onPaletteChanged))
   return sw
 }
 
 /** Build the × delete badge that overlays a custom swatch's top-right
  *  corner. Visible on hover (CSS-driven). Click removes the swatch and
- *  fires `onPaletteChanged` so the host menu rebuilds.
+ *  fires the supplied `onAfterDelete` callback so the host can refresh
+ *  its rendering.
  *
  *  Implemented as a <span role="button"> (not a <button>) so it can
  *  sit INSIDE the swatch button element — HTML5 disallows interactive
@@ -102,8 +103,12 @@ function makeSwatch(color: string, isCustom: boolean, opts: SwatchPaletteOptions
  *
  *  `stopPropagation` on pointerdown is critical — without it, the
  *  click also reaches the parent swatch button and fires onPick on
- *  the now-deleted color, picking it back into the active state. */
-function makeDeleteBadge(color: string, opts: SwatchPaletteOptions): HTMLElement {
+ *  the now-deleted color, picking it back into the active state.
+ *
+ *  Exported and reused by both the right-click swatch palette and
+ *  the standalone Color picker (Shift+C) — same DOM, same accessibility,
+ *  same event semantics. */
+export function makeSwatchDeleteBadge(color: string, onAfterDelete?: () => void): HTMLElement {
   const el = document.createElement('span')
   el.className = 'whiteboard-color-swatch-delete'
   el.setAttribute('role', 'button')
@@ -115,7 +120,7 @@ function makeDeleteBadge(color: string, opts: SwatchPaletteOptions): HTMLElement
     e.preventDefault()
     e.stopPropagation()
     removeCustomSwatch(color)
-    opts.onPaletteChanged?.()
+    onAfterDelete?.()
   }
   el.addEventListener('pointerdown', handler)
   el.addEventListener('click', handler)

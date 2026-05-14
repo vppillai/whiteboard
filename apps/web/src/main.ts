@@ -275,15 +275,27 @@ async function main(): Promise<void> {
   const images: ImageObject[] = []
   const texts: TextObject[] = []
   const shapes: ShapeObject[] = []
-  // Shared next-z sequence for images + texts so the user-visible stack
-  // order interleaves naturally between object types. New objects always
-  // appear above all existing ones.
+  // Shared next-z sequence for images + texts + shapes so the user-
+  // visible stack order interleaves naturally between object types.
+  // New objects always appear above all existing ones.
+  //
+  // Implemented as a monotone counter rather than an O(n) max-scan
+  // on each call. The counter is seeded LAZILY on first use (so the
+  // arrays have already been populated from IDB at that point) by
+  // scanning once across the existing objects; subsequent calls just
+  // increment. Future batch-insert paths (M5 AI shape recognition)
+  // benefit linearly over the prior per-call O(n) scan. v1.4 fix.
+  let nextZCounter = -1
   const nextObjectZ = (): number => {
-    let max = 0
-    for (const img of images) if (!img.deleted && img.z > max) max = img.z
-    for (const t of texts) if (!t.deleted && t.z > max) max = t.z
-    for (const sh of shapes) if (!sh.deleted && sh.z > max) max = sh.z
-    return max + 1
+    if (nextZCounter < 0) {
+      let max = 0
+      for (const img of images) if (!img.deleted && img.z > max) max = img.z
+      for (const t of texts) if (!t.deleted && t.z > max) max = t.z
+      for (const sh of shapes) if (!sh.deleted && sh.z > max) max = sh.z
+      nextZCounter = max
+    }
+    nextZCounter += 1
+    return nextZCounter
   }
   const nextImageZ = nextObjectZ
   const nextTextZ = nextObjectZ

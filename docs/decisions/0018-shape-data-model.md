@@ -39,13 +39,18 @@ Every `ShapeObject` extends `BoardObject` and stores its geometry as a `transfor
 
 **Why not endpoint-based for lines/arrows.** It would have read more naturally for those two kinds — `start: {x,y}, end: {x,y}` — but every shared transform consumer would have needed a per-kind dispatch. Rotation around a center, AABB inflation by stroke half-width, multi-drag translation, the marquee union, the resize anchor math — all uniform under rect, all forked under endpoint. The single uniformity cost (the sign-encoded direction trick) is one place; the abstraction violation would have lived in dozens.
 
-### 3. Stroke color, stroke width, fill toggle — no separate fill color
+### 3. Stroke color, stroke width, fill toggle, fill opacity — no separate fill color
 
-Sticky settings: `shapeColor`, `shapeStrokeWidth`, `shapeFillEnabled`. When fill is enabled, `ShapeObject.fill` is set to the **same token** as the stroke color, and the renderer applies a constant `FILL_ALPHA = 0.25` via `globalAlpha` during the fill pass. There is no `shapeFillColor` setting.
+Sticky settings: `shapeColor`, `shapeStrokeWidth`, `shapeFillEnabled`, `shapeFillOpacity`. When fill is enabled, `ShapeObject.fill` is set to the **same token** as the stroke color, and the renderer applies `shape.fillOpacity` (or a `DEFAULT_FILL_ALPHA = 0.25` fallback for older records that predate the per-shape opacity field) via `globalAlpha` during the fill pass. There is **no `shapeFillColor` setting** — fill color always tracks stroke color.
 
 **Why one color, alpha for fill.** The user brief was explicit: "no user-facing clutter." A second color picker (stroke vs fill) doubles the menu footprint for a feature that, in informal observation of how users actually fill shapes in tldraw / Excalidraw, almost always picks "same color, lighter" anyway. Translucent fill behind a solid outline reads as a tint, keeps any pen ink underneath visible, and avoids the visual confusion of an opaque fill matching the stroke. If a future iteration adds a separate fill color it can land as an `else if (s.fillColor) ... else` branch in the renderer — the `fill: string` token already supports an arbitrary color, the renderer just doesn't expose the knob yet.
 
-**Why a constant `FILL_ALPHA`.** A user-facing `fillOpacity` slider was considered and rejected for the same clutter reason. 0.25 was picked by feel: visible enough to convey "filled," subtle enough that overlapping shapes don't read as a solid mass.
+**Why a per-shape `fillOpacity` slider** (amended during v1.4 development). The initial ADR rejected a slider for clutter reasons. Two factors flipped that decision:
+
+  1. **User request.** During v1.4 feel-testing the user explicitly asked for a fill-opacity selection bar with the original 0.25 as the default. The slider is small (one row in the contextual menu), and its disabled state for line/arrow keeps it out of the way when irrelevant.
+  2. **Per-shape, not global.** Each new shape snapshots the sticky `shapeFillOpacity` at creation into `ShapeObject.fillOpacity`. Changing the slider later doesn't retroactively retint existing shapes. Selected-shape editing via the Select-tool's menu emits `edit-shape` ops, committing on slider `change` (pointerup) rather than per `input` event so a slow scrub produces ONE undoable / syncable op instead of N.
+
+The slider is disabled for line / arrow sub-modes (no fill semantics) and when fill is toggled off (the value still persists, but won't visibly take effect).
 
 ### 4. Stacking: above texts, below strokes
 
