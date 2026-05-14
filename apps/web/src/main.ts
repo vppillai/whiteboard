@@ -8,15 +8,26 @@
  *   B                  — drawing tool (current brush preset)
  *   P                  — drawing tool + Pen brush preset (default setup)
  *   E                  — eraser (tap toggles, hold spring-loads — see eraserhold.ts)
- *   1 – 5              — brush preset
- *   M                  — toggle metrics HUD
+ *   V or S             — select tool (universal pointer; click / marquee / Shift+click)
+ *   L                  — laser tool (fading pointer trail)
  *   T                  — text tool  (Shift+T cycles theme)
+ *   1 – 5              — brush preset
+ *   C                  — color picker (at pointer)
+ *   O                  — options (grid type, spacing)
+ *   F                  — toggle distraction-free mode
+ *   M                  — toggle metrics HUD
  *   ?                  — toggle help overlay
- *   Esc                — cancel / dismiss popover
+ *   Esc                — cancel / dismiss popover / clear selection
+ *   Esc Esc            — toggle Draw ↔ Select
  *   ⌘/Ctrl + Z         — undo
  *   ⌘/Ctrl + Shift + Z — redo (also ⌘/Ctrl + Y)
+ *   ⌘/Ctrl + A         — select all (strokes + images + texts; activates Select)
+ *   ⌘/Ctrl + C / X     — copy / cut selection (single image → bytes; everything else → PNG + native bundle)
+ *   ⌘/Ctrl + V         — paste image / text / whiteboard-native bundle
+ *   ⌘/Ctrl + B / I / U — bold / italic / underline (in text edit or on selected text)
+ *   Delete / Backspace — delete the active selection
  *   ⌘/Ctrl + 0         — reset zoom
- *   ⌘/Ctrl + 1         — fit all strokes to view
+ *   ⌘/Ctrl + 1         — fit all objects in view (resets zoom on an empty board)
  *   ⌘/Ctrl + + / -     — zoom in / out
  *   ⌘/Ctrl + Shift + K — clear board (confirm)
  *   ⌘/Ctrl + ,         — toggle settings panel

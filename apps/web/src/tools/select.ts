@@ -1,23 +1,36 @@
 /**
- * Select tool — universal pointer for manipulating any single board
- * object (image, text, stroke). While Select is active:
+ * Select tool — universal pointer for manipulating any board object
+ * (image, text, stroke), single or multi. While Select is active:
  *
  *   - Click an object (reverse-z first-hit, priority texts > images >
- *     strokes) → it becomes selected.
+ *     strokes) → it becomes the sole selection.
+ *   - **Shift+click** an object → toggles it in/out of the current
+ *     selection (additive multi-select).
+ *   - **Marquee drag** on empty canvas → draws a rectangle; release
+ *     picks every non-deleted object whose bbox / sample falls inside
+ *     and replaces the selection. `Shift+drag` is additive (extends
+ *     the existing selection rather than replacing).
+ *   - **Cmd/Ctrl+A** → selects every non-deleted object across all
+ *     three kinds. Activates Select if not already active.
  *   - Hover an object body → cursor changes to `move`; hover a handle →
  *     directional resize cursor. Hover the rotation handle → rotate
- *     cursor. (Strokes have no handles — body hover only.)
- *   - Drag the body → translate. For images / texts: drag a corner
- *     handle → resize from the opposite corner; image gets
- *     anchor-preserving rect resize, text gets font-size scaling (since
- *     the text rect is content-derived, not directly set). Drag an
- *     edge handle on a text (E/W only) → adjust wrapWidth; on an image
- *     (all 8) → 1-axis resize. Shift on a corner image constrains
- *     the aspect ratio.
- *   - Drag the rotation handle → rotate. Double-click rotation handle →
- *     reset to 0°. (Texts rotate too; strokes don't.)
- *   - Click empty space → deselect.
- *   - Delete / Backspace removes (soft-delete) with undo.
+ *     cursor. (Strokes have no handles — body hover only. Handles only
+ *     drawn for single-selection.)
+ *   - Drag the body of any selected object → translates the WHOLE
+ *     selection (single or group). Single-selection of images / texts:
+ *     drag a corner handle → resize from the opposite corner; image gets
+ *     anchor-preserving rect resize, text gets font-size scaling.
+ *     Drag an edge handle on a text (E/W only) → adjust wrapWidth; on
+ *     an image (all 8) → 1-axis resize. Shift on a corner image
+ *     constrains the aspect ratio.
+ *   - Drag the rotation handle → rotate (single-selection only).
+ *     Double-click rotation handle → reset to 0°. (Texts rotate too;
+ *     strokes don't.)
+ *   - Click empty space → deselects (replaces with `[]`).
+ *   - **Esc** → clears selection, AND aborts any in-flight marquee
+ *     (the latter detected via `hasPendingMarquee()`).
+ *   - Delete / Backspace → soft-deletes every selected object across
+ *     kinds with one op per item.
  *
  * Pen / Eraser treat all objects as inert — no hit-test, no
  * handles. Selection state is held inside the tool and discarded on
@@ -25,23 +38,36 @@
  * `cleanup()`).
  *
  * Rendering: live-layer paint dispatched per kind. Floating objects
- * (image, text) get an outline + 8/6 handles + rotation handle; strokes
- * get a perfect-freehand outline halo + dashed bbox. Outline scales
- * with zoom (drawn in board space). Handles are constant *pixel* size
- * so they don't disappear when zoomed out — drawn in screen space,
- * positioned from board → screen via the camera transform.
+ * (image, text) get an outline + 8/6 handles + rotation handle on
+ * single-selection; multi-selection gets a dashed group bbox enclosing
+ * the union AABB with NO handles (move + delete only). Strokes get a
+ * perfect-freehand outline halo + dashed bbox. Outline scales with zoom
+ * (drawn in board space). Handles are constant *pixel* size so they
+ * don't disappear when zoomed out — drawn in screen space, positioned
+ * from board → screen via the camera transform.
  *
- * Selection model: a 3-variant discriminated union `Selection = {
- * kind, id }` (image | text | stroke). A `getView()` helper resolves
- * it to a live `ObjectView` exposing `{ transform, rotation }`
- * uniformly. The handle math, rotate math, and hover-cursor logic
- * operate on the view — they don't care what kind of object is
- * selected. Kind-specific code lives in three places: per-kind drag
- * commits (`commitImageDrag` / `commitStrokeDrag` / `commitTextDrag`),
- * per-kind selection paint (`drawStrokeSelection` /
- * `drawFloatingObjectSelection`), and `objectAt` hit-test order.
- * Adding a 4th object kind is therefore one helper per concern, not a
- * fan-out across every interaction handler.
+ * Selection model: `selected: Selection[]` where `Selection = { kind,
+ * id }` is a 3-variant discriminated union (image | text | stroke).
+ * Single-selection is `selected.length === 1`; multi is `> 1`; nothing
+ * is `[]`. A `getView()` helper resolves a single Selection to a live
+ * `ObjectView` exposing `{ transform, rotation }` uniformly. Handle
+ * math, rotate math, and hover-cursor logic operate on the view — they
+ * don't care what kind of object is selected. See [ADR 0014] (selection
+ * union) and [ADR 0016] (Lasso absorption that produced the array
+ * form + marquee + multi-select).
+ *
+ * Drag state model: a single discriminated-union variable `activeDrag:
+ * ActiveDrag | null` carries the three mutually-exclusive drag modes
+ * (`{ kind: 'single' | 'multi' | 'marquee'; state }`). Switching modes
+ * is one assignment; exclusion is structural rather than convention.
+ * `commitDrag` dispatches on the union kind.
+ *
+ * Kind-specific code lives in three places: per-kind drag commits
+ * (`commitImageDrag` / `commitStrokeDrag` / `commitTextDrag`), per-kind
+ * selection paint (`drawStrokeSelection` / `drawFloatingObjectSelection`),
+ * and `objectAt` hit-test order. Adding a 4th object kind is therefore
+ * one helper per concern, not a fan-out across every interaction
+ * handler.
  */
 
 import type { ImageObject, Stroke, TextFontFamily, TextObject } from '@whiteboard/shared'

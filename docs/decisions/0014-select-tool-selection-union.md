@@ -38,6 +38,27 @@ Post-v1.2, the Lasso tool was absorbed into Select (see [ADR 0016](0016-lasso-in
    - **Delete** (`deleteSelected`): walks the selection and dispatches `delete-image` / `delete-text` / `delete` (stroke soft-delete) + the matching save callback per item.
 9. Handle availability differs by kind: images expose all 8 (4 corners + 4 edges); texts expose 4 corners (font-size scale) + 2 horizontal edges (`e`, `w`) for wrap-width adjustment; strokes expose none (move-only via body drag, plus a dashed bbox for affordance). The N/S edges are hidden for text because vertical edge drags don't have a sensible content-derived-height semantic.
 10. **`batchSelection` module deleted.** Its Cmd+A → Delete mark for images + texts is no longer needed — the Select tool's multi-selection state covers that role, plus strokes.
+11. **`selectByIds(items: readonly Selection[])` exported on the tool.** Used by the whiteboard-native clipboard paste-back path ([ADR 0017](0017-whiteboard-native-clipboard-format.md)) so a freshly-pasted group of objects can be pre-selected for immediate positioning. Items whose underlying object is missing / soft-deleted are silently skipped. Symmetric to the single-id selectors (`selectImageById` / `selectTextById` / `selectStrokeById`) and replaces the previous "caller mutates internal state" backdoors. The single-id selectors still exist for the paste-and-auto-select-one-image flow.
+12. **`hasPendingMarquee()` exported on the tool.** Returns true when a past-threshold marquee drag is in flight. Used by `main.ts`'s Esc handler to detect "user is mid-marquee and wants to abort" — without this, Esc only fires `clearSelection()` when there are *already* selected objects, leaving a candidate marquee to commit on the next pointer-up.
+
+## Drag state follows the same pattern (post-absorption addendum)
+
+The Select tool has three drag modes — single-object transform, multi-object move, marquee selection — and they are mutually exclusive (at most one is active at a time). The first implementation modeled this as three independent nullable fields (`drag` / `multiDrag` / `marquee`), making the exclusion a *runtime invariant* that every transition site had to remember to maintain (null `drag` before assigning `multiDrag`, etc.). That's the exact "type system isn't carrying its weight" smell the Selection-union pattern addresses for selection state.
+
+The post-absorption refactor (`aae538d`) collapses the three fields into one discriminated union:
+
+```ts
+type ActiveDrag =
+  | { kind: 'single'; state: DragState }
+  | { kind: 'multi'; state: MultiDragState }
+  | { kind: 'marquee'; state: MarqueeDragState }
+
+let activeDrag: ActiveDrag | null = null
+```
+
+Switching modes is now one assignment; exclusion is structural rather than convention; `commitDrag` dispatches on the union kind. This is the *same pattern* as Selection — the union carries kind-tagged variants whose per-mode state shapes intentionally stay distinct (a DragState's `before` snapshot is unrelated to a MarqueeDragState's `startScreen`; only the *container* is unified). Inside functions that operate on a specific mode, the convention is to narrow `activeDrag.state` to a local `const drag` / `multiDrag` / `marquee` so the body code reads naturally.
+
+This refactor also closed potential silent-op-drop holes — earlier `commitDrag` dispatched only the single-drag path, which meant a multi-drag interrupted by Shift+click or selection deletion could orphan its half-mutated state.
 
 ## Consequences
 

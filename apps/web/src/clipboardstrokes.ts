@@ -29,6 +29,14 @@
  * `images` field; readers ignore unknown fields. Bump `v` only on
  * truly incompatible changes (e.g. removing strokes or restructuring
  * origin); then older versions silently fall through to PNG paste.
+ *
+ * DoS caps applied at extract time (see `MAX_BUNDLE_STROKES`,
+ * `MAX_BUNDLE_TEXTS`, `MAX_STROKE_SAMPLES`): a malicious page placing
+ * a hostile `data-whiteboard-v1` blob in its copy text can't flood
+ * the user's canvas. Bundles past the caps reject the entire payload
+ * (the caller falls through to PNG paste). Schema validation is
+ * field-level — invalid stroke / text shapes also drop the bundle so
+ * we don't half-paste.
  */
 
 import type { Stroke, TextObject } from '@whiteboard/shared'

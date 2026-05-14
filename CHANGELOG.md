@@ -45,7 +45,27 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 - **Lasso tool deleted.** `apps/web/src/tools/lasso.ts` removed; the `L` key no longer activates lasso (it remains bound to the laser pointer, unchanged). The `S` key is preserved as an alias for the Select tool to keep the muscle-memory shortcut.
 - **`batchSelection` module removed.** Its purpose (the Cmd+A → Delete mark for images + texts) is now absorbed by the Select tool's multi-selection state.
 - **`Esc` with a Select-tool selection** clears it (in addition to its existing cancel-pending-action role).
-- **Empty-board Fit-to-view** (`Cmd/Ctrl+1` or right-click → Fit to view) on a board with zero objects now resets zoom to 100 % instead of no-op'ing.
+
+### Added (post-absorption follow-on)
+
+- **Whiteboard-native clipboard round-trip for strokes + texts.** `Cmd/Ctrl+C` / `Cmd/Ctrl+X` now writes a dual-slot clipboard payload: `image/png` (transparent-background render, unchanged behavior for external paste targets) plus `text/html` carrying a `data-whiteboard-v1` data attribute with the serialized strokes + texts bundle. Pasting back inside the whiteboard reconstitutes the original objects as live vectors at the cursor (relative layout preserved via a bundle-origin field); pasting into Google Docs / Slack / Confluence still lands as PNG. Selections containing images keep the PNG-only path (image bytes round-trip is a future addition). Full design at [ADR 0017](docs/decisions/0017-whiteboard-native-clipboard-format.md).
+- **`transform-many` composite op kind.** Multi-object move drags now emit a single composite op carrying per-item before/after transforms (image / text rects + stroke dx/dy deltas) instead of N independent per-item ops. One undo step reverses the whole group move; the M3 sync prep is the bigger win — one transaction and one wire update per peer per gesture instead of N.
+
+### Fixed
+
+- **IDB schema v3 → v4 corrective bump.** A small set of users ended up with v3 databases that were missing the `texts` store (likely a manual DevTools intervention or a one-time upgrade race). The v4 bump re-fires `onupgradeneeded` so the idempotent `if (!contains)` guards re-run and the missing `texts` store gets created. Healthy v3 DBs pass through as a no-op upgrade. Strokes + images + texts are preserved on the upgrade path.
+- **Pinned tool menu persists across tool select + right-click.** Previously, the pinned right-click tool menu was dismissed when the user picked a tool from it or right-clicked again to re-open. The pin now survives both actions; the same menu instance flashes briefly on a repeat-open to acknowledge the intent.
+- **Pinned tool menu rebuilds content on action.** Previously, picking a brush / tool / color from a pinned menu left stale active-state highlights (the pill that *was* active before the change kept its highlight). The menu now rebuilds its DOM body on action so the active pills track the current tool / brush / color.
+- **Empty-board Fit to view resets zoom.** `Cmd/Ctrl+1` (or right-click → Fit to view) on a board with zero objects now resets zoom to 100 % instead of no-op'ing.
+- **Select tool drag state unified into a discriminated union.** The previous three nullable state fields (`drag` / `multiDrag` / `marquee`) collapsed into a single `activeDrag: ActiveDrag | null` discriminated union. Mutual exclusion now lives in the type system rather than as a convention every transition site had to remember to maintain — closes potential silent-op-drop holes under deletion / Shift+click races. The `commitDrag` dispatcher correctly routes single vs multi via the union kind.
+- **Clipboard bundle parser hardened.** Field-level structural validation (id / samples / startedAt / brush for strokes; id / content / transform / font / color for texts) + DoS caps (5000 strokes, 5000 texts, 50000 samples per stroke) reject malformed or attack-shaped bundles. Falls through cleanly to the PNG paste path on rejection so external clipboard sources still work.
+
+### Refactor (internal)
+
+- **Object id generation centralized in `apps/web/src/ids.ts`.** `makeStrokeId` and `makeTextId` were duplicated in 3+ call sites with subtly different prefix conventions. Single source of truth now; clipboard paste-back, paste flow, and text creation all route through these helpers.
+- **`Selection` type exported from the Select tool.** External callers — the clipboard paste path in `main.ts`, the selection-clipboard module — name the shape directly rather than re-declaring a structural copy.
+- **`isMarkedForBatchDelete` renamed to `isMultiSelected` across the render pipeline.** Name reflects current reality (the predicate is consulted for ANY multi-selection halo, not just batch-delete marking, since Lasso → Select absorption). The per-frame O(N×M) predicate (M images / texts × N selections) is replaced with a single per-frame `Set<string>` build (O(N+M) construction + O(1) lookup); removes the quadratic hotspot for boards with large multi-selections.
+- **Clipboard pipeline extracted into `apps/web/src/selectionclipboard.ts`.** Parallel to `imagepaste.ts` with the same Context-injected dependency pattern. The orchestrator drops ~270 LOC and the copy / cut / paste-back flow becomes testable in isolation.
 
 ### Notes
 
