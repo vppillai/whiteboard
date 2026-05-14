@@ -147,7 +147,7 @@ Stored locally in IndexedDB as one row per stroke. The schema is CRDT-compatible
 
 ### 4.1 Tool set (v1)
 
-Brush, Eraser (two modes — see below), Lasso-select, Pan. That's it.
+Brush (Pen), Eraser (two modes — see below), Text, Select (universal selection — single + multi via marquee / Shift+click / Cmd+A; see [ADRs 0014](docs/decisions/0014-select-tool-selection-union.md) + [0016](docs/decisions/0016-lasso-into-select-absorption.md)), Laser, Pan. That's it. The original Lasso tool was absorbed into Select post-v1.2.
 
 > **Eraser model:** the wipe-mode eraser is **segment-level** ("cuts through") — only the part of a stroke the eraser physically passes over disappears; disconnected parts of the original stroke survive as separate live runs. Implemented per [ADR 0008](docs/decisions/0008-segment-eraser.md) via a per-sample mask (`Stroke.erasedSamples`). The object-mode eraser (Shift-modifier or Item pill) is still whole-stroke deletion — surgical removal when you want a stroke gone entirely.
 
@@ -173,7 +173,7 @@ The original toolbar commitment was retired during M2 brainstorming on tenet gro
 | `P`                            | Draw tool + Pen brush preset              | ✅     |
 | `E` (hold)                     | Spring-loaded eraser — release reverts    | ✅     |
 | `Shift + E`                    | Sticky eraser (toggle to eraser tool)     | ✅     |
-| `S`                            | Select (lasso)                            | ✅     |
+| `V` / `S`                      | Select tool (universal — image / text / stroke; single or multi) | ✅     |
 | `Space` (hold) + drag          | Pan (any pointer device)                  | ✅     |
 | Middle-mouse drag              | Pan                                       | ✅     |
 | `1`–`5`                        | Switch to brush preset 1–5                | M1     |
@@ -185,7 +185,7 @@ The original toolbar commitment was retired during M2 brainstorming on tenet gro
 | `Cmd/Ctrl + Shift + Z`         | Redo (also `Cmd/Ctrl + Y`)                | ✅     |
 | `Cmd/Ctrl + 0`                 | Reset zoom                                | ✅     |
 | `Cmd/Ctrl + =` / `-`           | Zoom in / out                             | ✅     |
-| `Cmd/Ctrl + A`                 | Select all (activates lasso)              | ✅     |
+| `Cmd/Ctrl + A`                 | Select all non-deleted objects (activates Select tool) | ✅     |
 | `Delete` / `Backspace`         | Delete selected                           | ✅     |
 | `Cmd/Ctrl + Shift + K`         | Clear board (confirm twice within 3 s)    | ✅     |
 | `M`                            | Toggle metrics HUD                        | ✅     |
@@ -217,11 +217,11 @@ The v1 ship is single-user, single-device — no rooms, no shared URLs, no prese
 
 All three run in-browser via `transformers.js` + WebGPU. Triggered explicitly by the user; never auto.
 
-1. **Shape recognition** — small ONNX classifier on stroke-feature vectors. Lasso → press `R` → suggest clean primitive with accept/reject. ~5–10 MB.
-2. **Handwriting → text** — runs over selected lasso region. Output is an editable text node. ~30–60 MB. English first.
-3. **Math / LaTeX** — separate model, lasso-scoped. Outputs LaTeX, rendered via KaTeX. ~80–120 MB; lazy-loaded only when invoked.
+1. **Shape recognition** — small ONNX classifier on stroke-feature vectors. Select the strokes → press `R` → suggest clean primitive with accept/reject. ~5–10 MB.
+2. **Handwriting → text** — runs over the current Select-tool selection. Output is an editable text node. ~30–60 MB. English first.
+3. **Math / LaTeX** — separate model, scoped to the current selection. Outputs LaTeX, rendered via KaTeX. ~80–120 MB; lazy-loaded only when invoked.
 
-All three: lasso → invoke → streamed result → accept/replace or reject. No always-on inference, no telemetry, no cloud fallback.
+All three: select → invoke → streamed result → accept/replace or reject. No always-on inference, no telemetry, no cloud fallback.
 
 ## 8. Deployment
 

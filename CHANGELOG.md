@@ -34,6 +34,19 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 - **`Cmd/Ctrl+1` fit-to-content didn't include images / texts.** Bounds computation walked strokes only; pasted images or texts could sit outside the framed rect. Now uses the same union as the export-bounds path.
 - **Bare `\r` normalization in text input.** Some sources (older Office paste, certain Linux clipboards) deliver `\r` line separators; the editor's commit path now normalizes `\r\n` and bare `\r` to `\n` before persisting so wrap-width measurement and SVG export both behave.
 
+### Lasso → Select absorption (BREAKING)
+
+- **Multi-selection in Select tool (`V` or `S`).** The Select tool now owns all selection — single-object (with handles), multi-object (move + delete), and marquee drag selection. The previously-image/text/stroke `Selection` singleton becomes `Selection[]`; single-selection still drives the existing handle math, while multi-selection renders as a dashed group halo with move + delete only.
+- **`Cmd/Ctrl+A` now switches to the Select tool** and selects every non-deleted object (strokes + images + texts). The previous routing (`Cmd+A` → batchSelection mark for images + texts, lasso for strokes) is replaced by a single Select-tool selection.
+- **Marquee drag selection.** Pointer-down on empty canvas + drag draws a rectangle; release picks every object whose bbox / sample falls inside the rect. `Shift+drag` is additive (extends the existing selection rather than replacing it).
+- **`Shift+click` toggles** an object in/out of the current Select-tool selection.
+- **Group move** — dragging any object in a multi-selection moves the whole group; a single `move` op covers all displaced strokes and `transform-*` ops cover displaced images / texts.
+- **`Cmd/Ctrl+C` / `Cmd/Ctrl+X` copies / cuts the selection as a transparent-background PNG** for paste into Google Docs / Slack / Confluence. The single-image-selection fast path still writes the raw image bytes (preserving the original encoding).
+- **Lasso tool deleted.** `apps/web/src/tools/lasso.ts` removed; the `L` key no longer activates lasso (it remains bound to the laser pointer, unchanged). The `S` key is preserved as an alias for the Select tool to keep the muscle-memory shortcut.
+- **`batchSelection` module removed.** Its purpose (the Cmd+A → Delete mark for images + texts) is now absorbed by the Select tool's multi-selection state.
+- **`Esc` with a Select-tool selection** clears it (in addition to its existing cancel-pending-action role).
+- **Empty-board Fit-to-view** (`Cmd/Ctrl+1` or right-click → Fit to view) on a board with zero objects now resets zoom to 100 % instead of no-op'ing.
+
 ### Notes
 
 - Bundle and test-count effects pending the next versioned release; this section accumulates them as features land.
