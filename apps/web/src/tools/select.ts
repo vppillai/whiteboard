@@ -70,12 +70,19 @@
  * handler.
  */
 
-import type { ImageObject, Stroke, TextFontFamily, TextObject } from '@whiteboard/shared'
+import type {
+  ImageObject,
+  ShapeObject,
+  Stroke,
+  TextFontFamily,
+  TextObject,
+} from '@whiteboard/shared'
 import { CURATED_COLORS as PALETTE } from '../colorpicker'
 import { imageAABB, imageCenter, pointInImage, rotateAroundPoint } from '../imagegeom'
 import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
 import type { Op, TransformManyItem } from '../ops'
 import { applyCamera, clearLayer } from '../render'
+import { pointInShape, shapeAABB } from '../rendershapes'
 import { getStrokeBBox, getStrokePath, invalidateStrokeBBox } from '../stroke'
 import { TEXT_PADDING_X, pointInText, resizeToFit, textAABB } from '../textgeom'
 import type { Tool, ToolContext } from './types'
@@ -99,7 +106,7 @@ export type Selection =
  */
 interface ObjectView {
   selection: Selection
-  obj: ImageObject | TextObject | Stroke
+  obj: ImageObject | TextObject | Stroke | ShapeObject
   transform: ImageObject['transform']
   rotation: number
 }
@@ -139,6 +146,7 @@ type DragKind =
 type MultiDragItem =
   | { kind: 'image'; id: string; before: ImageObject['transform'] }
   | { kind: 'text'; id: string; before: ImageObject['transform'] }
+  | { kind: 'shape'; id: string; before: ImageObject['transform'] }
   | { kind: 'stroke'; id: string; applied: { dx: number; dy: number } }
 
 interface MultiDragState {
@@ -209,6 +217,12 @@ interface SelectToolDeps {
   getTexts: () => TextObject[]
   /** Persist a single text after each move-tick. */
   saveText: (t: TextObject) => void
+  /** Read-only access; same mutation pattern as images/texts. Shapes
+   *  share the image transform model (rect + rotation), so move /
+   *  resize / rotate paths reuse the image code paths almost verbatim. */
+  getShapes: () => ShapeObject[]
+  /** Persist a single shape after each move-tick. */
+  saveShape: (s: ShapeObject) => void
   /** Read-only access. Used by the stroke hit-test path so clicking on
    *  a drawing in Select mode selects it (parallel to Lasso's tap-
    *  select). */
@@ -285,6 +299,9 @@ export interface SelectTool extends Tool {
    *  (e.g. "jump to stroke from history panel") don't need a backdoor
    *  into module state. */
   selectStrokeById(id: string): void
+  /** Symmetric selector for shapes. Used post-paste so freshly-pasted
+   *  shapes are pre-selected for immediate positioning. */
+  selectShapeById(id: string): void
   /** Replace the selection with EVERY non-deleted object across all
    *  kinds (strokes + images + texts). Used by Cmd+A. Caller is
    *  responsible for switching the active tool to Select first. */
@@ -371,6 +388,9 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     } else if (sel.kind === 'text') {
       const t = deps.getTexts().find((x) => x.id === sel.id)
       alive = !!t && !t.deleted
+    } else if (sel.kind === 'shape') {
+      const sh = deps.getShapes().find((x) => x.id === sel.id)
+      alive = !!sh && !sh.deleted
     } else {
       const s = deps.getStrokes().find((x) => x.id === sel.id)
       alive = !!s && !s.deleted
@@ -428,6 +448,16 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         rotation: t.rotation ?? 0,
       }
     }
+    if (sel.kind === 'shape') {
+      const sh = deps.getShapes().find((x) => x.id === sel.id)
+      if (!sh || sh.deleted) return null
+      return {
+        selection: sel,
+        obj: sh,
+        transform: sh.transform,
+        rotation: sh.rotation ?? 0,
+      }
+    }
     // sel.kind === 'stroke'
     const s = deps.getStrokes().find((x) => x.id === sel.id)
     if (!s || s.deleted) return null
@@ -462,6 +492,17 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     for (const t of texts) {
       if (pointInText({ x: boardX, y: boardY }, t)) {
         return { kind: 'text', id: t.id }
+      }
+    }
+    // Shapes — same screen-tolerance as strokes so thin lines / arrows
+    // are reliably tap-selectable at any zoom. Rect / ellipse with fill
+    // hit the whole interior; outline-only hit near the boundary.
+    const SHAPE_TOL_PX = 10
+    const shapeTol = SHAPE_TOL_PX / scale
+    const shapes = [...deps.getShapes()].filter((s) => !s.deleted).sort((a, b) => b.z - a.z)
+    for (const sh of shapes) {
+      if (pointInShape({ x: boardX, y: boardY }, sh, shapeTol)) {
+        return { kind: 'shape', id: sh.id }
       }
     }
     const imgs = [...deps.getImages()].filter((i) => !i.deleted).sort((a, b) => b.z - a.z)
@@ -711,6 +752,29 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     }
   }
 
+  /** Shape-kind drag commit. Mirrors commitImageDrag — same transform
+   *  model (rect + rotation), same op semantics. Style edits (color /
+   *  strokeWidth / fill) come through edit-shape from the contextual
+   *  menu, not from a drag, so this helper only emits transform / rotate. */
+  function commitShapeDrag(d: DragState, sh: ShapeObject, isRotation: boolean): void {
+    if (isRotation) {
+      const afterR = sh.rotation ?? 0
+      if (d.beforeRotation !== afterR) {
+        deps.pushOp({
+          kind: 'rotate-shape',
+          shapeId: sh.id,
+          before: d.beforeRotation,
+          after: afterR,
+        })
+      }
+      return
+    }
+    const after = { ...sh.transform }
+    if (transformChanged(d.before, after)) {
+      deps.pushOp({ kind: 'transform-shape', shapeId: sh.id, before: d.before, after })
+    }
+  }
+
   /**
    * Stroke-kind drag commit. Only `move` is supported (no resize / rotate
    * semantics for freehand geometry).
@@ -872,6 +936,11 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       const tb = textAABB(t)
       if (aabbIntersects(tb, box)) hits.push({ kind: 'text', id: t.id })
     }
+    for (const sh of deps.getShapes()) {
+      if (sh.deleted) continue
+      const sb = shapeAABB(sh)
+      if (aabbIntersects(sb, box)) hits.push({ kind: 'shape', id: sh.id })
+    }
     if (m.additive) {
       // Union with existing selection — dedupe by kind+id.
       const seen = new Set(selected.map((s) => `${s.kind}:${s.id}`))
@@ -901,6 +970,10 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         const t = deps.getTexts().find((x) => x.id === sel.id)
         if (!t || t.deleted) continue
         items.push({ kind: 'text', id: sel.id, before: { ...t.transform } })
+      } else if (sel.kind === 'shape') {
+        const sh = deps.getShapes().find((x) => x.id === sel.id)
+        if (!sh || sh.deleted) continue
+        items.push({ kind: 'shape', id: sel.id, before: { ...sh.transform } })
       } else {
         const s = deps.getStrokes().find((x) => x.id === sel.id)
         if (!s || s.deleted) continue
@@ -928,6 +1001,11 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         if (!t || t.deleted) continue
         t.transform = { ...item.before, x: item.before.x + dx, y: item.before.y + dy }
         deps.saveText(t)
+      } else if (item.kind === 'shape') {
+        const sh = deps.getShapes().find((x) => x.id === item.id)
+        if (!sh || sh.deleted) continue
+        sh.transform = { ...item.before, x: item.before.x + dx, y: item.before.y + dy }
+        deps.saveShape(sh)
       } else {
         const stroke = deps.getStrokes().find((x) => x.id === item.id)
         if (!stroke || stroke.deleted) continue
@@ -981,6 +1059,12 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         const after = { ...t.transform }
         if (!transformChanged(item.before, after)) continue
         items.push({ kind: 'text', textId: item.id, before: item.before, after })
+      } else if (item.kind === 'shape') {
+        const sh = deps.getShapes().find((x) => x.id === item.id)
+        if (!sh || sh.deleted) continue
+        const after = { ...sh.transform }
+        if (!transformChanged(item.before, after)) continue
+        items.push({ kind: 'shape', shapeId: item.id, before: item.before, after })
       } else {
         if (item.applied.dx === 0 && item.applied.dy === 0) continue
         items.push({
@@ -1067,6 +1151,9 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     } else if (d.selection.kind === 'stroke') {
       const s = deps.getStrokes().find((x) => x.id === d.selection.id)
       if (s && !s.deleted) commitStrokeDrag(d, s)
+    } else if (d.selection.kind === 'shape') {
+      const sh = deps.getShapes().find((x) => x.id === d.selection.id)
+      if (sh && !sh.deleted) commitShapeDrag(d, sh, isRotation)
     } else {
       const t = deps.getTexts().find((x) => x.id === d.selection.id)
       if (t && !t.deleted) commitTextDrag(d, t, isRotation, isResize)
@@ -1213,6 +1300,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     pointerBoard: { x: number; y: number },
     naturalAspect: number,
     shift: boolean,
+    minSide = 16,
   ): ImageObject['transform'] {
     // Project (pointer - anchor) onto the image's local axes:
     //   xAxis_board = (cos, sin), yAxis_board = (-sin, cos)
@@ -1254,11 +1342,12 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       newH = before.h
     }
 
-    // Minimum side — 16 board-px. Prevents zero-sized images that
-    // disappear and can't be hit-tested.
-    const MIN_SIDE = 16
-    if (newW < MIN_SIDE) newW = MIN_SIDE
-    if (newH < MIN_SIDE) newH = MIN_SIDE
+    // Minimum side prevents zero-sized objects from collapsing into a
+    // hit-test dead zone. Default 16 for images/texts; shapes (esp.
+    // lines & arrows) pass a smaller value because a near-horizontal
+    // line legitimately has near-zero height in its transform.
+    if (newW < minSide) newW = minSide
+    if (newH < minSide) newH = minSide
 
     // Direction signs in image-local coords for each handle. The dragged
     // corner / edge midpoint sits at (sx*newW/2, sy*newH/2) relative to
@@ -1314,6 +1403,103 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     }
   }
 
+  /** Build the contextual menu for a shape selection (color / stroke
+   *  width / fill toggle). Mirrors the Shape tool's own menu so style
+   *  edits work in either mode. Each change emits an `edit-shape` op
+   *  so undo correctly restores the previous style. */
+  function renderShapeContextualMenu(
+    host: HTMLElement,
+    sh: ShapeObject,
+    dismiss: () => void,
+  ): void {
+    type EditPayload = { color: string; strokeWidth: number; fill: string | undefined }
+    const snapshotEdit = (s: ShapeObject): EditPayload => ({
+      color: s.color,
+      strokeWidth: s.strokeWidth,
+      fill: s.fill,
+    })
+    const applyEdit = (mutate: (s: ShapeObject) => void): void => {
+      commitDrag(null)
+      const before = snapshotEdit(sh)
+      mutate(sh)
+      deps.saveShape(sh)
+      const after = snapshotEdit(sh)
+      deps.pushOp({ kind: 'edit-shape', shapeId: sh.id, before, after })
+      deps.markCommittedDirty()
+    }
+
+    host.appendChild(sectionLabel('Color'))
+    const palette = paletteGrid()
+    for (const c of PALETTE) {
+      palette.appendChild(
+        swatch({
+          color: c,
+          active: sh.color === c,
+          onClick: () => {
+            applyEdit((s) => {
+              s.color = c
+              // If fill was on, keep it synced to the new stroke color.
+              if (s.fill) s.fill = c
+            })
+            dismiss()
+          },
+        }),
+      )
+    }
+    host.appendChild(palette)
+
+    host.appendChild(separator())
+
+    host.appendChild(sectionLabel('Stroke width'))
+    const widthRow = pillRow()
+    for (const w of [1, 2, 4, 8] as const) {
+      widthRow.appendChild(
+        pill({
+          label: `${w}px`,
+          active: sh.strokeWidth === w,
+          onClick: () => {
+            applyEdit((s) => {
+              s.strokeWidth = w
+            })
+            dismiss()
+          },
+        }),
+      )
+    }
+    host.appendChild(widthRow)
+
+    host.appendChild(separator())
+
+    host.appendChild(sectionLabel('Fill'))
+    const fillRow = pillRow()
+    const fillOn = !!sh.fill
+    fillRow.appendChild(
+      pill({
+        label: 'Outline only',
+        active: !fillOn,
+        onClick: () => {
+          applyEdit((s) => {
+            s.fill = undefined
+          })
+          dismiss()
+        },
+      }),
+    )
+    fillRow.appendChild(
+      pill({
+        label: 'Filled',
+        active: fillOn,
+        onClick: () => {
+          applyEdit((s) => {
+            s.fill = s.color
+          })
+          dismiss()
+        },
+      }),
+    )
+    host.appendChild(fillRow)
+  }
+
   return {
     id: 'select',
     cursor: 'default',
@@ -1348,6 +1534,11 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
               img.rotation = undefined
               deps.saveImageMeta(img)
               deps.pushOp({ kind: 'rotate-image', imageId: img.id, before, after: 0 })
+            } else if (view.selection.kind === 'shape') {
+              const sh = view.obj as ShapeObject
+              sh.rotation = undefined
+              deps.saveShape(sh)
+              deps.pushOp({ kind: 'rotate-shape', shapeId: sh.id, before, after: 0 })
             } else {
               const t = view.obj as TextObject
               t.rotation = undefined
@@ -1592,11 +1783,13 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
             }
           }
         } else {
-          // Image / text: rect-transform objects. Move = re-derive
+          // Image / text / shape: rect-transform objects. Move = re-derive
           // transform.x/y from `before` + total delta (single in-place
           // mutation per tick; idempotent).
-          ;(view.obj as ImageObject | TextObject).transform.x = drag.before.x + totalDx
-          ;(view.obj as ImageObject | TextObject).transform.y = drag.before.y + totalDy
+          ;(view.obj as ImageObject | TextObject | ShapeObject).transform.x =
+            drag.before.x + totalDx
+          ;(view.obj as ImageObject | TextObject | ShapeObject).transform.y =
+            drag.before.y + totalDy
         }
       } else if ('rotate' in drag.kind) {
         // Rotation drag: angle is the polar angle from the object's
@@ -1608,6 +1801,8 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         const nextRotation = normalizeRotation(drag.kind.startRotation + delta)
         if (view.selection.kind === 'image') {
           ;(view.obj as ImageObject).rotation = nextRotation
+        } else if (view.selection.kind === 'shape') {
+          ;(view.obj as ShapeObject).rotation = nextRotation
         } else {
           ;(view.obj as TextObject).rotation = nextRotation
         }
@@ -1629,6 +1824,24 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
             { x: bx, y: by },
             naturalAspect,
             e.shiftKey,
+          )
+        } else if (view.selection.kind === 'shape') {
+          // Shapes have no natural aspect — shift = preserve the drag-
+          // start aspect (so lines / rects keep their proportions).
+          // minSide = 1 (vs the image default of 16) because lines /
+          // arrows legitimately have near-zero w or h in their
+          // direction encoding.
+          const sh = view.obj as ShapeObject
+          const beforeAspect = drag.before.h !== 0 ? drag.before.w / drag.before.h : 1
+          sh.transform = applyResize(
+            drag.before,
+            drag.beforeRotation,
+            drag.kind.resize,
+            drag.kind.anchorBoard,
+            { x: bx, y: by },
+            beforeAspect,
+            e.shiftKey,
+            1,
           )
         } else {
           const t = view.obj as TextObject
@@ -1689,6 +1902,8 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         deps.saveImageMeta(view.obj as ImageObject)
       } else if (view.selection.kind === 'text') {
         deps.saveText(view.obj as TextObject)
+      } else if (view.selection.kind === 'shape') {
+        deps.saveShape(view.obj as ShapeObject)
       } else {
         deps.saveStroke(view.obj as Stroke)
       }
@@ -1765,11 +1980,21 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
 
     renderContextualMenu(host, dismiss): void {
       // Right-click contextual menu — content depends on what's selected.
-      // Currently only text gets a rich menu (Color / Font / Size /
-      // B / I / U). Image-selection / no-selection both fall through
+      // Text gets the rich Color / Font / Size / B / I / U menu. Shape
+      // gets a compact Color / Stroke width / Fill toggle (mirrors the
+      // Shape tool's own menu so style edits work in either mode).
+      // Image-selection / stroke-selection / no-selection fall through
       // to the static TOOL / VIEW / EXPORT rows that toolmenu.ts adds
       // outside this hook.
       const sel = singleSelection()
+
+      if (sel?.kind === 'shape') {
+        const sh = deps.getShapes().find((x) => x.id === sel.id)
+        if (!sh || sh.deleted) return
+        renderShapeContextualMenu(host, sh, dismiss)
+        return
+      }
+
       if (!sel || sel.kind !== 'text') return
       const t = deps.getTexts().find((x) => x.id === sel.id)
       if (!t || t.deleted) return
@@ -1959,12 +2184,16 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       selectSingleById({ kind: 'stroke', id })
     },
 
+    selectShapeById(id: string): void {
+      selectSingleById({ kind: 'shape', id })
+    },
+
     selectAll(): void {
       // Commit any pending drag before replacing selection wholesale.
       commitDrag(null)
       const next: Selection[] = []
-      // Order: strokes → images → texts (matches the render z-order
-      // composite, gives a stable order callers can rely on).
+      // Order: strokes → images → texts → shapes (matches the render
+      // z-order composite, gives a stable order callers can rely on).
       for (const s of deps.getStrokes()) {
         if (!s.deleted) next.push({ kind: 'stroke', id: s.id })
       }
@@ -1973,6 +2202,9 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       }
       for (const t of deps.getTexts()) {
         if (!t.deleted) next.push({ kind: 'text', id: t.id })
+      }
+      for (const sh of deps.getShapes()) {
+        if (!sh.deleted) next.push({ kind: 'shape', id: sh.id })
       }
       selected = next
       activeDrag = null
@@ -1989,6 +2221,9 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         } else if (item.kind === 'text') {
           const t = deps.getTexts().find((x) => x.id === item.id)
           if (t && !t.deleted) next.push(item)
+        } else if (item.kind === 'shape') {
+          const sh = deps.getShapes().find((x) => x.id === item.id)
+          if (sh && !sh.deleted) next.push(item)
         } else {
           const s = deps.getStrokes().find((x) => x.id === item.id)
           if (s && !s.deleted) next.push(item)
@@ -2051,6 +2286,13 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
           t.deleted = true
           deps.saveText(t)
           deps.pushOp({ kind: 'delete-text', textId: sel.id })
+          didDelete = true
+        } else if (sel.kind === 'shape') {
+          const sh = deps.getShapes().find((x) => x.id === sel.id)
+          if (!sh || sh.deleted) continue
+          sh.deleted = true
+          deps.saveShape(sh)
+          deps.pushOp({ kind: 'delete-shape', shapeId: sel.id })
           didDelete = true
         } else {
           const s = deps.getStrokes().find((x) => x.id === sel.id)

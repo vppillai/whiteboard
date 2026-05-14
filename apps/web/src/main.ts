@@ -483,6 +483,8 @@ async function main(): Promise<void> {
     saveImageMeta: persistImageMeta,
     getTexts: () => texts,
     saveText: persistText,
+    getShapes: () => shapes,
+    saveShape: persistShape,
     getStrokes: () => strokes,
     // Stroke persistence — same warn-and-continue policy as
     // persistImageMeta / persistText. Used by the Select tool's

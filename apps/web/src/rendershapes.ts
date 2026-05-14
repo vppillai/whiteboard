@@ -288,3 +288,116 @@ export function shapeAABB(s: ShapeObject): {
   }
   return { minX, minY, maxX, maxY }
 }
+
+/**
+ * Hit-test: returns true when board point `p` is inside (or, for line/
+ * arrow, within strokeWidth tolerance of) the shape. Used by the Select
+ * tool's tap-select pass.
+ *
+ * Per-kind logic:
+ *   - rect: rotated-rect AABB after inverse-rotation around the center
+ *     (same pattern as pointInImage).
+ *   - ellipse: rotated-ellipse interior test (inverse-rotate the point,
+ *     then check (x/rx)² + (y/ry)² ≤ 1).
+ *   - line / arrow: distance from p to the line segment (after inverse-
+ *     rotation), within max(strokeWidth/2, screenTol) tolerance.
+ *
+ * `screenTol` is a board-space tolerance the caller scales by 1/zoom so
+ * thin shapes are still tap-selectable at any zoom level. Caller passes
+ * the same Lasso/Select-style tolerance used for strokes.
+ */
+export function pointInShape(
+  p: { x: number; y: number },
+  s: ShapeObject,
+  screenTol: number,
+): boolean {
+  const r = s.rotation ?? 0
+  const cx = s.transform.x + s.transform.w / 2
+  const cy = s.transform.y + s.transform.h / 2
+  const local =
+    Math.abs(r) < ROTATION_EPSILON ? p : rotatePointAroundCenter(p, { x: cx, y: cy }, -r)
+  const { x, y, w, h } = s.transform
+  const nx = w >= 0 ? x : x + w
+  const ny = h >= 0 ? y : y + h
+  const nw = Math.abs(w)
+  const nh = Math.abs(h)
+  const tol = Math.max(s.strokeWidth / 2, screenTol)
+
+  if (s.shape === 'rect') {
+    if (s.fill) {
+      return local.x >= nx && local.x <= nx + nw && local.y >= ny && local.y <= ny + nh
+    }
+    // Outline-only rect: hit only when near an edge (within tol).
+    const insideX = local.x >= nx - tol && local.x <= nx + nw + tol
+    const insideY = local.y >= ny - tol && local.y <= ny + nh + tol
+    if (!insideX || !insideY) return false
+    const nearLeft = Math.abs(local.x - nx) <= tol
+    const nearRight = Math.abs(local.x - (nx + nw)) <= tol
+    const nearTop = Math.abs(local.y - ny) <= tol
+    const nearBottom = Math.abs(local.y - (ny + nh)) <= tol
+    return nearLeft || nearRight || nearTop || nearBottom
+  }
+
+  if (s.shape === 'ellipse') {
+    const ecx = nx + nw / 2
+    const ecy = ny + nh / 2
+    const rx = nw / 2
+    const ry = nh / 2
+    if (rx < 1e-6 || ry < 1e-6) return false
+    const dx = (local.x - ecx) / rx
+    const dy = (local.y - ecy) / ry
+    const d2 = dx * dx + dy * dy
+    if (s.fill) return d2 <= 1
+    // Outline-only ellipse: hit when on the boundary within tol. We
+    // approximate by checking that d2 is near 1 with a tolerance scaled
+    // by the smaller of rx/ry so it reads roughly as constant-thickness.
+    const minR = Math.min(rx, ry)
+    if (minR < 1e-6) return false
+    const tolFrac = tol / minR
+    return d2 >= (1 - tolFrac) * (1 - tolFrac) && d2 <= (1 + tolFrac) * (1 + tolFrac)
+  }
+
+  // line / arrow: distance from local point to segment from (x,y) to
+  // (x+w, y+h). The endpoint encoding preserves draw direction; the
+  // hit test doesn't care about direction, just distance.
+  const ax = x
+  const ay = y
+  const bx = x + w
+  const by = y + h
+  const dx = bx - ax
+  const dy = by - ay
+  const len2 = dx * dx + dy * dy
+  if (len2 < 1e-12) {
+    // Zero-length segment — fall back to point-distance check.
+    const px = local.x - ax
+    const py = local.y - ay
+    return px * px + py * py <= tol * tol
+  }
+  let t = ((local.x - ax) * dx + (local.y - ay) * dy) / len2
+  if (t < 0) t = 0
+  if (t > 1) t = 1
+  const projX = ax + t * dx
+  const projY = ay + t * dy
+  const ex = local.x - projX
+  const ey = local.y - projY
+  return ex * ex + ey * ey <= tol * tol
+}
+
+/** Rotate `p` around `center` by angle (radians). Same shape as
+ *  imagegeom.rotateAroundPoint — kept local to avoid an extra
+ *  cross-file dependency in this geometry helper. */
+function rotatePointAroundCenter(
+  p: { x: number; y: number },
+  center: { x: number; y: number },
+  angle: number,
+): { x: number; y: number } {
+  if (angle === 0) return p
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  const dx = p.x - center.x
+  const dy = p.y - center.y
+  return {
+    x: center.x + dx * cos - dy * sin,
+    y: center.y + dx * sin + dy * cos,
+  }
+}
