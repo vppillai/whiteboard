@@ -1,12 +1,21 @@
 /**
  * Help overlay (toggled with `?`). Bottom-right corner; pointer-events:none
  * on the wrapper so it doesn't intercept drawing, but the GitHub repo link
- * opts back in via pointer-events:auto so it remains clickable.
+ * and the close button opt back in via pointer-events:auto so they remain
+ * clickable while the rest of the panel stays transparent to pen input.
+ *
+ * Dismiss paths: `?` (toggle), Esc (handled by main.ts's keymap cancel
+ * via `isOpen` + `close`), and the ✕ button in the top-right corner.
  */
 
 export interface HelpOverlay {
   el: HTMLElement
   toggle: () => void
+  /** True when the overlay is currently visible. Used by the Esc
+   *  handler in main.ts to decide whether Esc should claim the event. */
+  isOpen: () => boolean
+  /** Close the overlay if open. No-op if already hidden. */
+  close: () => void
 }
 
 const SHORTCUTS = [
@@ -16,9 +25,17 @@ const SHORTCUTS = [
   'E (hold)           spring-loaded eraser  (release reverts)',
   'Shift + E          sticky eraser',
   'Shift + erase      object mode (single stroke per click)',
-  'S                  tool: lasso',
-  '⌘/Ctrl + A         select all (lasso)',
-  'Delete             delete lasso selection  (also Backspace)',
+  'V or S             tool: select  (universal pointer; click / marquee / Shift+click)',
+  'L                  tool: laser  (fading pointer trail)',
+  'T                  tool: text   (mono, 12px default — change in menu)',
+  '⌘/Ctrl + B/I/U     bold / italic / underline (in text edit or on selected text)',
+  'Esc Esc            toggle Draw ↔ Select',
+  'Esc (text edit)    commit + return to previous tool',
+  'Esc (select)       clear selection',
+  '⌘/Ctrl + A         select all  (strokes + images + texts)',
+  '⌘/Ctrl + C / X     copy / cut selection (single image → bytes · else → PNG + native bundle)',
+  '⌘/Ctrl + V         paste image / text / whiteboard bundle (vectors back inside; PNG outside)',
+  'Delete             delete the active selection  (also Backspace)',
   '1 – 5              brush preset (pen / marker / pencil / hi / brush)',
   'C                  color picker (at pointer)',
   'O                  options (grid type, spacing)',
@@ -28,7 +45,7 @@ const SHORTCUTS = [
   '⌘/Ctrl + Shift + K clear board (confirm twice)',
   '',
   'M                  toggle metrics',
-  'T                  cycle theme',
+  'Shift + T          cycle theme',
   '?                  toggle this help',
   '',
   '⌘/Ctrl + 0         reset zoom',
@@ -50,6 +67,17 @@ export function createHelpOverlay(): HelpOverlay {
   el.id = 'whiteboard-help'
   el.style.display = 'none'
 
+  // Top-right close button. Pointer-events:auto on the button itself so
+  // it remains clickable through the panel's wrapper-level
+  // pointer-events:none.
+  const closeBtn = document.createElement('button')
+  closeBtn.type = 'button'
+  closeBtn.className = 'whiteboard-help-close'
+  closeBtn.title = 'Close help (Esc)'
+  closeBtn.setAttribute('aria-label', 'Close help')
+  closeBtn.textContent = '✕'
+  el.appendChild(closeBtn)
+
   const shortcuts = document.createElement('pre')
   shortcuts.className = 'whiteboard-help-shortcuts'
   shortcuts.textContent = SHORTCUTS
@@ -66,8 +94,15 @@ export function createHelpOverlay(): HelpOverlay {
   footer.appendChild(link)
   el.appendChild(footer)
 
-  const toggle = (): void => {
-    el.style.display = el.style.display === 'none' ? 'block' : 'none'
+  const isOpen = (): boolean => el.style.display !== 'none'
+  const close = (): void => {
+    if (isOpen()) el.style.display = 'none'
   }
-  return { el, toggle }
+  const toggle = (): void => {
+    el.style.display = isOpen() ? 'none' : 'block'
+  }
+
+  closeBtn.addEventListener('click', close)
+
+  return { el, toggle, isOpen, close }
 }

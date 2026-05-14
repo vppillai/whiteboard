@@ -17,6 +17,7 @@ import {
   removeCustomSwatch,
   setGridSpacing,
   setGridType,
+  setMouseSyntheticPressure,
   setPredictedEvents,
   setPresetField,
 } from '../settings'
@@ -425,10 +426,45 @@ function renderInputSection(): Section {
   })
   row.appendChild(input)
 
+  // ---- Mouse synthetic pressure -----------------------------------------
+  // Second toggle in the Input section. Mouse pointer events report a
+  // constant 0.5 pressure; the synthesis maps screen-space velocity
+  // (fast = thin, slow = thick) so mouse strokes get some shape variation.
+  // Off for pen / touch where real pressure exists.
+  const mspRow = document.createElement('div')
+  mspRow.className = 'whiteboard-settings-pe-row'
+  el.appendChild(mspRow)
+
+  const mspLabel = document.createElement('label')
+  mspLabel.className = 'whiteboard-settings-pe-label'
+  mspRow.appendChild(mspLabel)
+
+  const mspTitle = document.createElement('span')
+  mspTitle.className = 'whiteboard-settings-pe-title'
+  mspTitle.textContent = 'Mouse synthetic pressure'
+  mspLabel.appendChild(mspTitle)
+
+  const mspHelp = document.createElement('span')
+  mspHelp.className = 'whiteboard-settings-pe-help'
+  mspHelp.textContent =
+    'Shape mouse-drawn strokes from cursor velocity (fast = thinner, ' +
+    'slow = thicker). Pen / touch ignore this — they have real pressure.'
+  mspLabel.appendChild(mspHelp)
+
+  const mspInput = document.createElement('input')
+  mspInput.type = 'checkbox'
+  mspInput.className = 'whiteboard-settings-pe-input'
+  mspInput.checked = getSettings().mouseSyntheticPressure
+  mspInput.addEventListener('change', () => {
+    setMouseSyntheticPressure(mspInput.checked)
+  })
+  mspRow.appendChild(mspInput)
+
   return {
     el,
     update: () => {
       input.checked = getSettings().predictedEvents
+      mspInput.checked = getSettings().mouseSyntheticPressure
     },
   }
 }

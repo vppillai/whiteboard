@@ -12,9 +12,9 @@
  * the cache's load promise will set `committedDirty` so they appear on a
  * later frame.
  *
- * Coupling to main.ts kept minimal: callers pass the images list, camera,
- * viewport bbox, and the batch-delete mark set (via a predicate). No
- * imports from main.ts.
+ * Coupling to main.ts kept minimal: callers pass the images list,
+ * camera, viewport bbox, and a predicate identifying images that are
+ * part of a Select-tool multi-selection. No imports from main.ts.
  */
 
 import type { ImageObject } from '@whiteboard/shared'
@@ -38,14 +38,16 @@ export interface RenderImagesParams {
   images: readonly ImageObject[]
   /** Committed layer with camera transform already applied. */
   layer: CanvasLayer
-  /** Camera scale — used to keep batch-delete outline stroke width and
-   *  dash pattern visually constant under zoom. */
+  /** Camera scale — used to keep the multi-selection outline stroke
+   *  width and dash pattern visually constant under zoom. */
   camera: Camera
   /** Board-space viewport bbox for culling. */
   viewBBox: ViewBBox
-  /** Predicate identifying images that should render with the dashed
-   *  batch-delete outline (Cmd+A flow). */
-  isMarkedForBatchDelete: (id: string) => boolean
+  /** Predicate identifying images that are part of a Select-tool
+   *  multi-selection (length > 1; the single-selection visual is
+   *  painted by Select's own redraw with handles + outline). Used to
+   *  decorate each image with a dashed accent outline. */
+  isMultiSelected: (id: string) => boolean
 }
 
 /**
@@ -58,10 +60,10 @@ export interface RenderImagesParams {
  */
 const ROTATION_EPSILON = 1e-9
 
-const BATCH_OUTLINE_COLOR = '#2563eb'
+const MULTI_SELECTION_OUTLINE_COLOR = '#2563eb'
 
 export function renderImages(params: RenderImagesParams): void {
-  const { images, layer, camera, viewBBox, isMarkedForBatchDelete } = params
+  const { images, layer, camera, viewBBox, isMultiSelected } = params
   const ctx = layer.ctx
   for (const img of images) {
     if (img.deleted) continue
@@ -75,26 +77,26 @@ export function renderImages(params: RenderImagesParams): void {
     if (bb.maxY < viewBBox.minY || bb.minY > viewBBox.maxY) continue
     const { x, y, w, h } = img.transform
     const r = img.rotation ?? 0
-    const isMarked = isMarkedForBatchDelete(img.id)
+    const inMultiSelection = isMultiSelected(img.id)
     if (Math.abs(r) < ROTATION_EPSILON) {
       ctx.drawImage(el, x, y, w, h)
-      if (isMarked) drawBatchOutline(ctx, x, y, w, h, camera.scale)
+      if (inMultiSelection) drawMultiSelectionOutline(ctx, x, y, w, h, camera.scale)
     } else {
       ctx.save()
       ctx.translate(x + w / 2, y + h / 2)
       ctx.rotate(r)
       ctx.drawImage(el, -w / 2, -h / 2, w, h)
-      if (isMarked) drawBatchOutline(ctx, -w / 2, -h / 2, w, h, camera.scale)
+      if (inMultiSelection) drawMultiSelectionOutline(ctx, -w / 2, -h / 2, w, h, camera.scale)
       ctx.restore()
     }
   }
 }
 
-/** Thin dashed outline drawn around a batch-marked image. Stroke width
- *  and dash pattern divide by camera.scale so the outline reads as ~2px
- *  thick at any zoom level — matches the way the Select tool draws its
- *  handles. */
-function drawBatchOutline(
+/** Thin dashed outline drawn around an image that's part of a Select-
+ *  tool multi-selection. Stroke width and dash pattern divide by
+ *  camera.scale so the outline reads as ~2px thick at any zoom level
+ *  — matches the way the Select tool draws its handles. */
+function drawMultiSelectionOutline(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
@@ -103,7 +105,7 @@ function drawBatchOutline(
   scale: number,
 ): void {
   ctx.save()
-  ctx.strokeStyle = BATCH_OUTLINE_COLOR
+  ctx.strokeStyle = MULTI_SELECTION_OUTLINE_COLOR
   ctx.lineWidth = 2 / scale
   ctx.setLineDash([6 / scale, 4 / scale])
   ctx.strokeRect(x, y, w, h)

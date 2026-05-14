@@ -12,11 +12,13 @@ A low-latency, browser-based whiteboard tuned for Wacom Intuos and other indirec
 
 - **Five brush presets** — pen, marker, pencil, highlighter, brush — each with an independently customizable pressure curve.
 - **Two eraser modes** — pixel-mask wipe ("cuts through" strokes, leaves disconnected runs alive) and object delete (whole stroke).
-- **Lasso select** — polygon or tap; drag-to-move, delete-selected, select-all.
-- **Image paste, draw on top** — `Ctrl/Cmd+V` or drag-drop a PNG / JPEG / WebP / GIF onto the canvas; the dedicated **Select tool** (`V`) provides move / resize (Shift = aspect-lock) / rotate (double-click handle to reset to 0°) / delete. Images live below strokes so pen-on-image is the natural workflow. Exports (PNG / SVG / PDF) include images in z-order.
-- **Pressure-curve editor** — per-brush bezier graph with a live test pad.
+- **Select tool (`V` or `S`) — universal selection.** Click any object (image, text, or stroke) to manipulate it with handles (images get 8 handles + rotation; texts get 4 corners + E/W wrap-width edges + rotation; strokes are move-only via body-drag). Marquee-drag on empty canvas to multi-select, `Shift+click` to toggle individual objects, `Cmd/Ctrl+A` to select everything. Drag any selected object to move the whole group; `Delete` to remove all. `Cmd/Ctrl+C` / `Cmd/Ctrl+X` copies selection as a transparent-background PNG (or original bytes for a single image) for paste into Google Docs / Slack / Confluence. Pasting back inside the whiteboard restores strokes / texts as live vectors (relative layout preserved); pasting outside lands as PNG. Double-click the rotation handle to reset to 0°; double-click a text body to edit.
+- **Image paste** — `Ctrl/Cmd+V` or drag-drop a PNG / JPEG / WebP / GIF onto the canvas; lands as a floating object below the strokes layer so pen-on-image is the natural workflow. Auto-switches to the Select tool with handles shown so the user can drag into place.
+- **Text** (`T`) — multi-line text objects with mono / 12 px defaults. Bold / italic / underline via `Cmd/Ctrl+B/I/U`. Right-click menu for font / size / color. `Ctrl/Cmd+V` on the canvas with clipboard text creates a new TextObject at the cursor. Texts copied from the whiteboard paste back natively as text objects (with their font / size / color / wrap-width preserved). Drag the E/W edge handle on a selected text in `V` mode to set a wrap width and reflow content.
+- **Laser** (`L`) — fading polyline trail for presentations; color via the curated palette. Nothing persists.
+- **Exports** — PNG, SVG, PDF; all include images + texts in z-order with rotation and wrap-width preserved.
+- **Pressure-curve editor** — per-brush bezier graph with a live test pad. Mouse-mode synthetic pressure (velocity-shaped) ships on by default for mouse strokes.
 - **Infinite canvas** — wheel-pan, `Cmd/Ctrl+wheel` zoom, `Cmd/Ctrl+0` reset, `Cmd/Ctrl+1` zoom-to-fit.
-- **Export** — PNG, SVG (mask-based erasure), PDF (lazy-loaded jsPDF).
 - **Themes** — light / dark / system; the `ink` color token tracks the theme.
 - **Color picker** (`C`) — curated palette, custom swatches, recent colors.
 - **Configurable grid** — dots / lines / ruled / none, multiple spacings.
@@ -24,7 +26,7 @@ A low-latency, browser-based whiteboard tuned for Wacom Intuos and other indirec
 - **Settings panel** (`Cmd/Ctrl+,`) — brush tuning, swatches, theme, grid, advanced.
 - **Op-based undo / redo** — cheap, bounded at 500 entries, listener-cleanup wired through HMR + `beforeunload`.
 - **Local persistence** — IndexedDB; pick up where you left off after reload; no account required.
-- **Comprehensive keyboard shortcuts** — `?` opens the in-app overlay.
+- **Comprehensive keyboard shortcuts** — `?` opens the in-app overlay. Includes `Esc Esc` to toggle Draw ↔ Select, `Shift+T` to cycle theme (the unmodified `T` is the Text tool), and click-to-select strokes in Select mode.
 - **Sub-33 ms pen-to-photon latency** on Wacom Intuos — instrumented and measured (`?perftest=1`).
 
 ## Why this exists
@@ -93,7 +95,7 @@ Post-v1 work, tracked in [docs/milestones.md](docs/milestones.md) and [SPEC § 1
 
 ## Project status
 
-**v1.1.0** — single-user, offline-first, production-ready for the indirect-input drawing case the project was built for. Lint, typecheck, and 100 unit tests run on every push (`bun test`); latency budget (≤ 33 ms pen-to-photon) is feel-tested on Wacom Intuos at every milestone close.
+**v1.2.0** — single-user, offline-first, production-ready for the indirect-input drawing case the project was built for. Lint, typecheck, and 127 unit tests run on every push (`bun test`); latency budget (≤ 33 ms pen-to-photon) is feel-tested on Wacom Intuos at every milestone close.
 
 > **Authorship note.** This codebase is AI-generated under human direction: produced primarily by an AI coding assistant working from a human-authored spec, with design decisions, feel-test gates, and acceptance by a human. Published as OSS for anyone solving the same indirect-input drawing problem.
 

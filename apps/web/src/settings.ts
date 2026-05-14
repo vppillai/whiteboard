@@ -9,7 +9,7 @@
  * existing strokes); any other value is treated as a literal CSS color.
  */
 
-import type { BrushConfig } from '@whiteboard/shared'
+import type { BrushConfig, TextFontFamily } from '@whiteboard/shared'
 import { BRUSH_PRESETS, type BrushId, isValidBrushId } from './brushes'
 
 export type GridType = 'dots' | 'lines' | 'ruled' | 'none'
@@ -72,6 +72,25 @@ export interface SettingsV1 {
   customSwatches: string[]
   recentColors: string[]
   predictedEvents: boolean // NEW (M2)
+  /** Synthesize stroke pressure from pointer velocity for `pointerType ===
+   *  'mouse'` strokes (pen / touch ignore this; they have real pressure).
+   *  Fast = thinner, slow = thicker — gives mouse-drawn strokes some shape
+   *  variation instead of the dead 0.5-flat default. v1.2. */
+  mouseSyntheticPressure: boolean
+  /** Color of the laser pointer trail. Stored separately from `color` so
+   *  picking laser-red doesn't carry over when switching to pen. Default
+   *  is the curated palette's red, matching real laser pointers. v1.2. */
+  laserColor: string
+  /** Sticky-session defaults applied to the next new text the Text tool
+   *  creates. Per-text formatting is stored on each TextObject; these
+   *  are just the initial values. User-facing defaults: mono / 12px /
+   *  no B/I/U / ink color. v1.2. */
+  textFont: TextFontFamily
+  textSize: number
+  textBold: boolean
+  textItalic: boolean
+  textUnderline: boolean
+  textColor: string
   syncedAt?: number
   remoteId?: string
 }
@@ -100,6 +119,14 @@ function defaultV1(): SettingsV1 {
     customSwatches: [],
     recentColors: [],
     predictedEvents: false, // NEW (M2; ADR 0004)
+    mouseSyntheticPressure: true, // NEW (v1.2): mouse strokes get velocity-shaped pressure
+    laserColor: '#ef4444', // NEW (v1.2): curated red, matches real laser pointer
+    textFont: 'mono', // NEW (v1.2): per user request — default mono
+    textSize: 12, // NEW (v1.2): per user request — default 12px
+    textBold: false,
+    textItalic: false,
+    textUnderline: false,
+    textColor: 'ink',
   }
 }
 
@@ -156,6 +183,20 @@ export function migrate(input: unknown): SettingsV1 {
       ? v.recentColors.filter(isValidHex).slice(0, RECENT_COLORS_CAP)
       : [],
     predictedEvents: typeof v.predictedEvents === 'boolean' ? v.predictedEvents : false,
+    mouseSyntheticPressure:
+      typeof v.mouseSyntheticPressure === 'boolean'
+        ? v.mouseSyntheticPressure
+        : DEFAULTS.mouseSyntheticPressure,
+    laserColor: typeof v.laserColor === 'string' ? v.laserColor : DEFAULTS.laserColor,
+    textFont:
+      v.textFont === 'mono' || v.textFont === 'sans' || v.textFont === 'serif'
+        ? v.textFont
+        : DEFAULTS.textFont,
+    textSize: typeof v.textSize === 'number' && v.textSize > 0 ? v.textSize : DEFAULTS.textSize,
+    textBold: typeof v.textBold === 'boolean' ? v.textBold : DEFAULTS.textBold,
+    textItalic: typeof v.textItalic === 'boolean' ? v.textItalic : DEFAULTS.textItalic,
+    textUnderline: typeof v.textUnderline === 'boolean' ? v.textUnderline : DEFAULTS.textUnderline,
+    textColor: typeof v.textColor === 'string' ? v.textColor : DEFAULTS.textColor,
     syncedAt: typeof v.syncedAt === 'number' ? v.syncedAt : undefined,
     remoteId: typeof v.remoteId === 'string' ? v.remoteId : undefined,
   }
@@ -335,6 +376,93 @@ export function setBrushId(brush: BrushId): void {
 export function setPredictedEvents(value: boolean): void {
   if (state.predictedEvents === value) return
   state.predictedEvents = value
+  persist()
+  emit()
+}
+
+/** Toggle mouse synthetic pressure on/off. v1.2. Pen / touch unaffected. */
+export function setMouseSyntheticPressure(value: boolean): void {
+  if (state.mouseSyntheticPressure === value) return
+  state.mouseSyntheticPressure = value
+  persist()
+  emit()
+}
+
+/** Get the laser pointer trail color. v1.2. */
+export function getLaserColor(): string {
+  return state.laserColor
+}
+
+/** Set the laser pointer trail color. v1.2. Stored separately from pen
+ *  `color` so the laser-red doesn't carry over to drawing. */
+export function setLaserColor(value: string): void {
+  if (state.laserColor === value) return
+  state.laserColor = value
+  persist()
+  emit()
+}
+
+// ─── Text sticky defaults (v1.2) ───────────────────────────────────────────
+// One getter + one setter per field. Text tool reads these for the
+// "next new text" defaults; menu interactions and Cmd+B/I/U updates
+// write back here so the next new text inherits the user's choices.
+
+export function getTextFont(): TextFontFamily {
+  return state.textFont
+}
+export function setTextFont(value: TextFontFamily): void {
+  if (state.textFont === value) return
+  state.textFont = value
+  persist()
+  emit()
+}
+
+export function getTextSize(): number {
+  return state.textSize
+}
+export function setTextSize(value: number): void {
+  if (state.textSize === value) return
+  state.textSize = value
+  persist()
+  emit()
+}
+
+export function getTextBold(): boolean {
+  return state.textBold
+}
+export function setTextBold(value: boolean): void {
+  if (state.textBold === value) return
+  state.textBold = value
+  persist()
+  emit()
+}
+
+export function getTextItalic(): boolean {
+  return state.textItalic
+}
+export function setTextItalic(value: boolean): void {
+  if (state.textItalic === value) return
+  state.textItalic = value
+  persist()
+  emit()
+}
+
+export function getTextUnderline(): boolean {
+  return state.textUnderline
+}
+export function setTextUnderline(value: boolean): void {
+  if (state.textUnderline === value) return
+  state.textUnderline = value
+  persist()
+  emit()
+}
+
+export function getTextColor(): string {
+  return state.textColor
+}
+export function setTextColor(value: string): void {
+  if (state.textColor === value) return
+  state.textColor = value
   persist()
   emit()
 }

@@ -147,7 +147,7 @@ Stored locally in IndexedDB as one row per stroke. The schema is CRDT-compatible
 
 ### 4.1 Tool set (v1)
 
-Brush, Eraser (two modes — see below), Lasso-select, Pan. That's it.
+Brush (Pen), Eraser (two modes — see below), Text, Select (universal selection — single + multi via marquee / Shift+click / Cmd+A; see [ADRs 0014](docs/decisions/0014-select-tool-selection-union.md) + [0016](docs/decisions/0016-lasso-into-select-absorption.md)), Laser, Pan. That's it. The original Lasso tool was absorbed into Select post-v1.2.
 
 > **Eraser model:** the wipe-mode eraser is **segment-level** ("cuts through") — only the part of a stroke the eraser physically passes over disappears; disconnected parts of the original stroke survive as separate live runs. Implemented per [ADR 0008](docs/decisions/0008-segment-eraser.md) via a per-sample mask (`Stroke.erasedSamples`). The object-mode eraser (Shift-modifier or Item pill) is still whole-stroke deletion — surgical removal when you want a stroke gone entirely.
 
@@ -173,7 +173,7 @@ The original toolbar commitment was retired during M2 brainstorming on tenet gro
 | `P`                            | Draw tool + Pen brush preset              | ✅     |
 | `E` (hold)                     | Spring-loaded eraser — release reverts    | ✅     |
 | `Shift + E`                    | Sticky eraser (toggle to eraser tool)     | ✅     |
-| `S`                            | Select (lasso)                            | ✅     |
+| `V` / `S`                      | Select tool (universal — image / text / stroke; single or multi) | ✅     |
 | `Space` (hold) + drag          | Pan (any pointer device)                  | ✅     |
 | Middle-mouse drag              | Pan                                       | ✅     |
 | `1`–`5`                        | Switch to brush preset 1–5                | M1     |
@@ -185,7 +185,7 @@ The original toolbar commitment was retired during M2 brainstorming on tenet gro
 | `Cmd/Ctrl + Shift + Z`         | Redo (also `Cmd/Ctrl + Y`)                | ✅     |
 | `Cmd/Ctrl + 0`                 | Reset zoom                                | ✅     |
 | `Cmd/Ctrl + =` / `-`           | Zoom in / out                             | ✅     |
-| `Cmd/Ctrl + A`                 | Select all (activates lasso)              | ✅     |
+| `Cmd/Ctrl + A`                 | Select all non-deleted objects (activates Select tool) | ✅     |
 | `Delete` / `Backspace`         | Delete selected                           | ✅     |
 | `Cmd/Ctrl + Shift + K`         | Clear board (confirm twice within 3 s)    | ✅     |
 | `M`                            | Toggle metrics HUD                        | ✅     |
@@ -217,11 +217,11 @@ The v1 ship is single-user, single-device — no rooms, no shared URLs, no prese
 
 All three run in-browser via `transformers.js` + WebGPU. Triggered explicitly by the user; never auto.
 
-1. **Shape recognition** — small ONNX classifier on stroke-feature vectors. Lasso → press `R` → suggest clean primitive with accept/reject. ~5–10 MB.
-2. **Handwriting → text** — runs over selected lasso region. Output is an editable text node. ~30–60 MB. English first.
-3. **Math / LaTeX** — separate model, lasso-scoped. Outputs LaTeX, rendered via KaTeX. ~80–120 MB; lazy-loaded only when invoked.
+1. **Shape recognition** — small ONNX classifier on stroke-feature vectors. Select the strokes → press `R` → suggest clean primitive with accept/reject. ~5–10 MB.
+2. **Handwriting → text** — runs over the current Select-tool selection. Output is an editable text node. ~30–60 MB. English first.
+3. **Math / LaTeX** — separate model, scoped to the current selection. Outputs LaTeX, rendered via KaTeX. ~80–120 MB; lazy-loaded only when invoked.
 
-All three: lasso → invoke → streamed result → accept/replace or reject. No always-on inference, no telemetry, no cloud fallback.
+All three: select → invoke → streamed result → accept/replace or reject. No always-on inference, no telemetry, no cloud fallback.
 
 ## 8. Deployment
 
@@ -296,7 +296,10 @@ Each milestone closes only after: feature complete, doc-update reviewed, lint + 
 - **In-flight stroke crash recovery.** Bundled into the deferred M3 design (Decision 9 in the archive): ~2 s autosave of the active stroke to a localStorage slot, with a restore-on-boot prompt. Tenet-aligned, ~50 LOC, works in both modes. Held back from v1 to keep the surface tight; ship as a small standalone milestone if a user-facing pain emerges. Implementation hook: `stroke.ts` + `tools/pen.ts` `pointerdown`/`pointerup` hooks.
 - **Screen-tablet support.** Re-enable predicted events for direct-input devices (iPad Pencil, Wacom MobileStudio, Surface Pro pen) where prediction is a clear win. Likely shape: a per-device-class preference exposed via the M2 settings panel, defaulting to off for indirect input and on for direct input. Trigger: a user with a screen tablet asks.
 - **Performance under stroke count.** The current 2D-canvas + perfect-freehand rasterizes each stroke on the CPU (~1 ms each). Pan / zoom redraws all committed strokes; at ~500+ strokes this is the WebGL trigger. Track in `?perftest=scale` (planned at M1).
-- **Paste image, draw on top.** User intent: `Cmd/Ctrl+V` a screenshot or image into the board; image appears as a non-editable layer; pen strokes draw on top. Implications: a new object kind in the data model (image vs stroke), an image rendering layer between the grid and the strokes, Blob persistence in IndexedDB, and (if/when the deferred sharing layer returns) a binary-data sync story — likely out-of-band via the WebSocket relay rather than encoded into the Y.Doc to avoid bloating CRDT updates. Likely lands as a discrete milestone post-v1 ship; placeholder name **M5.1: image-paste**. The current `Stroke` type doesn't accommodate this — when we get here, an ADR formalizes a `BoardObject = Stroke | ImageObject` discriminated union and rerouting through that.
+- ~~**Paste image, draw on top.**~~ Shipped at v1.1.0 — `Cmd/Ctrl+V` (and drag-drop) places PNG / JPEG / WebP / GIF images below the strokes layer; Select tool (`V`) drives move / resize / rotate / delete. Blob persistence lives in a sibling `images-blob` IDB store. The discriminated-union framing did NOT happen — instead, `BoardObject` ships in `packages/shared/src/types.ts` as a structural base interface that `ImageObject` and `TextObject` extend; `Stroke` stays outside (sample-driven, not rect-driven). When sharing returns, the binary-sync story for image blobs is the outstanding piece (out-of-band via WebSocket rather than in-Y.Doc), tracked as the M5.1 image-binaries scope in [ADR 0012](docs/decisions/0012-sharing-deferred.md).
+- ~~**First-class text.**~~ Shipped at v1.2.0 — `T` activates the Text tool, contenteditable DOM overlay handles input, `create-text` / `edit-text` / `transform-text` / `rotate-text` / `delete-text` ops on the standard undo pipeline, wrap-width per object, Cmd+B/I/U for object-level format. Text payloads persist inline in the new `texts` IDB store (DB v3). Select tool extended to the third variant in its discriminated union (`'image' | 'text'` → `'image' | 'text' | 'stroke'` in v1.2 post-release). See [ADRs 0013–0015](docs/decisions/) for the design.
+- ~~**Whiteboard-native clipboard round-trip.**~~ Shipped post-v1.2 — strokes and texts paste back as live vectors inside the whiteboard via a dual-slot clipboard format (`image/png` for external apps + `text/html` carrying `data-whiteboard-v1` for whiteboard-internal paste). Relative layout preserved via a bundle-origin field; freshly id'd on paste so source + paste can coexist. Selections containing images fall back to PNG-only (image-bytes round-trip deferred — likely a separate blob slot or M3 server-side handoff). DoS caps at 5000 strokes / 5000 texts / 50000 samples per stroke. See [ADR 0017](docs/decisions/0017-whiteboard-native-clipboard-format.md).
+- ~~**`transform-many` composite op.**~~ Shipped post-v1.2 — multi-object move drags now emit a single composite op carrying per-item before/after transforms (image / text rects + stroke dx/dy deltas) instead of N independent per-item ops. One undo step reverses the whole group move; M3 sync prep — one transaction + one wire update per peer per gesture instead of N. Resize / rotation intentionally stay single-object (heterogeneous-group resize lacks a coherent UX).
 - **Backend sync of user settings.** M1.7 (see milestones) establishes a sync-ready settings schema (versioned, ID-keyed, with reserved `syncedAt` / `remoteId` fields) but no backend. After v1 ship, when there's a notion of "user login" and the server gains a settings store, the local settings layer gets a sync delegate that pushes / pulls without changing the schema. Conflict policy is out of scope until the feature is staffed.
 - **iPad / Apple Pencil first-class.** Touch input works today via Pointer Events; pinch-zoom does too. A polished iPad experience — palm rejection, larger pen-friendly hit targets in popovers, prediction enabled for direct-input devices (per ADR 0004), Pencil-specific tilt and barrel-roll where supported — would be a meaningful audience expansion. Not on the v1 critical path; pick it up if there's user demand or iPad-specific quirks surface during v1 dogfooding.
 - **Multi-board / boards list.** Currently the app holds a single board in IDB. Multiple named boards with switcher UI, rename, delete, last-modified timestamps — useful, but a real scope addition: new data model, new persistence boundary, future implications if the deferred sharing layer returns (each board would map to its own room). Defer until single-board usage proves the limit.

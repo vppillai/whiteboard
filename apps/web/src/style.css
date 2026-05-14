@@ -257,6 +257,9 @@ body {
   bottom: 12px;
   right: 12px;
   padding: 10px 14px;
+  /* Extra right padding so the shortcut text doesn't run under the
+     absolute-positioned close button in the top-right corner. */
+  padding-right: 30px;
   background: var(--hud-bg);
   color: var(--hud-fg);
   border: 1px solid var(--hud-border);
@@ -267,6 +270,31 @@ body {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   opacity: 0.92;
+}
+
+#whiteboard-help .whiteboard-help-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--hud-fg);
+  font: 12px / 1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  cursor: pointer;
+  opacity: 0.6;
+  /* Pin pointer-events back on so the button is clickable through the
+     panel wrapper's pointer-events:none. */
+  pointer-events: auto;
+  transition: opacity 0.12s, background-color 0.12s;
+}
+
+#whiteboard-help .whiteboard-help-close:hover {
+  opacity: 1;
+  background: var(--hud-border);
 }
 
 #whiteboard-help .whiteboard-help-shortcuts {
@@ -369,6 +397,29 @@ body {
   overflow: hidden;
 }
 
+/* Attention pulse — toggled when a user action (e.g. right-click on
+   canvas while this popover is pinned) would otherwise have opened a
+   new popover. Redirects the eye to the pinned popover instead of
+   moving the OS cursor (which browsers don't permit). */
+@keyframes whiteboard-popover-pulse {
+  0% {
+    box-shadow: var(--banner-shadow);
+    transform: scale(1);
+  }
+  30% {
+    box-shadow: var(--banner-shadow), 0 0 0 4px var(--whiteboard-accent, #2563eb);
+    transform: scale(1.025);
+  }
+  100% {
+    box-shadow: var(--banner-shadow);
+    transform: scale(1);
+  }
+}
+
+.whiteboard-popover.whiteboard-popover-flash {
+  animation: whiteboard-popover-pulse 500ms ease-out;
+}
+
 .whiteboard-popover-header {
   display: flex;
   align-items: center;
@@ -464,7 +515,7 @@ body {
 
 .whiteboard-tools {
   padding: 10px;
-  min-width: 250px;
+  min-width: 280px;
 }
 
 .whiteboard-tools-section-label {
@@ -482,10 +533,20 @@ body {
   gap: 6px;
 }
 
+/* Right-click menu swatch: fills its grid column (width: 100% over a
+ * `repeat(5, 1fr)` grid), with `aspect-ratio: 1` to stay square as the
+ * menu width grows. `min-width: 0` is the standard fix for letting a
+ * grid item shrink below its intrinsic content size (browsers default
+ * grid items to `min-width: auto`, which can break the 1fr math). The
+ * resulting swatches scale with the menu's `min-width` (currently 280
+ * px → ~47 px tall swatches) instead of being a fixed 26 px in a wider
+ * cell with wasted padding. */
 .whiteboard-color-swatch-small {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  min-width: 0;
+  border-radius: 8px;
 }
 
 .whiteboard-tools-row {

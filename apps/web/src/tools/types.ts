@@ -1,6 +1,6 @@
 /**
  * Tool abstraction. Each tool maps the same pen / mouse / touch input to a
- * different interaction (draw, erase, lasso-select, laser pointer, text).
+ * different interaction (draw, erase, select, laser pointer, text).
  * The pointer module routes events to the active tool; tools own all
  * tool-specific state, rendering, and menu UI.
  *
@@ -44,9 +44,19 @@ export interface ToolContext {
    * the pointer enters / leaves hit zones.
    */
   setCursor(cursor: string): void
+  /**
+   * Last-known pointer position in CLIENT coords (e.clientX/Y). Updated
+   * on every pointermove by main.ts. Tools that need to prime hover state
+   * when activated — pen tool especially — read this to render at the
+   * current cursor location without waiting for the next pointermove.
+   * Browsers don't expose the OS pointer position via any API, so this
+   * is the best the app can do; the cached value is stale immediately
+   * after the user moves outside the window or wakes from sleep.
+   */
+  getLastPointer(): { x: number; y: number }
 }
 
-export type ToolId = 'pen' | 'eraser' | 'lasso' | 'laser' | 'text' | 'select'
+export type ToolId = 'pen' | 'eraser' | 'laser' | 'text' | 'select'
 
 export interface Tool {
   id: ToolId

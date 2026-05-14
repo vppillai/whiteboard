@@ -8,7 +8,7 @@
  * for the per-stroke work.
  */
 
-import type { ImageObject, Stroke } from '@whiteboard/shared'
+import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
 import { makeCamera } from '../camera'
 import { drawGrid } from '../grid'
 import { getImageElement, loadImageElement } from '../imagecache'
@@ -16,6 +16,7 @@ import type { ImageStore } from '../imagestore'
 import { type CanvasLayer, applyCamera, clearLayer, drawStrokeOntoLayer } from '../render'
 import type { SettingsV1 } from '../settings'
 import { effectiveOpacity, getStrokePath } from '../stroke'
+import { TEXT_PADDING_X, TEXT_PADDING_Y, fontCss, measureText } from '../textgeom'
 import { resolveInkColor } from '../theme'
 import type { Bounds } from './bounds'
 
@@ -23,6 +24,12 @@ export interface PngExportOptions {
   /** Device-pixel-ratio multiplier. Default 1 (matches on-screen-at-100%
    *  zoom). PDF embed bumps to 2 for print quality. */
   dpr?: number
+  /** When true, skip the theme-background fill so the PNG has a
+   *  transparent background. Used by the lasso clipboard-copy path so
+   *  drawings pasted into Docs / Slack / etc. don't bring a canvas-
+   *  colored rectangle with them. File exports default `false` (we want
+   *  the background visible in a standalone PNG file). */
+  transparentBg?: boolean
 }
 
 /**
@@ -39,6 +46,7 @@ export interface PngExportOptions {
 export async function exportPNG(
   strokes: Stroke[],
   images: readonly ImageObject[],
+  texts: readonly TextObject[],
   bounds: Bounds,
   settings: SettingsV1,
   imageStore: ImageStore | null,
@@ -107,18 +115,27 @@ export async function exportPNG(
     )
   }
 
-  // ----- Pass 2: committed = theme bg + grid + images + composited strokes -----
+  // ----- Pass 2: committed = (theme bg) + grid + images + composited strokes -----
   clearLayer(committedLayer)
   const cCtx = committedLayer.ctx
   // Theme background — read CSS variable at export time so light / dark
-  // themes produce matching PNGs.
-  cCtx.save()
-  cCtx.setTransform(1, 0, 0, 1, 0, 0)
-  cCtx.fillStyle = resolveBgColor()
-  cCtx.fillRect(0, 0, w, h)
-  cCtx.restore()
+  // themes produce matching PNGs. Skipped when `transparentBg` is set
+  // (clipboard-copy path), so pasting into Google Docs / Slack / etc.
+  // doesn't bring along a canvas-colored rectangle. The grid is ALSO
+  // skipped on transparent renders — a grid on a transparent background
+  // looks wrong (no canvas underneath it) and isn't what a "drawing only"
+  // copy implies.
+  if (!options.transparentBg) {
+    cCtx.save()
+    cCtx.setTransform(1, 0, 0, 1, 0, 0)
+    cCtx.fillStyle = resolveBgColor()
+    cCtx.fillRect(0, 0, w, h)
+    cCtx.restore()
+  }
   applyCamera(committedLayer, camera, dpr)
-  drawGrid(committedLayer, camera, bounds.width, bounds.height, settings.grid)
+  if (!options.transparentBg) {
+    drawGrid(committedLayer, camera, bounds.width, bounds.height, settings.grid)
+  }
   // Images go between grid and strokes — they're "below" the strokes
   // visually. drawImage uses the current board-space transform; rotation
   // is applied by translating to the image center, rotating, drawing
@@ -138,6 +155,34 @@ export async function exportPNG(
       cCtx.restore()
     }
   }
+  // Texts go above images, below strokes — matching the on-screen layer
+  // order. Each text is rendered via the same per-line fillText pass the
+  // on-canvas render uses, so what you see is what you export.
+  const visibleTexts = [...texts].filter((t) => !t.deleted).sort((a, b) => a.z - b.z)
+  for (const t of visibleTexts) {
+    const r = t.rotation ?? 0
+    if (Math.abs(r) < 1e-9) {
+      drawTextOntoCanvas(cCtx, t)
+    } else {
+      cCtx.save()
+      const cx = t.transform.x + t.transform.w / 2
+      const cy = t.transform.y + t.transform.h / 2
+      cCtx.translate(cx, cy)
+      cCtx.rotate(r)
+      const local: TextObject = {
+        ...t,
+        transform: {
+          x: -t.transform.w / 2,
+          y: -t.transform.h / 2,
+          w: t.transform.w,
+          h: t.transform.h,
+        },
+      }
+      drawTextOntoCanvas(cCtx, local)
+      cCtx.restore()
+    }
+  }
+
   cCtx.save()
   cCtx.setTransform(1, 0, 0, 1, 0, 0)
   cCtx.drawImage(strokesLayer.el, 0, 0)
@@ -163,4 +208,35 @@ function makeDetachedLayer(w: number, h: number): CanvasLayer {
   const ctx = el.getContext('2d')
   if (!ctx) throw new Error('export/png: 2D canvas context unavailable')
   return { el, ctx }
+}
+
+/** Draw one text object's lines + optional underline onto a 2D context.
+ *  Mirrors the on-screen renderer's drawText path in rendertexts.ts —
+ *  same metrics + same wrap-width handling so the export matches what
+ *  the user sees. Caller has already applied any rotation / translation
+ *  to the context. */
+function drawTextOntoCanvas(ctx: CanvasRenderingContext2D, t: TextObject): void {
+  ctx.save()
+  ctx.font = fontCss(t.font)
+  ctx.fillStyle = resolveInkColor(t.color)
+  ctx.textBaseline = 'top'
+  const m = measureText(t.content, t.font, t.wrapWidth)
+  const baseX = t.transform.x + TEXT_PADDING_X
+  const baseY = t.transform.y + TEXT_PADDING_Y
+  for (let i = 0; i < m.lines.length; i++) {
+    const line = m.lines[i] ?? ''
+    const y = baseY + i * m.lineHeight
+    ctx.fillText(line, baseX, y)
+    if (t.font.underline) {
+      const w = m.lineWidths[i] ?? 0
+      const underlineY = y + t.font.size * 1.05
+      ctx.beginPath()
+      ctx.moveTo(baseX, underlineY)
+      ctx.lineTo(baseX + w, underlineY)
+      ctx.lineWidth = Math.max(1, t.font.size * 0.07)
+      ctx.strokeStyle = resolveInkColor(t.color)
+      ctx.stroke()
+    }
+  }
+  ctx.restore()
 }

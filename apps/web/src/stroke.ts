@@ -257,3 +257,33 @@ export function applyPressure(input: number, brush: BrushConfig): number {
   if (brush.pressureCurve) return bezierY(input, brush.pressureCurve.mid)
   return input ** brush.pressureGamma
 }
+
+/**
+ * Synthesize a 0..1 pressure value from screen-space pointer velocity. Used
+ * for `pointerType === 'mouse'` strokes where the browser-reported pressure
+ * is a constant 0.5 — that flat value defeats `pressureGamma` / curves and
+ * produces dead-feeling mouse-drawn strokes. Mapping velocity to pressure
+ * (fast = thinner, slow = thicker) gives mouse strokes some shape variation
+ * that mirrors how a real pen-on-paper stroke thins out when moving fast.
+ *
+ * The shape is a simple linear interpolation between P_MAX (slow / stopped)
+ * and P_MIN (saturated fast), with velocity saturating at `V_SAT` px/ms.
+ * Tuned by feel:
+ *   - V_SAT = 1.6 px/ms (~roughly the speed of a "quick scribble")
+ *   - P_MAX = 0.85 — leaves headroom below 1 so a perfectly-still cursor
+ *     doesn't max out the curve before the user has started moving
+ *   - P_MIN = 0.30 — prevents fast strokes from fading to invisible
+ *
+ * Pure function. Caller computes velocity from segment distance / dt and
+ * passes it in; this keeps the pressure synthesis testable without faking
+ * the whole pointer-event stream.
+ */
+const SYNTHETIC_PRESSURE_V_SAT_PX_PER_MS = 1.6
+const SYNTHETIC_PRESSURE_MAX = 0.85
+const SYNTHETIC_PRESSURE_MIN = 0.3
+
+export function synthesizePressureFromVelocity(velocityPxPerMs: number): number {
+  if (!Number.isFinite(velocityPxPerMs) || velocityPxPerMs < 0) return SYNTHETIC_PRESSURE_MAX
+  const t = Math.min(1, velocityPxPerMs / SYNTHETIC_PRESSURE_V_SAT_PX_PER_MS)
+  return SYNTHETIC_PRESSURE_MAX - (SYNTHETIC_PRESSURE_MAX - SYNTHETIC_PRESSURE_MIN) * t
+}

@@ -20,6 +20,36 @@ export interface Sample {
   t: number
 }
 
+/**
+ * Common shape of every "floating" board object that the Select tool
+ * manipulates uniformly — currently `ImageObject` and `TextObject`,
+ * future shapes / sticky notes / arrows. Strokes have their own shape
+ * (sample-driven, not rect-driven) and are NOT a BoardObject.
+ *
+ * Why centralize: every new object kind would otherwise re-declare the
+ * same six fields and risk drift (z type narrowing, rotation default
+ * semantics, soft-delete invariant). The Select tool's `ObjectView`
+ * already consumes this shape uniformly via the discriminated union.
+ *
+ * Field invariants:
+ * - `transform` rect is axis-aligned (rotation is a separate field so
+ *   undo / op math operates on the unrotated rect).
+ * - `rotation` absent ≡ 0; persisted records pre-dating rotation
+ *   support read as 0 without migration.
+ * - `z` is paste-time monotone (no manual reordering at v1; see
+ *   `nextObjectZ` in main.ts).
+ * - `deleted` undefined ≡ false; soft-delete preserves undo + future
+ *   CRDT compatibility (ADR 0012).
+ */
+export interface BoardObject {
+  id: string
+  transform: { x: number; y: number; w: number; h: number }
+  rotation?: number
+  z: number
+  createdAt: number
+  deleted?: boolean
+}
+
 export interface BrushConfig {
   /** Base stroke size in CSS pixels at full pressure. */
   size: number
@@ -60,23 +90,63 @@ export interface BrushConfig {
  * `blobRef`. v1: `blobRef === id`. Separate field is forward-compat for
  * a future where the bytes live on a sync server (M5.1 per ADR 0012).
  */
-export interface ImageObject {
-  id: string
+export interface ImageObject extends BoardObject {
   blobRef: string
   format: 'png' | 'jpeg' | 'webp' | 'gif'
   /** Original pixel dimensions; preserved for aspect-ratio-constrained resize. */
   natural: { w: number; h: number }
-  /** Canvas-space rect — (x, y) is the top-left. */
-  transform: { x: number; y: number; w: number; h: number }
-  /** Rotation in radians around the rect center. Defaults to 0 when absent
-   *  (omitted on persisted records that pre-date rotation support). */
-  rotation?: number
-  /** Paste-order monotone increasing. Higher z renders later (on top of older images, below all strokes). */
-  z: number
-  /** Wall-clock ms; tie-breaker plus debug aid. */
-  createdAt: number
-  /** Soft-delete (matches Stroke pattern; preserves undo). */
-  deleted?: boolean
+}
+
+/**
+ * Closed set of font families the text tool exposes. Each maps to a CSS
+ * font-family string at render time (see `apps/web/src/textgeom.ts`). The
+ * names are stable identifiers — the actual CSS stack can evolve (fallback
+ * fonts added, default size adjusted) without rewriting persisted records.
+ */
+export type TextFontFamily = 'mono' | 'sans' | 'serif'
+
+/**
+ * Text object on the canvas — a first-class non-stroke object placed and
+ * edited by the dedicated Text tool (`T` key). Rendered above images and
+ * below strokes so the pen draws on top of text the same way it draws on
+ * top of images.
+ *
+ * Formatting is OBJECT-LEVEL (the whole TextObject is bold / italic /
+ * underline, or none of the above). Range-styled rich text within a text
+ * isn't supported in v1 — Figma-basic / Excalidraw model. The
+ * contenteditable handles cursor + selection during editing; persisted
+ * content is plain text with `\n` line separators.
+ *
+ * Width / height are stored after measurement so the renderer doesn't
+ * have to re-measure every frame, but they're recomputed whenever
+ * content / font / size / bold / italic changes (underline only affects
+ * pixels, not metrics).
+ *
+ * The font choice is a closed enum (`TextFontFamily`); the actual CSS
+ * font-family stack lives in the render module so the persisted record
+ * stays small and migration-safe.
+ */
+export interface TextObject extends BoardObject {
+  /** Multi-line content with '\n' separators. Plain text. */
+  content: string
+  font: {
+    family: TextFontFamily
+    /** Pixel size in board space. */
+    size: number
+    bold: boolean
+    italic: boolean
+    underline: boolean
+  }
+  /** Color token — same scheme as brushes ('ink' for theme-aware, or hex). */
+  color: string
+  /** When set, text wraps to this width (in board pixels) via greedy
+   *  word-wrap during measurement. Height grows with content. When
+   *  absent (the default), text auto-grows in width — no wrap. v1.2:
+   *  Select tool's E/W edge handles on a text adjust this value. */
+  wrapWidth?: number
+  // `transform`, `rotation?`, `z`, `createdAt`, `deleted?` come from
+  // BoardObject. `transform.w/h` are measurement-derived and recomputed
+  // on every edit (content/font/size/bold/italic change).
 }
 
 export interface Stroke {

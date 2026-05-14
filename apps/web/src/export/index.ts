@@ -8,7 +8,7 @@
  * exporting a blank canvas.
  */
 
-import type { ImageObject, Stroke } from '@whiteboard/shared'
+import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
 import type { Camera } from '../camera'
 import type { ImageStore } from '../imagestore'
 import { getSettings } from '../settings'
@@ -27,6 +27,9 @@ export interface ExportOptions {
    *  exports include them; backward-compatible default = no images. */
   getImages?: () => readonly ImageObject[]
   imageStore?: ImageStore | null
+  /** Optional. Wired in v1.2 — text objects are rendered above images
+   *  and below strokes. Empty default keeps prior callers compatible. */
+  getTexts?: () => readonly TextObject[]
   /** For scope === 'visible'. */
   camera: Camera
   viewportWidth: number
@@ -44,17 +47,26 @@ export async function exportBoard(
 ): Promise<void> {
   const strokes = opts.getStrokes()
   const images = opts.getImages?.() ?? []
+  const texts = opts.getTexts?.() ?? []
   const bounds =
     scope === 'visible'
       ? computeViewportBounds(opts.camera, opts.viewportWidth, opts.viewportHeight)
-      : computeBoardBounds(strokes, images)
+      : computeBoardBounds(strokes, images, texts)
   if (!bounds) {
     if (opts.onEmptyBoard) opts.onEmptyBoard()
     else console.warn('whiteboard/export: nothing to export')
     return
   }
   const snap = getSettings()
-  const blob = await renderFormat(format, strokes, images, opts.imageStore ?? null, bounds, snap)
+  const blob = await renderFormat(
+    format,
+    strokes,
+    images,
+    texts,
+    opts.imageStore ?? null,
+    bounds,
+    snap,
+  )
   triggerDownload(blob, filename(format))
   opts.onSuccess?.(format)
 }
@@ -63,19 +75,20 @@ async function renderFormat(
   format: ExportFormat,
   strokes: Stroke[],
   images: readonly ImageObject[],
+  texts: readonly TextObject[],
   imageStore: ImageStore | null,
   bounds: Bounds,
   snap: ReturnType<typeof getSettings>,
 ): Promise<Blob> {
   switch (format) {
     case 'png':
-      return exportPNG(strokes, images, bounds, snap, imageStore)
+      return exportPNG(strokes, images, texts, bounds, snap, imageStore)
     case 'svg': {
       const dataUris = await buildImageDataUris(images, imageStore)
-      return exportSVG(strokes, images, dataUris, bounds, snap)
+      return exportSVG(strokes, images, dataUris, texts, bounds, snap)
     }
     case 'pdf':
-      return exportPDF(strokes, images, bounds, snap, imageStore)
+      return exportPDF(strokes, images, texts, bounds, snap, imageStore)
   }
 }
 

@@ -8,15 +8,26 @@
  *   B                  — drawing tool (current brush preset)
  *   P                  — drawing tool + Pen brush preset (default setup)
  *   E                  — eraser (tap toggles, hold spring-loads — see eraserhold.ts)
+ *   V or S             — select tool (universal pointer; click / marquee / Shift+click)
+ *   L                  — laser tool (fading pointer trail)
+ *   T                  — text tool  (Shift+T cycles theme)
  *   1 – 5              — brush preset
+ *   C                  — color picker (at pointer)
+ *   O                  — options (grid type, spacing)
+ *   F                  — toggle distraction-free mode
  *   M                  — toggle metrics HUD
- *   T                  — cycle theme
  *   ?                  — toggle help overlay
- *   Esc                — cancel / dismiss popover
+ *   Esc                — cancel / dismiss popover / clear selection
+ *   Esc Esc            — toggle Draw ↔ Select
  *   ⌘/Ctrl + Z         — undo
  *   ⌘/Ctrl + Shift + Z — redo (also ⌘/Ctrl + Y)
+ *   ⌘/Ctrl + A         — select all (strokes + images + texts; activates Select)
+ *   ⌘/Ctrl + C / X     — copy / cut selection (single image → bytes; everything else → PNG + native bundle)
+ *   ⌘/Ctrl + V         — paste image / text / whiteboard-native bundle
+ *   ⌘/Ctrl + B / I / U — bold / italic / underline (in text edit or on selected text)
+ *   Delete / Backspace — delete the active selection
  *   ⌘/Ctrl + 0         — reset zoom
- *   ⌘/Ctrl + 1         — fit all strokes to view
+ *   ⌘/Ctrl + 1         — fit all objects in view (resets zoom on an empty board)
  *   ⌘/Ctrl + + / -     — zoom in / out
  *   ⌘/Ctrl + Shift + K — clear board (confirm)
  *   ⌘/Ctrl + ,         — toggle settings panel
@@ -34,10 +45,11 @@
  */
 
 import './style.css'
-import type { BrushConfig, ImageObject, Sample, Stroke } from '@whiteboard/shared'
+import type { BrushConfig, ImageObject, Sample, Stroke, TextObject } from '@whiteboard/shared'
 import { BRUSH_IDS, BRUSH_PRESETS } from './brushes'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
 import { createClearFlow } from './clearflow'
+import { extractStrokesFromHtml } from './clipboardstrokes'
 import { CURATED_COLORS, cyclePaletteIndex, openColorPicker } from './colorpicker'
 import { exitDistractionFree, isDistractionFree, toggleDistractionFree } from './distractionfree'
 import { attachEraserHold } from './eraserhold'
@@ -62,36 +74,46 @@ import { attachPan } from './pan'
 import { runPerftest } from './perftest'
 import { createHelpPill } from './pill'
 import { attachPointer } from './pointer'
-import { dismissAllPopovers, getActiveTag } from './popover'
+import { dismissAllPopovers, getActivePopover, getActiveTag } from './popover'
 import { applyCamera, clearLayer, drawStrokeOntoLayer, drawStrokePath, setupCanvas } from './render'
 import { renderImages } from './renderimages'
+import { renderTexts } from './rendertexts'
 import { createResetFlow } from './resetflow'
+import {
+  type SelectionClipboardContext,
+  pasteSelectionBundle,
+  performSelectCopy,
+} from './selectionclipboard'
 import {
   getBrushId,
   getColor,
   getEffectiveBrushConfig,
+  getLaserColor,
   getSettings,
   onChange as onSettingsChange,
   setBrushId,
   setColor,
+  setLaserColor,
 } from './settings'
 import { createPanelContent } from './settings/panel-content'
 import { dismissSidePanel, isSidePanelOpen, showSidePanel } from './sidepanel'
 import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
 import { type StrokeStore, createLocalStrokeStore } from './strokestore'
+import { type TextStore, createLocalTextStore } from './textstore'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { openToolMenu } from './toolmenu'
 import { createToolPill } from './toolpill'
 import {
   type EraserTool,
-  type LassoTool,
+  type Selection,
   type Tool,
   type ToolContext,
   type ToolId,
   createEraserTool,
-  createLassoTool,
+  createLaserTool,
   createPenTool,
   createSelectTool,
+  createTextTool,
 } from './tools'
 import { clearView, loadView, makeViewSaver } from './viewstate'
 import { fitToContent } from './zoomfit'
@@ -148,6 +170,10 @@ async function main(): Promise<void> {
   // belong inside a small JSON record. v1 is local IDB-backed; sync of
   // image binaries is deferred to M5.1 per ADR 0012.
   const imageStore: ImageStore = createLocalImageStore()
+
+  // TextStore — analog of StrokeStore / ImageStore for text objects. Single
+  // store (no companion blob) since text records carry payload inline.
+  const textStore: TextStore = createLocalTextStore()
 
   const root = document.getElementById('app')
   if (!root) throw new Error('#app not found')
@@ -233,23 +259,18 @@ async function main(): Promise<void> {
   // so iteration order is render order. nextImageZ() picks the next slot
   // above the current max so newly-pasted images stack on top.
   const images: ImageObject[] = []
-  const nextImageZ = (): number => {
+  const texts: TextObject[] = []
+  // Shared next-z sequence for images + texts so the user-visible stack
+  // order interleaves naturally between object types. New objects always
+  // appear above all existing ones.
+  const nextObjectZ = (): number => {
     let max = 0
     for (const img of images) if (!img.deleted && img.z > max) max = img.z
+    for (const t of texts) if (!t.deleted && t.z > max) max = t.z
     return max + 1
   }
-
-  // Images marked for batch delete via Cmd/Ctrl+A. Distinct from the Select
-  // tool's single-image selection (which carries handles + transform UX);
-  // this is just a "next Delete press also removes these" flag. Cleared on
-  // pointerdown / tool change / Esc / after delete. Visualized as a thin
-  // outline in the per-frame image render pass below.
-  const imagesMarkedForBatchDelete = new Set<string>()
-  const clearImageBatchSelection = (): void => {
-    if (imagesMarkedForBatchDelete.size === 0) return
-    imagesMarkedForBatchDelete.clear()
-    committedDirty = true
-  }
+  const nextImageZ = nextObjectZ
+  const nextTextZ = nextObjectZ
 
   try {
     const { images: persistedImages, compactedBlobRefs } = await imageStore.load()
@@ -278,6 +299,14 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     console.warn('whiteboard/web: failed to load persisted images:', err)
+  }
+
+  try {
+    const persistedTexts = await textStore.load()
+    texts.push(...persistedTexts)
+    committedDirty = true
+  } catch (err) {
+    console.warn('whiteboard/web: failed to load persisted texts:', err)
   }
 
   // ---------------------------------------------------------------------
@@ -327,6 +356,14 @@ async function main(): Promise<void> {
     })
   }
 
+  // Same pattern for text records — single closure used by opCtx and the
+  // Text tool. Errors are warn-and-continue (matching strokes / images).
+  const persistText = (t: TextObject): void => {
+    void textStore.update(t).catch((err) => {
+      console.warn('whiteboard/web: failed to persist text:', err)
+    })
+  }
+
   const opCtx: OpContext = {
     strokes,
     saveStroke: (s) => {
@@ -336,6 +373,8 @@ async function main(): Promise<void> {
     },
     images,
     saveImageMeta: persistImageMeta,
+    texts,
+    saveText: persistText,
     markDirty: () => {
       committedDirty = true
     },
@@ -355,6 +394,14 @@ async function main(): Promise<void> {
       committedDirty = true
     },
     showInfoToast,
+    // Auto-switch to Select + select the new image so the user can drag
+    // it into place immediately. `setTool` / `selectTool` are declared
+    // further down — both are populated by the time a paste event can
+    // actually fire (no TDZ risk since the body only runs on user input).
+    onPasteSuccess: (id) => {
+      setTool('select')
+      selectTool.selectImageById(id)
+    },
   }
 
   const penTool = createPenTool({
@@ -396,38 +443,65 @@ async function main(): Promise<void> {
     },
   })
 
-  const lassoTool: LassoTool = createLassoTool({
-    callbacks: {
-      getStrokes: () => strokes,
-      onDelete: (ids) => {
-        if (ids.length === 0) return
-        const op: Op = { kind: 'delete', strokeIds: ids }
-        applyOp(op, opCtx)
-        pushUndoOp(op)
-      },
-      onMove: (ids, dx, dy) => {
-        if (ids.length === 0 || (dx === 0 && dy === 0)) return
-        const op: Op = { kind: 'move', strokeIds: ids, dx, dy }
-        applyOp(op, opCtx)
-        pushUndoOp(op)
-      },
-    },
-  })
-
   const selectTool = createSelectTool({
     getImages: () => images,
     saveImageMeta: persistImageMeta,
+    getTexts: () => texts,
+    saveText: persistText,
+    getStrokes: () => strokes,
+    // Stroke persistence — same warn-and-continue policy as
+    // persistImageMeta / persistText. Used by the Select tool's
+    // stroke-drag path (per-tick saves) and stroke-delete path.
+    saveStroke: (s) => {
+      void strokeStore.save(s).catch((err) => {
+        console.warn('whiteboard/web: failed to persist stroke (Select move/delete):', err)
+      })
+    },
     pushOp: (op) => pushUndoOp(op),
     markCommittedDirty: () => {
       committedDirty = true
     },
+    // Select tool double-click on a text body → hand off to Text tool
+    // so the user can edit immediately. setTool('text') cleanups Select
+    // (drops the selection); editTextById then opens the editor on the
+    // same text. The ctx is the Select tool's last pointer event ctx —
+    // Text tool needs it to position the DOM overlay (it has no
+    // pointer-event cache of its own yet).
+    onTextDoubleClick: (id, ctx) => {
+      setTool('text')
+      textTool.editTextById(id, ctx)
+    },
   })
 
-  const allTools: Record<'pen' | 'eraser' | 'lasso' | 'select', Tool> = {
+  const laserTool = createLaserTool({
+    getColor: getLaserColor,
+    setColor: setLaserColor,
+  })
+
+  // Track the most recently active tool BEFORE Text was selected. Used
+  // by the Text tool's Esc handler to return the user to the tool they
+  // were on before. Updated in setTool() whenever the user switches AWAY
+  // from a non-text tool; stays put when text is the active tool.
+  let previousToolId: ToolId | null = null
+
+  const textTool = createTextTool({
+    getTexts: () => texts,
+    nextZ: nextTextZ,
+    pushOp: pushUndoOp,
+    saveText: persistText,
+    markCommittedDirty: () => {
+      committedDirty = true
+    },
+    resolveColor: resolveInkColor,
+    onEscExit: () => setTool(previousToolId ?? 'pen'),
+  })
+
+  const allTools: Record<ToolId, Tool> = {
     pen: penTool,
     eraser: eraserTool,
-    lasso: lassoTool,
     select: selectTool,
+    laser: laserTool,
+    text: textTool,
   }
   const tool: { current: Tool } = { current: penTool }
   // Apply the initial tool's cursor — `setTool` only fires on changes, so
@@ -478,17 +552,34 @@ async function main(): Promise<void> {
   document.body.appendChild(toolPill.el)
   const setTool = (id: ToolId): void => {
     if (tool.current.id === id) return
-    if (id !== 'pen' && id !== 'eraser' && id !== 'lasso' && id !== 'select') return
+    if (id !== 'pen' && id !== 'eraser' && id !== 'select' && id !== 'laser' && id !== 'text')
+      return
+    // Capture the OUTGOING tool id as "previous" — but only when leaving
+    // a non-text tool. The Text tool's Esc-handler uses this to return
+    // to where the user was before they pressed T. Switching away from
+    // Text doesn't update previousToolId (so a subsequent T → Esc still
+    // restores the original tool).
+    if (tool.current.id !== 'text') {
+      previousToolId = tool.current.id
+    }
     tool.current.cleanup?.()
     tool.current = allTools[id]
     root.style.cursor = tool.current.cursor ?? ''
     toolPill.setActiveTool(id)
-    // Tool change drops Cmd+A image-batch marks. (Pen/Eraser etc. won't
-    // surface a "Delete deletes the marked images" affordance, so leaving
-    // them marked is misleading.)
-    clearImageBatchSelection()
-    committedDirty = true // active tool changed; selection halos may toggle
+    // Select tool's own cleanup() already clears its multi-selection on
+    // tool change (the cleanup hook fires via the line above). Just mark
+    // dirty so the next frame paints without the removed selection halos.
+    committedDirty = true
   }
+
+  // Last-pointer (for popover anchoring on keyboard shortcuts AND for
+  // pen.redraw's hover-prime via toolCtx.getLastPointer). Declared
+  // BEFORE toolCtx so the closure below captures an already-initialized
+  // binding instead of relying on toolCtx not being invoked
+  // synchronously between this line and the let assignment further
+  // down. Updated on every pointermove (the listener is later in this
+  // function but the binding is hoisted into TDZ — see comment there).
+  let lastPointer = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
 
   // ---------------------------------------------------------------------
   //  Tool context — passed to every tool event. Carries cross-cutting
@@ -511,6 +602,7 @@ async function main(): Promise<void> {
       // restores the static tool cursor; useful when leaving a hit zone.
       root.style.cursor = cursor || tool.current.cursor || ''
     },
+    getLastPointer: () => lastPointer,
   }
 
   // ---------------------------------------------------------------------
@@ -532,7 +624,9 @@ async function main(): Promise<void> {
   // `noteSampleCount` callback through ToolContext (matches the
   // `markCommittedDirty` pattern) so tools report from where they already
   // hold the coalesced array.
-  let lastPointer = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+  // `lastPointer` is declared earlier (above toolCtx) so its binding is
+  // already initialized when toolCtx's getLastPointer closure captures
+  // it. The listener body below assigns into that same binding.
   root.addEventListener('pointermove', (e) => {
     if (!(e instanceof PointerEvent)) return
     lastPointer = { x: e.clientX, y: e.clientY }
@@ -555,18 +649,95 @@ async function main(): Promise<void> {
   //  cleanly regardless).
   // ---------------------------------------------------------------------
   root.addEventListener('contextmenu', (e) => e.preventDefault())
+  // Defensive document-level guard. The root listener above covers events
+  // whose target is `root` or a descendant. But MANY app surfaces live
+  // OUTSIDE root (toolpill, help pill, HUD, text editor overlay, etc.) —
+  // a right-click on those would otherwise surface the browser's native
+  // context menu. Inverted rule: ALWAYS preventDefault unless the target
+  // is a form input where the browser menu (paste / spell-check) is
+  // genuinely useful. Currently the only real inputs live in the settings
+  // side panel; everything else is an inert visual.
+  const onDocContextMenu = (e: Event): void => {
+    const target = e.target as HTMLElement | null
+    if (!target) return
+    // Allow on real form inputs (the settings panel's hex / number /
+    // text inputs). `closest` walks ancestors so a click on a label
+    // inside a form input's container still allows the menu.
+    if (target.closest('input, textarea')) return
+    e.preventDefault()
+  }
+  document.addEventListener('contextmenu', onDocContextMenu)
+  registerCleanup(() => document.removeEventListener('contextmenu', onDocContextMenu))
 
-  // Any pointer-down on the canvas drops a pending Cmd+A image-batch
-  // selection. The marks are a transient "press Delete next" affordance;
-  // continuing into any other gesture (drawing, lasso, select) means the
-  // user moved on.
-  root.addEventListener(
-    'pointerdown',
-    () => {
-      clearImageBatchSelection()
+  // ---------------------------------------------------------------------
+  //  Text-paste helpers — Cmd/Ctrl+V with non-image text on the
+  //  clipboard creates a new TextObject at the cursor. Mirrors the
+  //  image-paste flow (one op pushed, auto-switch to Select + select).
+  //  Multi-line strings (with `\n`) become multi-line text. Whitespace-
+  //  only paste is ignored.
+  // ---------------------------------------------------------------------
+  // Normalize line endings at the clipboard read boundary so downstream
+  // measureText() — which splits on '\n' only — never sees a bare '\r'.
+  // Centralizing here covers both clipboard read paths AND the in-editor
+  // input handler (which has its own normalize since contenteditable
+  // bypasses these reads).
+  const normalizeLineEndings = (s: string): string => s.replace(/\r\n?/g, '\n')
+
+  const readTextFromClipboardEvent = (dt: DataTransfer | null): string | null => {
+    if (!dt) return null
+    const t = dt.getData('text/plain')
+    return t ? normalizeLineEndings(t) : null
+  }
+
+  const readTextFromAsyncClipboard = async (): Promise<string | null> => {
+    if (!navigator.clipboard?.readText) return null
+    try {
+      const t = await navigator.clipboard.readText()
+      return t ? normalizeLineEndings(t) : null
+    } catch {
+      // Permission denied / not in user gesture / etc.
+      return null
+    }
+  }
+
+  const pasteTextAtBoard = (content: string, board: { x: number; y: number }): void => {
+    // Delegate to the Text tool's factory so paste and on-canvas
+    // creation share the same TextObject construction (sticky defaults,
+    // sizing, persistence, op). Auto-switch to Select afterwards so the
+    // user can immediately drag — mirrors the image-paste UX.
+    const id = textTool.createTextAt(content, board)
+    setTool('select')
+    selectTool.selectTextById(id)
+    showInfoToast('Text pasted')
+  }
+
+  /** Subsystem context for `selectionclipboard.ts`. Built once at boot
+   *  with closure references to the orchestrator's state; the
+   *  subsystem reads via getters (so it sees live state) and writes
+   *  through the exposed callbacks (so all side effects funnel through
+   *  the orchestrator). */
+  const selectionClipboardCtx: SelectionClipboardContext = {
+    getStrokes: () => strokes,
+    getImages: () => images,
+    getTexts: () => texts,
+    getSelections: () => selectTool.getSelections(),
+    getSelectedImage: () => selectTool.getSelectedImage(),
+    getSettings,
+    loadImageBlob: (ref) => imageStore.loadBlob(ref),
+    strokes,
+    texts,
+    saveStroke: (s) => strokeStore.save(s),
+    saveText: persistText,
+    pushOp: pushUndoOp,
+    nextTextZ,
+    showInfoToast,
+    setToolSelect: () => setTool('select'),
+    selectByIds: (items) => selectTool.selectByIds(items),
+    clearSelection: () => selectTool.clearSelection(),
+    markCommittedDirty: () => {
+      committedDirty = true
     },
-    { capture: true },
-  )
+  }
 
   // ---------------------------------------------------------------------
   //  Image paste — three input paths feeding one PasteImage op (see
@@ -588,27 +759,68 @@ async function main(): Promise<void> {
     ) {
       return
     }
-    const dt = e.clipboardData
-    if (!dt) return
     // Position uses the last known cursor location (in client coords →
     // board coords). Keyboard-triggered paste with no prior mouse activity
     // falls back to viewport center.
     const pasteAt = (): { x: number; y: number } => toBoard(lastPointer.x, lastPointer.y)
     void (async () => {
-      const blob = await readImageFromDataTransfer(dt)
-      if (blob) {
-        e.preventDefault()
-        await pasteImageFromBlob(blob, pasteAt(), imagePasteCtx)
-        return
+      const dt = e.clipboardData
+      // Whiteboard-native paste first: if the clipboard's text/html slot
+      // carries a `data-whiteboard-v1` marker, the user is pasting a
+      // selection that was copied FROM this whiteboard. Restore as
+      // vector strokes at the cursor rather than as a raster PNG.
+      const html = dt?.getData('text/html')
+      if (html) {
+        const bundle = extractStrokesFromHtml(html)
+        if (bundle) {
+          e.preventDefault()
+          pasteSelectionBundle(bundle, pasteAt(), selectionClipboardCtx)
+          return
+        }
       }
-      // Fallback: async clipboard API. Some browsers (Safari with screen-
-      // capture tools, certain Linux DEs) only expose image data through
-      // the async API, not the synchronous ClipboardEvent.
+      // Try the synchronous ClipboardEvent path first when clipboardData
+      // is non-null. This catches drag-drop, file managers, screenshot
+      // utilities that populate `dataTransfer.files` / `dataTransfer.items`
+      // with `kind === 'file'`.
+      if (dt) {
+        const blob = await readImageFromDataTransfer(dt)
+        if (blob) {
+          e.preventDefault()
+          await pasteImageFromBlob(blob, pasteAt(), imagePasteCtx)
+          return
+        }
+      }
+      // Async Clipboard API fallback. CRITICAL for:
+      //   - Google Docs / Google Slides image copy (puts image bytes
+      //     only on the async API, not on `clipboardData.files`)
+      //   - Safari with screenshot / annotation utilities
+      //   - Some Linux DEs that route image data through the async
+      //     clipboard portal only
+      // Note: this runs even if `e.clipboardData` was null — without
+      // this, the Google Docs round-trip (copy from sheet → paste back
+      // into whiteboard) silently dropped the image.
       const fallback = await readImageFromClipboard()
       if (fallback) {
         e.preventDefault()
         await pasteImageFromBlob(fallback, pasteAt(), imagePasteCtx)
+        return
       }
+      // No image on the clipboard — try plain text. Pasting text onto
+      // the canvas creates a new TextObject at the cursor with the
+      // user's sticky-default font / size / color. Multi-line text
+      // (with `\n` separators) becomes a multi-line text object;
+      // whitespace-only paste is ignored.
+      const text = readTextFromClipboardEvent(dt) ?? (await readTextFromAsyncClipboard())
+      if (text?.trim()) {
+        e.preventDefault()
+        pasteTextAtBoard(text, pasteAt())
+        return
+      }
+      // Nothing usable found. Surface a short toast so the user knows
+      // the Cmd+V was seen but had nothing to land — common when copying
+      // from sources that don't populate the system clipboard (Google
+      // Docs's internal image clipboard, app-private formats, etc.).
+      showInfoToast('Nothing to paste')
     })()
   }
   document.addEventListener('paste', onPaste)
@@ -620,6 +832,52 @@ async function main(): Promise<void> {
   // to a file:// URL.
   registerCleanup(setupDragDropImagePaste(root, toBoard, imagePasteCtx))
 
+  // ---------------------------------------------------------------------
+  //  Copy / cut for selected image. Mirrors the paste handler's
+  //  "skip in text-editable contexts" rule so settings inputs keep their
+  //  native cut/copy. Only fires when the Select tool is active AND an
+  //  image is currently selected — any other state lets the event through
+  //  to the browser default (which is a no-op on canvas but matters for
+  //  inputs).
+  //
+  //  Cut's delete only fires AFTER the clipboard write succeeds; failing
+  //  to write but still deleting would lose the image with nowhere to
+  //  paste it back from.
+  // ---------------------------------------------------------------------
+  const isTextEditableTarget = (el: EventTarget | null): boolean =>
+    el instanceof HTMLInputElement ||
+    el instanceof HTMLTextAreaElement ||
+    (el instanceof HTMLElement && el.isContentEditable)
+
+  // Copy / cut event wiring. The actual clipboard pipeline lives in
+  // `selectionclipboard.ts`; this layer just gates on context and
+  // delegates. Cut's delete is gated on clipboard-write success —
+  // data-loss-prevention rule that's been here since v1.1's image cut.
+  const onCopy = (e: ClipboardEvent): void => {
+    if (isTextEditableTarget(e.target)) return
+    if (tool.current !== selectTool) return
+    if (selectTool.getSelections().length === 0) return
+    e.preventDefault()
+    void performSelectCopy(selectionClipboardCtx)
+  }
+
+  const onCut = (e: ClipboardEvent): void => {
+    if (isTextEditableTarget(e.target)) return
+    if (tool.current !== selectTool) return
+    if (selectTool.getSelections().length === 0) return
+    e.preventDefault()
+    void (async () => {
+      const ok = await performSelectCopy(selectionClipboardCtx)
+      if (ok) selectTool.deleteSelected()
+    })()
+  }
+  document.addEventListener('copy', onCopy)
+  document.addEventListener('cut', onCut)
+  registerCleanup(() => {
+    document.removeEventListener('copy', onCopy)
+    document.removeEventListener('cut', onCut)
+  })
+
   root.addEventListener(
     'pointerdown',
     (e) => {
@@ -627,7 +885,17 @@ async function main(): Promise<void> {
       e.stopImmediatePropagation()
       e.preventDefault()
       if (getActiveTag() === 'tools') {
-        dismissAllPopovers()
+        // A tool menu is already up. If it's pinned, the user explicitly
+        // asked for it to persist — flash it to redirect their eye (the
+        // pinned menu IS their context menu now) and don't open a new
+        // instance. Otherwise, the right-click acts as a toggle and
+        // dismisses the current menu.
+        const active = getActivePopover()
+        if (active?.isPinned()) {
+          active.flashAttention()
+        } else {
+          dismissAllPopovers()
+        }
         return
       }
       openToolMenu({
@@ -639,9 +907,16 @@ async function main(): Promise<void> {
           onCameraChange()
         },
         onZoomToFit: () => {
-          if (fitToContent(camera, strokes, { width: target.width, height: target.height })) {
-            onCameraChange()
-          }
+          // Empty board → reset zoom (fitToContent returns false on
+          // empty). Fall through so "Fit to view" always does something
+          // visible rather than no-op'ing on a fresh canvas.
+          const fit = fitToContent(
+            camera,
+            { strokes, images, texts },
+            { width: target.width, height: target.height },
+          )
+          if (!fit) resetZoom(camera)
+          onCameraChange()
         },
         onClear: clearFlow.request,
         togglePanel,
@@ -652,6 +927,7 @@ async function main(): Promise<void> {
             anchor: { x: e.clientX, y: e.clientY },
             getStrokes: () => strokes,
             getImages: () => images,
+            getTexts: () => texts,
             imageStore,
             camera,
             viewportWidth: target.width,
@@ -706,11 +982,12 @@ async function main(): Promise<void> {
     refocusOnClose: root,
     onPerformClear: () => {
       // Destructive boundary by design — undo/redo stacks reset alongside
-      // the in-memory strokes, images, and the IDB stores. See ops.ts
-      // (clear is *not* an Op).
+      // the in-memory strokes, images, texts, and the IDB stores. See
+      // ops.ts (clear is *not* an Op).
       strokes.length = 0
       images.length = 0
-      imagesMarkedForBatchDelete.clear()
+      texts.length = 0
+      selectTool.clearSelection()
       undoStack.length = 0
       redoStack.length = 0
       camera.x = 0
@@ -723,6 +1000,9 @@ async function main(): Promise<void> {
       })
       void imageStore.clear().catch((err) => {
         console.warn('whiteboard/web: image clear failed:', err)
+      })
+      void textStore.clear().catch((err) => {
+        console.warn('whiteboard/web: text clear failed:', err)
       })
       _clearImageCache()
     },
@@ -754,6 +1034,56 @@ async function main(): Promise<void> {
     }),
   )
 
+  // Double-Esc toggle: tracks the timestamp of the most recent Esc that
+  // had nothing to cancel ("no-op Esc"). A second no-op Esc within the
+  // double-tap window toggles between Draw and Select. Any Esc that
+  // actually cancelled state (popover, lasso, image-batch mark, …)
+  // resets this so the sequence "Esc dismisses popover → quick Esc"
+  // doesn't surprise the user with an unintended tool switch.
+  const ESCAPE_DOUBLE_TAP_MS = 350
+  let lastEscapeNoOpAt = Number.NEGATIVE_INFINITY
+
+  /**
+   * Cmd/Ctrl + B / I / U dispatcher. Two scopes:
+   *   - Text tool currently EDITING a text → routes to the tool's
+   *     toggleFormat (the editor's keydown handler intercepts first when
+   *     focused; this is the backup for momentary-focus-loss cases).
+   *   - Select tool has a TEXT selected (not editing) → toggle that
+   *     text's font directly + emit an `edit-text` op so undo restores.
+   * Other contexts: no-op (matches user expectation).
+   */
+  const toggleTextFormat = (which: 'bold' | 'italic' | 'underline'): void => {
+    if (textTool.isEditing()) {
+      textTool.toggleFormat(which)
+      return
+    }
+    const sel = selectTool.getSelected()
+    if (sel?.kind !== 'text') return
+    const t = texts.find((x) => x.id === sel.id)
+    if (!t || t.deleted) return
+    // Spread `t.font` for the snapshot — `t.font` is mutated in-place
+    // below, and `before.font` must be a SEPARATE object (not a live
+    // reference) for undo to correctly restore the pre-toggle state.
+    const before = {
+      content: t.content,
+      font: { ...t.font },
+      color: t.color,
+      wrapWidth: t.wrapWidth,
+    }
+    if (which === 'bold') t.font.bold = !t.font.bold
+    else if (which === 'italic') t.font.italic = !t.font.italic
+    else t.font.underline = !t.font.underline
+    persistText(t)
+    const after = {
+      content: t.content,
+      font: { ...t.font },
+      color: t.color,
+      wrapWidth: t.wrapWidth,
+    }
+    pushUndoOp({ kind: 'edit-text', textId: t.id, before, after })
+    committedDirty = true
+  }
+
   registerCleanup(
     attachKeymap({
       undo,
@@ -771,9 +1101,16 @@ async function main(): Promise<void> {
         onCameraChange()
       },
       zoomToFit: () => {
-        if (fitToContent(camera, strokes, { width: target.width, height: target.height })) {
-          onCameraChange()
-        }
+        // Same fallback as the right-click "Fit to view" pill — empty
+        // board resets zoom so the keyboard shortcut is never a silent
+        // no-op.
+        const fit = fitToContent(
+          camera,
+          { strokes, images, texts },
+          { width: target.width, height: target.height },
+        )
+        if (!fit) resetZoom(camera)
+        onCameraChange()
       },
       clear: clearFlow.request,
       toggleTheme: cycleMode,
@@ -796,43 +1133,36 @@ async function main(): Promise<void> {
         setBrushId('pen')
       },
       selectEraserSticky: () => setTool('eraser'),
-      selectLassoTool: () => setTool('lasso'),
       selectSelectTool: () => setTool('select'),
+      selectLaserTool: () => setTool('laser'),
+      selectTextTool: () => setTool('text'),
+      // Cmd+B/I/U routed to the text tool's external entry. No-ops when
+      // not in edit mode (the tool's own contenteditable handler also
+      // intercepts these; this is a backup for the edge case where the
+      // editable lost focus momentarily).
+      toggleTextBold: () => toggleTextFormat('bold'),
+      toggleTextItalic: () => toggleTextFormat('italic'),
+      toggleTextUnderline: () => toggleTextFormat('underline'),
       deleteSelection: () => {
-        // Cmd+A also marks images for batch delete. Drain that set first
-        // (independent of which tool is active) so the user can hit
-        // Cmd+A → Delete from any tool to remove all images.
-        let didDelete = false
-        if (imagesMarkedForBatchDelete.size > 0) {
-          for (const id of imagesMarkedForBatchDelete) {
-            const img = images.find((i) => i.id === id)
-            if (!img || img.deleted) continue
-            img.deleted = true
-            void imageStore.updateMeta(img).catch((err) => {
-              console.warn('whiteboard/web: failed to persist image delete:', err)
-            })
-            pushUndoOp({ kind: 'delete-image', imageId: id })
-            didDelete = true
-          }
-          imagesMarkedForBatchDelete.clear()
-          committedDirty = true
-        }
-        if (tool.current === selectTool && selectTool.deleteSelected()) didDelete = true
-        if (tool.current === lassoTool && lassoTool.deleteSelection()) didDelete = true
-        return didDelete
+        // Multi-aware Select tool owns the single-and-multi delete path
+        // for all object kinds (Lasso absorbed; ADR 0014).
+        if (tool.current === selectTool && selectTool.deleteSelected()) return true
+        return false
       },
       selectAll: () => {
-        // Strokes via the existing lasso path …
-        setTool('lasso')
-        lassoTool.selectAll()
-        // … plus images via the batch-mark set so the next Delete removes
-        // them too. Visually a thin outline appears around each image (see
-        // the per-frame image render pass).
-        imagesMarkedForBatchDelete.clear()
-        for (const img of images) {
-          if (!img.deleted) imagesMarkedForBatchDelete.add(img.id)
-        }
-        committedDirty = true
+        // Guard: if a text editor is open, defer to its native Cmd+A
+        // (the editor's keydown handler stops propagation; this guard
+        // catches the edge case where focus drifted off the editor
+        // momentarily and the global keymap saw the event). Switching
+        // tools here would clean-up the text tool and destroy the
+        // in-progress edit — exactly the wrong outcome for Cmd+A.
+        if (textTool.isEditing()) return
+        // Switch to the Select tool and populate its multi-selection
+        // with every non-deleted object. Replaces the previous lasso-
+        // plus-batchSelection split (Phase B3 of the lasso → select
+        // absorption; ADR 0014 multi-select migration).
+        setTool('select')
+        selectTool.selectAll()
       },
       togglePanel,
       cancel: () => {
@@ -846,19 +1176,43 @@ async function main(): Promise<void> {
         }
         if (clearFlow.cancel()) handled = true
         if (dismissAllPopovers()) handled = true
-        // Esc also drops any Cmd+A image-batch marks before falling back
-        // to a tool switch — same semantic as Esc in lasso (clear the
-        // pending selection).
-        if (imagesMarkedForBatchDelete.size > 0) {
-          clearImageBatchSelection()
+        // Esc closes the help overlay if open. Goes after popovers so a
+        // user with both help AND a popover open dismisses one at a
+        // time — same pattern as distraction-free above.
+        if (help.isOpen()) {
+          help.close()
           handled = true
         }
-        // Esc in lasso mode falls back to the pen tool. The lasso's `cleanup`
-        // hook (called from `setTool`) clears any in-progress polygon and
-        // selection state, so switching is a clean reset.
-        if (tool.current === lassoTool) {
-          setTool('pen')
+        // Esc cancels any Select-tool selection state — either a
+        // committed multi-selection OR a marquee drag still in
+        // progress. The marquee check matters because a user mid-
+        // marquee has `getSelections().length === 0` until release,
+        // so Esc would otherwise not abort the gesture and the
+        // marquee would commit on the next pointer-up.
+        if (
+          tool.current === selectTool &&
+          (selectTool.getSelections().length > 0 || selectTool.hasPendingMarquee())
+        ) {
+          selectTool.clearSelection()
           handled = true
+        }
+        // Double-Esc toggle: if THIS Esc cancelled real state, reset the
+        // double-tap window so a follow-up Esc doesn't surprise the user
+        // by switching tools mid-cleanup. If nothing was cancelled, check
+        // whether the prior Esc was a recent no-op too — that's the
+        // double-tap signal, toggle Draw ↔ Select.
+        if (handled) {
+          lastEscapeNoOpAt = Number.NEGATIVE_INFINITY
+        } else {
+          const now = performance.now()
+          if (now - lastEscapeNoOpAt < ESCAPE_DOUBLE_TAP_MS) {
+            const next: ToolId = tool.current.id === 'select' ? 'pen' : 'select'
+            setTool(next)
+            lastEscapeNoOpAt = Number.NEGATIVE_INFINITY
+            handled = true
+          } else {
+            lastEscapeNoOpAt = now
+          }
         }
         return handled
       },
@@ -883,6 +1237,7 @@ async function main(): Promise<void> {
             anchor: lastPointer,
             getStrokes: () => strokes,
             getImages: () => images,
+            getTexts: () => texts,
             imageStore,
             camera,
             viewportWidth: target.width,
@@ -922,11 +1277,6 @@ async function main(): Promise<void> {
       clearLayer(target.strokes)
       applyCamera(target.strokes, camera, target.dpr)
 
-      // Strokes the lasso is live-moving are skipped here and ghost-painted
-      // on live by the lasso's `redraw()` at offset.
-      const dragState = tool.current === lassoTool ? lassoTool.getDragState() : null
-      const draggingIds = dragState?.ids
-
       // Pending stamps are read through the EraserTool's `getPendingStamps`
       // extension (in-flight wipe sweep not yet committed); skipped if a
       // different tool is active.
@@ -934,7 +1284,6 @@ async function main(): Promise<void> {
 
       for (const s of strokes) {
         if (s.deleted) continue
-        if (draggingIds?.has(s.id)) continue
         if (!bboxesIntersect(getStrokeBBox(s), viewBBox)) continue
         const path = getStrokePath(s, [], true)
         if (!path) continue
@@ -959,12 +1308,44 @@ async function main(): Promise<void> {
       // of the "paste an image and draw on top" feature. See renderimages.ts
       // for the per-image draw loop (viewport cull, rotation, batch-delete
       // outline).
+      // Multi-selection outline predicate: true when the object is
+      // part of a Select-tool selection with MORE than one item (the
+      // single-selection case is painted by the Select tool's own
+      // redraw — handles + outline). Cmd+A populates Select with
+      // every non-deleted object, which is the primary user-facing
+      // path for this visual.
+      //
+      // Set-cached per frame: a single .filter().map() walks the
+      // selection once and the renderer's per-image / per-text lookup
+      // is O(1). Without the cache, the prior `sels.some(...)` predicate
+      // ran O(M) for every image and every text, producing O(N×M)
+      // comparisons per frame on a Cmd+A of a large board.
+      const sels = selectTool.getSelections()
+      const multiSelectedImageIds =
+        sels.length > 1 ? new Set(sels.filter((s) => s.kind === 'image').map((s) => s.id)) : null
+      const multiSelectedTextIds =
+        sels.length > 1 ? new Set(sels.filter((s) => s.kind === 'text').map((s) => s.id)) : null
       renderImages({
         images,
         layer: target.committed,
         camera,
         viewBBox,
-        isMarkedForBatchDelete: (id) => imagesMarkedForBatchDelete.has(id),
+        isMultiSelected: multiSelectedImageIds
+          ? (id) => multiSelectedImageIds.has(id)
+          : () => false,
+      })
+
+      // Texts render above images and below the strokes composite. The
+      // currently-edited text id is masked out by the render so the DOM-
+      // overlay editable doesn't double-render the same content.
+      renderTexts({
+        texts,
+        layer: target.committed,
+        camera,
+        viewBBox,
+        resolveColor: resolveInkColor,
+        editingId: textTool.getEditingId(),
+        isMultiSelected: multiSelectedTextIds ? (id) => multiSelectedTextIds.has(id) : () => false,
       })
 
       // Composite the strokes offscreen onto committed in pixel space

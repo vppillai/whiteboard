@@ -35,6 +35,13 @@ export interface Popover {
   dismiss(): void
   /** A selection happened in the body — auto-dismiss unless pinned. */
   noteSelection(): void
+  /** Briefly pulse the popover to draw the user's eye. Used when a user
+   *  action (e.g. right-click on canvas) would normally open a new
+   *  popover but a pinned popover already exists — pulsing the pinned
+   *  one tells the user "your context menu is over there, use it"
+   *  without programmatically moving the OS cursor (which browsers
+   *  don't allow). */
+  flashAttention(): void
 }
 
 // Single-instance: at most one popover is alive at a time. Opening another
@@ -174,6 +181,21 @@ export function showPopover(opts: PopoverOptions): Popover {
   document.addEventListener('keydown', onKey, true)
   document.addEventListener('pointerdown', onOutsidePointer, true)
 
+  let flashTimer: number | null = null
+  function flashAttention(): void {
+    el.classList.remove('whiteboard-popover-flash')
+    // Force a reflow so re-adding the class restarts the CSS animation.
+    void el.offsetWidth
+    el.classList.add('whiteboard-popover-flash')
+    if (flashTimer !== null) window.clearTimeout(flashTimer)
+    flashTimer = window.setTimeout(() => {
+      el.classList.remove('whiteboard-popover-flash')
+      flashTimer = null
+    }, 600)
+    // Bring the popover into view if it scrolled off (e.g. user panned).
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }
+
   const popover: Popover = {
     el,
     isPinned: () => pinned,
@@ -185,6 +207,7 @@ export function showPopover(opts: PopoverOptions): Popover {
     noteSelection: () => {
       if (!pinned) dismiss()
     },
+    flashAttention,
   }
   active = { popover, tag: opts.tag }
   return popover
@@ -200,6 +223,14 @@ export function dismissAllPopovers(): boolean {
 /** Returns the tag of the active popover, or undefined if none is open. */
 export function getActiveTag(): string | undefined {
   return active?.tag
+}
+
+/** Returns the active popover, or null if none is open. Lets callers
+ *  inspect pin state (e.g. to suppress dismiss on a repeat-open) or
+ *  call flashAttention to draw the eye when the user tries to open a
+ *  new popover while a pinned one is alive. */
+export function getActivePopover(): Popover | null {
+  return active?.popover ?? null
 }
 
 function positionPopover(el: HTMLElement, anchor: { x: number; y: number }): void {

@@ -37,18 +37,33 @@ export interface KeyHandlers {
   /** Activate the eraser tool persistently (sticky toggle). Bound to Shift+E
    *  because plain E is pure spring-loaded — see `eraserhold.ts`. */
   selectEraserSticky: () => void
-  /** Activate the lasso tool. Bound to `S`. */
-  selectLassoTool: () => void
-  /** Activate the Select tool for image manipulation. Bound to `V` —
-   *  the Figma / Sketch / Excalidraw convention for the pointer/select
-   *  tool. */
+  /** Activate the Select tool for object manipulation (images, texts,
+   *  and strokes) — single-object and multi-object. Bound to `V` (the
+   *  Figma / Sketch / Excalidraw convention for the universal pointer
+   *  / select tool) AND `S` (preserved muscle memory from the v1.x
+   *  lasso tool, which Select absorbed in v1.3). */
   selectSelectTool: () => void
-  /** Delete the active selection (lasso). Returns `true` if anything was
-   *  actually deleted; the dispatcher uses this to decide whether to
-   *  preventDefault (so Backspace doesn't trigger browser history-back). */
+  /** Activate the laser pointer tool. Bound to `L`. Ephemeral fading
+   *  trail for presentations; nothing persisted. */
+  selectLaserTool: () => void
+  /** Activate the text tool. Bound to `T`. (Theme cycling moved to
+   *  `Shift+T` to free up the unmodified key for this — per the v1.2
+   *  user request that text be primary on T.) */
+  selectTextTool: () => void
+  /** Toggle bold / italic / underline on the active text. Routed from
+   *  Cmd/Ctrl+B/I/U. The text tool itself intercepts these inside its
+   *  contenteditable; the global keymap handlers are a backup for the
+   *  edge case where the editable isn't the focused element. */
+  toggleTextBold: () => void
+  toggleTextItalic: () => void
+  toggleTextUnderline: () => void
+  /** Delete the active Select-tool selection (single or multi). Returns
+   *  `true` if anything was actually deleted; the dispatcher uses this
+   *  to decide whether to preventDefault (so Backspace doesn't trigger
+   *  browser history-back). */
   deleteSelection: () => boolean
-  /** Select all non-deleted strokes via the lasso. Activates lasso if not
-   *  already active. */
+  /** Select all non-deleted objects across all kinds (strokes + images
+   *  + texts). Activates the Select tool if not already active. */
   selectAll: () => void
   /** Toggle the settings side panel (Cmd/Ctrl+,). Open if closed, dismiss if
    *  open — single-instance side panel handles the toggle semantics. */
@@ -123,6 +138,22 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
         preventAndCall(e, handlers.openExport)
         return
       }
+      // Cmd/Ctrl+B/I/U — text formatting. Only meaningful inside text
+      // edit mode; the handler itself no-ops when not editing, so
+      // intercepting unconditionally is safe (and lets us preventDefault
+      // so the browser doesn't try its own bold/italic/underline action).
+      if (!shift && k === 'b') {
+        preventAndCall(e, handlers.toggleTextBold)
+        return
+      }
+      if (!shift && k === 'i') {
+        preventAndCall(e, handlers.toggleTextItalic)
+        return
+      }
+      if (!shift && k === 'u') {
+        preventAndCall(e, handlers.toggleTextUnderline)
+        return
+      }
     }
 
     // Esc cancels — dispatcher prevents default only if anything was actually
@@ -132,9 +163,10 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       return
     }
 
-    // Delete / Backspace removes the lasso selection. preventDefault only on
-    // success so Backspace can still go-back when there's no selection (and
-    // when typed into a focused input — there are none in v1, but future-proof).
+    // Delete / Backspace removes the Select-tool selection. preventDefault
+    // only on success so Backspace can still go-back when there's no
+    // selection (and when typed into a focused input — there are none in
+    // v1, but future-proof).
     if (!meta && !alt && (e.key === 'Delete' || e.key === 'Backspace')) {
       if (handlers.deleteSelection()) e.preventDefault()
       return
@@ -143,7 +175,8 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
     // Unmodified single-letter bindings (ignore auto-repeat).
     if (!meta && !alt && !shift && !e.repeat) {
       if (k === 't') {
-        handlers.toggleTheme()
+        // T enters Text mode (v1.2). Theme cycle moved to Shift+T.
+        handlers.selectTextTool()
         return
       }
       if (k === 'c') {
@@ -170,13 +203,17 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
         handlers.selectPenDefault()
         return
       }
-      if (k === 's') {
-        handlers.selectLassoTool()
+      // V AND S — Select tool (universal pointer for any object kind).
+      // V follows the Figma / Sketch / Excalidraw convention; S is
+      // preserved muscle-memory from the v1.x lasso tool that Select
+      // absorbed in v1.3.
+      if (k === 'v' || k === 's') {
+        handlers.selectSelectTool()
         return
       }
-      // V — Select tool (image manipulation). Figma/Sketch convention.
-      if (k === 'v') {
-        handlers.selectSelectTool()
+      // L — Laser pointer (ephemeral fading trail).
+      if (k === 'l') {
+        handlers.selectLaserTool()
         return
       }
       // F — toggle distraction-free mode (hides chrome). M2.
@@ -191,6 +228,11 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       // Shift+E: sticky eraser (the counterpart to plain E's spring-load).
       if (k === 'e') {
         handlers.selectEraserSticky()
+        return
+      }
+      // Shift+T cycles theme (moved from plain T when text gained T in v1.2).
+      if (k === 't') {
+        handlers.toggleTheme()
         return
       }
       // Shift+[ / Shift+] — cycle curated palette. M2.

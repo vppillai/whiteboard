@@ -12,10 +12,11 @@
  * in a Blob — so tests can verify content without jsdom.
  */
 
-import type { ImageObject, Stroke } from '@whiteboard/shared'
+import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
 import { getStroke } from 'perfect-freehand'
 import { imageAABB, imageCenter } from '../imagegeom'
 import type { GridType, SettingsV1 } from '../settings'
+import { FONT_CSS, TEXT_PADDING_X, TEXT_PADDING_Y, measureText, textAABB } from '../textgeom'
 import { resolveInkColor } from '../theme'
 import type { Bounds } from './bounds'
 
@@ -27,6 +28,7 @@ export function exportSVG(
   strokes: Stroke[],
   images: readonly ImageObject[],
   imageDataUris: ImageDataUriMap,
+  texts: readonly TextObject[],
   bounds: Bounds,
   settings: SettingsV1,
 ): Blob {
@@ -89,6 +91,50 @@ export function exportSVG(
     )
   }
 
+  // Texts go above images, below strokes (matching the on-screen layer
+  // order). One <text> element per text object with one <tspan> per line
+  // so positioning is explicit per line and CSS line-height isn't
+  // required. Visibility cull by rotation-aware AABB intersection with
+  // the export bounds; rotation transform via SVG's transform attribute.
+  const sortedTexts = [...texts].filter((t) => !t.deleted).sort((a, b) => a.z - b.z)
+  const textEls: string[] = []
+  for (const t of sortedTexts) {
+    const bb = textAABB(t)
+    if (bb.maxX < bounds.x || bb.minX > boundsMaxX) continue
+    if (bb.maxY < bounds.y || bb.minY > boundsMaxY) continue
+    const r = t.rotation ?? 0
+    // Use measureText so wrap-width text (greedy word-wrap split during
+    // measurement) emits the same lines on export as it shows in the
+    // editor. Without this, a wrapped block would export as a single
+    // tspan-per-newline (visible only at hard-break positions).
+    const m = measureText(t.content, t.font, t.wrapWidth)
+    const baseX = t.transform.x + TEXT_PADDING_X
+    const baseY = t.transform.y + TEXT_PADDING_Y
+    const fill = resolveInkColor(t.color)
+    const fontFamily = FONT_CSS[t.font.family]
+    const fontStyle = t.font.italic ? ' font-style="italic"' : ''
+    const fontWeight = t.font.bold ? ' font-weight="700"' : ''
+    const transformAttr =
+      Math.abs(r) < 1e-9
+        ? ''
+        : ` transform="rotate(${fmt((r * 180) / Math.PI)} ${fmt(t.transform.x + t.transform.w / 2)} ${fmt(t.transform.y + t.transform.h / 2)})"`
+    const tspans = m.lines
+      .map((line, i) => {
+        // `dominant-baseline=hanging` on each <tspan> makes the y
+        // coordinate the TOP of the line (matches canvas's
+        // textBaseline='top' so the SVG export aligns with the editor's
+        // WYSIWYG view). On the parent <text> it would be inert here
+        // because per-<tspan> y= overrides it.
+        const y = baseY + i * m.lineHeight
+        return `<tspan x="${fmt(baseX)}" y="${fmt(y)}" dominant-baseline="hanging">${escapeText(line)}</tspan>`
+      })
+      .join('')
+    const textDecoration = t.font.underline ? ' text-decoration="underline"' : ''
+    textEls.push(
+      `<text font-family="${escapeAttr(fontFamily)}" font-size="${fmt(t.font.size)}" fill="${escapeAttr(fill)}"${fontStyle}${fontWeight}${textDecoration}${transformAttr}>${tspans}</text>`,
+    )
+  }
+
   // Per-stroke. Collect mask <defs> separately and inject after grid.
   const maskDefs: string[] = []
   const strokeEls: string[] = []
@@ -133,6 +179,7 @@ export function exportSVG(
   if (maskDefs.length > 0) {
     parts.push(`<defs>${maskDefs.join('')}</defs>`)
   }
+  for (const el of textEls) parts.push(el)
   for (const el of strokeEls) parts.push(el)
   parts.push('</svg>')
   return new Blob([parts.join('\n')], { type: 'image/svg+xml' })
@@ -152,6 +199,12 @@ function renderGridDefs(
   }
   // 'ruled' — horizontal lines only (notebook paper).
   return `<defs><pattern id="wb-grid" x="0" y="0" width="${spacing}" height="${spacing}" patternUnits="userSpaceOnUse"><path d="M 0 0 L ${spacing} 0" stroke="${escapeAttr(lineColor)}" stroke-width="0.5" fill="none"/></pattern></defs>`
+}
+
+/** Escape SVG text content. `&` first to avoid double-encoding, then
+ *  `<` and `>` so the content can't open or close adjacent elements. */
+function escapeText(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 function escapeAttr(s: string): string {

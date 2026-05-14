@@ -20,8 +20,9 @@
  * when the user confirms a clear.
  */
 
-import type { ImageObject, Stroke } from '@whiteboard/shared'
+import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
 import { addErasedStamps, invalidateStrokeBBox, removeErasedStamps } from './stroke'
+import { resizeToFit as resizeTextRect } from './textgeom'
 
 export interface StampEdit {
   strokeId: string
@@ -71,6 +72,118 @@ export type Op =
       before: number
       after: number
     }
+  /**
+   * Create a text object. Mirrors 'paste-image': by the time the op is
+   * pushed the text record is already in `ctx.texts` with deleted=false
+   * and persisted via TextStore. Apply (=redo) flips deleted→false;
+   * unapply (=undo) flips deleted→true. The text bytes stay in IDB
+   * across undo cycles so redo is cheap.
+   */
+  | { kind: 'create-text'; textId: string }
+  /** Soft-delete a text. Symmetric to 'create-text'. */
+  | { kind: 'delete-text'; textId: string }
+  /**
+   * Move or resize a text rect: swap the transform. Resize for text
+   * happens implicitly on every edit (auto-fit to measured content),
+   * which is its own 'edit-text' op — explicit `transform-text` is the
+   * pure-move flow only. Coalesced at drag-end.
+   */
+  | {
+      kind: 'transform-text'
+      textId: string
+      before: TextObject['transform']
+      after: TextObject['transform']
+    }
+  /**
+   * Edit a text's content / font / color / wrapWidth in one undoable
+   * step. Coalesced across the whole edit session (typing N keys +
+   * B/I/U toggles + font change + E/W edge drag collapses to a single
+   * op pushed when edit mode exits). Stores the full before/after
+   * payload because individual field deltas would multiply op kinds —
+   * the payload is small (string + a few fields) so the simplicity is
+   * worth the bytes. `wrapWidth` may be `undefined` (auto-width) or
+   * a positive number; both round-trip through undo correctly.
+   */
+  | {
+      kind: 'edit-text'
+      textId: string
+      before: {
+        content: string
+        font: TextObject['font']
+        color: string
+        wrapWidth: number | undefined
+      }
+      after: {
+        content: string
+        font: TextObject['font']
+        color: string
+        wrapWidth: number | undefined
+      }
+    }
+  /**
+   * Rotate a text in place. Symmetric with rotate-image — stores
+   * before/after radians so undo / redo swap without recomputation.
+   * v1.2: emitted by the Select tool when the rotation handle is
+   * dragged on a selected text (text move-only previously).
+   */
+  | {
+      kind: 'rotate-text'
+      textId: string
+      before: number
+      after: number
+    }
+  /**
+   * Composite multi-object move: a single op carrying transforms for
+   * every item displaced by one multi-drag gesture. Each item is one of
+   * the three existing per-kind move shapes (transform-image,
+   * transform-text, or per-stroke samples translation). The op exists
+   * to coalesce what would otherwise be N separate per-item ops into a
+   * single undo step and — critically for M3 sync — a single transaction
+   * + a single wire message on N peers. Without this, a 30-object
+   * multi-drag on a 16-peer board produces 480 update messages.
+   *
+   * Local-only behavior is also better: one Cmd+Z reverses the whole
+   * group move instead of unwinding 30 separate per-item ops.
+   *
+   * Items are stored as a discriminated union so apply / unapply can
+   * dispatch per kind without re-resolving the object kind from a
+   * separate lookup.
+   *
+   * Resize / rotation are intentionally NOT batched into this op —
+   * they're single-object operations even in multi-selection mode (see
+   * Phase B4 of the Lasso → Select absorption, ADR 0016). When / if
+   * multi-rotate lands, a parallel `rotate-many` op kind is the natural
+   * shape; the same pattern from this op extends cleanly.
+   */
+  | {
+      kind: 'transform-many'
+      items: TransformManyItem[]
+    }
+
+/** One entry in a `transform-many` op's `items` array. Per-kind
+ *  before/after payload mirrors the existing per-item op shapes:
+ *    - image / text: rect transform
+ *    - stroke: dx/dy delta (matches `move` op's semantics — symmetric
+ *      apply/unapply translate samples by ±(dx,dy)). */
+export type TransformManyItem =
+  | {
+      kind: 'image'
+      imageId: string
+      before: ImageObject['transform']
+      after: ImageObject['transform']
+    }
+  | {
+      kind: 'text'
+      textId: string
+      before: TextObject['transform']
+      after: TextObject['transform']
+    }
+  | {
+      kind: 'stroke'
+      strokeId: string
+      dx: number
+      dy: number
+    }
 
 export interface OpContext {
   /** All strokes (including soft-deleted ones). Mutated in place by ops. */
@@ -83,6 +196,10 @@ export interface OpContext {
    *  Bytes do not change after the initial paste, so this is the metadata-only
    *  fast path, not the binary-carrying saveImage from storage.ts. */
   saveImageMeta: (img: ImageObject) => void
+  /** All texts (including soft-deleted ones). Mutated in place by text ops. */
+  texts: TextObject[]
+  /** Persist a single text record. */
+  saveText: (t: TextObject) => void
   /** Mark the committed canvas dirty for the next render. */
   markDirty: () => void
 }
@@ -91,10 +208,10 @@ export interface OpContext {
 export function applyOp(op: Op, ctx: OpContext): void {
   switch (op.kind) {
     case 'create':
-      flipDeleted(ctx, [op.strokeId], false)
+      flipStrokesDeleted(ctx, [op.strokeId], false)
       break
     case 'delete':
-      flipDeleted(ctx, op.strokeIds, true)
+      flipStrokesDeleted(ctx, op.strokeIds, true)
       break
     case 'move':
       translateStrokes(ctx, op.strokeIds, op.dx, op.dy)
@@ -114,6 +231,24 @@ export function applyOp(op: Op, ctx: OpContext): void {
     case 'rotate-image':
       setImageRotation(ctx, op.imageId, op.after)
       break
+    case 'create-text':
+      flipTextDeleted(ctx, op.textId, false)
+      break
+    case 'delete-text':
+      flipTextDeleted(ctx, op.textId, true)
+      break
+    case 'transform-text':
+      setTextTransform(ctx, op.textId, op.after)
+      break
+    case 'edit-text':
+      setTextEdit(ctx, op.textId, op.after)
+      break
+    case 'rotate-text':
+      setTextRotation(ctx, op.textId, op.after)
+      break
+    case 'transform-many':
+      applyTransformMany(ctx, op.items, false)
+      break
   }
   ctx.markDirty()
 }
@@ -122,10 +257,10 @@ export function applyOp(op: Op, ctx: OpContext): void {
 export function unapplyOp(op: Op, ctx: OpContext): void {
   switch (op.kind) {
     case 'create':
-      flipDeleted(ctx, [op.strokeId], true)
+      flipStrokesDeleted(ctx, [op.strokeId], true)
       break
     case 'delete':
-      flipDeleted(ctx, op.strokeIds, false)
+      flipStrokesDeleted(ctx, op.strokeIds, false)
       break
     case 'move':
       translateStrokes(ctx, op.strokeIds, -op.dx, -op.dy)
@@ -145,17 +280,76 @@ export function unapplyOp(op: Op, ctx: OpContext): void {
     case 'rotate-image':
       setImageRotation(ctx, op.imageId, op.before)
       break
+    case 'create-text':
+      flipTextDeleted(ctx, op.textId, true)
+      break
+    case 'delete-text':
+      flipTextDeleted(ctx, op.textId, false)
+      break
+    case 'transform-text':
+      setTextTransform(ctx, op.textId, op.before)
+      break
+    case 'edit-text':
+      setTextEdit(ctx, op.textId, op.before)
+      break
+    case 'rotate-text':
+      setTextRotation(ctx, op.textId, op.before)
+      break
+    case 'transform-many':
+      applyTransformMany(ctx, op.items, true)
+      break
   }
   ctx.markDirty()
 }
 
-function flipDeleted(ctx: OpContext, ids: readonly string[], deleted: boolean): void {
-  for (const id of ids) {
-    const stroke = ctx.strokes.find((s) => s.id === id)
-    if (!stroke) continue
-    stroke.deleted = deleted || undefined
-    ctx.saveStroke(stroke)
+/** Apply or unapply a `transform-many` op. `unapply=true` swaps the
+ *  before/after roles per item, mirroring the convention every other
+ *  symmetric op (transform-image / transform-text / move / rotate-*)
+ *  uses. */
+function applyTransformMany(
+  ctx: OpContext,
+  items: readonly TransformManyItem[],
+  unapply: boolean,
+): void {
+  for (const item of items) {
+    if (item.kind === 'image') {
+      setImageTransform(ctx, item.imageId, unapply ? item.before : item.after)
+    } else if (item.kind === 'text') {
+      setTextTransform(ctx, item.textId, unapply ? item.before : item.after)
+    } else {
+      const dx = unapply ? -item.dx : item.dx
+      const dy = unapply ? -item.dy : item.dy
+      translateStrokes(ctx, [item.strokeId], dx, dy)
+    }
   }
+}
+
+/**
+ * Generic soft-delete flip for any board-resident object kind. The three
+ * earlier per-kind helpers (`flipDeleted` for strokes, `flipImageDeleted`,
+ * `flipTextDeleted`) were 5-line copies of this same pattern — a 4th
+ * object kind (shapes / sticky notes) would have added a 4th copy and a
+ * 4th place that could drift on the `deleted || undefined` invariant.
+ *
+ * `deleted || undefined` is intentional: it stores `true` for deleted
+ * and `undefined` (omitted on serialization) for live, keeping persisted
+ * records compact and backward-compatible with rotation-less / delete-
+ * less records.
+ */
+function flipDeletedOn<T extends { id: string; deleted?: boolean }>(
+  arr: readonly T[],
+  id: string,
+  deleted: boolean,
+  save: (obj: T) => void,
+): void {
+  const obj = arr.find((x) => x.id === id)
+  if (!obj) return
+  obj.deleted = deleted || undefined
+  save(obj)
+}
+
+function flipStrokesDeleted(ctx: OpContext, ids: readonly string[], deleted: boolean): void {
+  for (const id of ids) flipDeletedOn(ctx.strokes, id, deleted, ctx.saveStroke)
 }
 
 function translateStrokes(ctx: OpContext, ids: readonly string[], dx: number, dy: number): void {
@@ -191,10 +385,7 @@ function applyStampEdits(ctx: OpContext, edits: readonly StampEdit[], add: boole
 }
 
 function flipImageDeleted(ctx: OpContext, id: string, deleted: boolean): void {
-  const img = ctx.images.find((i) => i.id === id)
-  if (!img) return
-  img.deleted = deleted || undefined
-  ctx.saveImageMeta(img)
+  flipDeletedOn(ctx.images, id, deleted, ctx.saveImageMeta)
 }
 
 function setImageTransform(ctx: OpContext, id: string, transform: ImageObject['transform']): void {
@@ -209,4 +400,55 @@ function setImageRotation(ctx: OpContext, id: string, rotation: number): void {
   if (!img) return
   img.rotation = rotation || undefined
   ctx.saveImageMeta(img)
+}
+
+function flipTextDeleted(ctx: OpContext, id: string, deleted: boolean): void {
+  flipDeletedOn(ctx.texts, id, deleted, ctx.saveText)
+}
+
+function setTextTransform(ctx: OpContext, id: string, transform: TextObject['transform']): void {
+  const t = ctx.texts.find((x) => x.id === id)
+  if (!t) return
+  t.transform = { ...transform }
+  ctx.saveText(t)
+}
+
+/** Apply an edit-text op's payload to the matching text. Recomputes the
+ *  transform.w/h via measureText so the rect always matches content +
+ *  wrapWidth; the op stores only the content / font / color / wrapWidth,
+ *  not the derived size. wrapWidth is restored explicitly so an edge-
+ *  handle drag's undo correctly puts the wrap layout back. */
+function setTextEdit(
+  ctx: OpContext,
+  id: string,
+  payload: {
+    content: string
+    font: TextObject['font']
+    color: string
+    wrapWidth: number | undefined
+  },
+): void {
+  const t = ctx.texts.find((x) => x.id === id)
+  if (!t) return
+  t.content = payload.content
+  t.font = { ...payload.font }
+  t.color = payload.color
+  t.wrapWidth = payload.wrapWidth
+  // Re-fit the rect to the new content + font + wrapWidth so move/
+  // resize stay in sync with edit. `resizeTextRect` measures via a
+  // detached canvas and falls back to a heuristic when no DOM is
+  // present (e.g. bun:test).
+  const measured = resizeTextRect(t)
+  t.transform = measured.transform
+  ctx.saveText(t)
+}
+
+function setTextRotation(ctx: OpContext, id: string, rotation: number): void {
+  const t = ctx.texts.find((x) => x.id === id)
+  if (!t) return
+  // Symmetric with setImageRotation: store `undefined` for the zero case
+  // so persisted records don't carry an explicit `rotation: 0` field
+  // (cheaper schema; backward-compat with rotation-less records).
+  t.rotation = rotation || undefined
+  ctx.saveText(t)
 }
