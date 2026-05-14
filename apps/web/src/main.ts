@@ -915,8 +915,16 @@ async function main(): Promise<void> {
    *  translate to the cursor while preserving relative layout among
    *  all items in the bundle (strokes and texts retain their relative
    *  positions). Differs from `computeBoardBounds`'s output, which
-   *  carries EXPORT_MARGIN for PNG breathing room. */
-  const selectionOrigin = (ss: Stroke[], ts: TextObject[]): { x: number; y: number } | null => {
+   *  carries EXPORT_MARGIN for PNG breathing room.
+   *
+   *  Edge case: a selection of strokes whose samples are all empty
+   *  (degenerate erased-but-not-compacted strokes, or future partial-
+   *  commit paths) returns null only if the texts list is ALSO empty.
+   *  Otherwise the texts' rects provide the origin. Falls back to
+   *  `{0, 0}` only when no item contributes — but the caller already
+   *  short-circuits on empty selections, so reaching the fallback is
+   *  defensive-only. */
+  const selectionOrigin = (ss: Stroke[], ts: TextObject[]): { x: number; y: number } => {
     let minX = Number.POSITIVE_INFINITY
     let minY = Number.POSITIVE_INFINITY
     for (const s of ss) {
@@ -929,7 +937,15 @@ async function main(): Promise<void> {
       if (t.transform.x < minX) minX = t.transform.x
       if (t.transform.y < minY) minY = t.transform.y
     }
-    if (!Number.isFinite(minX)) return null
+    if (!Number.isFinite(minX)) {
+      // All strokes had zero samples AND no texts contributed. Rather
+      // than silently fall back to PNG-only by returning null, anchor
+      // at the origin — paste-back still works (translates by (cursor
+      // - 0, 0) so the strokes' samples land RELATIVE to cursor by
+      // their existing coordinates, which is the same UX as the
+      // "drag onto a fresh canvas" case).
+      return { x: 0, y: 0 }
+    }
     return { x: minX, y: minY }
   }
 
@@ -1040,16 +1056,13 @@ async function main(): Promise<void> {
     // No images → write native bundle + PNG. Strokes and/or texts
     // round-trip as vectors on paste-back inside the whiteboard.
     if (snap.images.length === 0 && (snap.strokes.length > 0 || snap.texts.length > 0)) {
-      const origin = selectionOrigin(snap.strokes, snap.texts)
-      if (origin) {
-        const bundle: ClipboardStrokeBundle = {
-          v: 1,
-          strokes: snap.strokes,
-          texts: snap.texts.length > 0 ? snap.texts : undefined,
-          origin,
-        }
-        return writeSelectionBundleToClipboard(pngBlob, bundle, showInfoToast)
+      const bundle: ClipboardStrokeBundle = {
+        v: 1,
+        strokes: snap.strokes,
+        texts: snap.texts.length > 0 ? snap.texts : undefined,
+        origin: selectionOrigin(snap.strokes, snap.texts),
       }
+      return writeSelectionBundleToClipboard(pngBlob, bundle, showInfoToast)
     }
 
     // Selection contains image(s) → PNG only.

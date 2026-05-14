@@ -161,4 +161,74 @@ describe('clipboardstrokes: round-trip', () => {
       '<div data-whiteboard-v1="{&quot;v&quot;:1,&quot;strokes&quot;:[],&quot;texts&quot;:&quot;not-an-array&quot;,&quot;origin&quot;:{&quot;x&quot;:0,&quot;y&quot;:0}}"></div>'
     expect(extractStrokesFromHtml(html)).toBeNull()
   })
+
+  test('unknown additive fields are silently tolerated (forward-compat)', () => {
+    // A future v=1 writer might add `images?` or other optional fields
+    // — older readers should accept the bundle and ignore the unknowns.
+    // This locks in the forward-compat policy documented in the file
+    // header so a future patch that tightens the parser inadvertently
+    // breaks cross-version clipboard.
+    const bundle = {
+      v: 1,
+      strokes: [],
+      origin: { x: 0, y: 0 },
+      images: ['future-field-from-v1.4'],
+      somethingElse: { nested: true },
+    }
+    const json = JSON.stringify(bundle)
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+    const html = `<div data-whiteboard-v1="${json}"></div>`
+    const restored = extractStrokesFromHtml(html)
+    expect(restored).not.toBeNull()
+    expect(restored?.strokes).toEqual([])
+  })
+
+  test('DoS cap: > 5000 strokes returns null', () => {
+    // Defensive: a malicious page could put a huge stroke array in the
+    // clipboard and try to flood IDB / slow the canvas. The parser
+    // rejects bundles past the cap.
+    const huge = { v: 1, strokes: new Array(5001).fill(null), origin: { x: 0, y: 0 } }
+    const json = JSON.stringify(huge).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    const html = `<div data-whiteboard-v1="${json}"></div>`
+    expect(extractStrokesFromHtml(html)).toBeNull()
+  })
+
+  test('DoS cap: > 50000 samples per stroke returns null', () => {
+    const stroke = mkStroke('s1', [])
+    // Synthetically inflate samples past the cap.
+    const inflated = {
+      ...stroke,
+      samples: new Array(50001).fill({ x: 0, y: 0, p: 0.5, t: 0 }),
+    }
+    const bundle = { v: 1, strokes: [inflated], origin: { x: 0, y: 0 } }
+    const json = JSON.stringify(bundle).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    const html = `<div data-whiteboard-v1="${json}"></div>`
+    expect(extractStrokesFromHtml(html)).toBeNull()
+  })
+
+  test('shape validation rejects stroke missing required fields', () => {
+    // `id` missing → reject entire bundle.
+    const bogus = {
+      v: 1,
+      strokes: [{ samples: [], startedAt: 0, brush: {} }],
+      origin: { x: 0, y: 0 },
+    }
+    const json = JSON.stringify(bogus).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    const html = `<div data-whiteboard-v1="${json}"></div>`
+    expect(extractStrokesFromHtml(html)).toBeNull()
+  })
+
+  test('shape validation rejects text missing required fields', () => {
+    const bogus = {
+      v: 1,
+      strokes: [],
+      texts: [{ id: 't1', content: 'x' }], // missing transform, font, color
+      origin: { x: 0, y: 0 },
+    }
+    const json = JSON.stringify(bogus).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    const html = `<div data-whiteboard-v1="${json}"></div>`
+    expect(extractStrokesFromHtml(html)).toBeNull()
+  })
 })
