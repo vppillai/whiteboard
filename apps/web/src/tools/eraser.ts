@@ -198,11 +198,12 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
       bucket.push(stamp)
       any = true
     }
-    // Non-stroke object kinds: whole-object delete when the eraser
-    // disk touches them. Pixel-mask cuts don't apply to vector / raster
-    // objects, so consistency with object-mode is: the whole thing goes.
-    // Already-queued ids are skipped (Set semantics).
-    if (queueNonStrokeHits(px, py, stamp.r)) any = true
+    // Wipe mode is STROKES-ONLY. Earlier in v1.4 the sweep also queued
+    // whole-object deletes for shapes / texts / images that the disk
+    // touched, but that was too aggressive: a user scrubbing strokes
+    // OFF an image would also nuke the image underneath. Now wipe is
+    // narrowly scoped to "cut through strokes." To delete a shape /
+    // text / image, the user switches to object mode (tap-to-delete).
     return any
   }
 
@@ -211,13 +212,13 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
    *  delete queue (deduped by Set). Returns true if anything new
    *  was queued so the caller can mark dirty / preview the deletion.
    *
-   *  Used by both sweep (wipe) and tap (object) paths so the hit-test
-   *  semantics are identical regardless of mode. Tolerance for shapes
-   *  is the disk radius itself (the disk's edge defines the hit
-   *  boundary in screen-relative pixels). Texts and images use a
-   *  rotated-rect AABB containment check at the center point — a
-   *  small disk grazing a corner counts as a hit, matching the
-   *  visual "the cursor touched it" expectation. */
+   *  Object-mode tap only. Wipe mode is intentionally strokes-only —
+   *  scrubbing strokes off an image shouldn't also delete the image
+   *  underneath. Whole-object delete is a deliberate single-tap
+   *  gesture in object mode.
+   *
+   *  Tolerance: the disk radius. Texts and images use a rotated-rect
+   *  AABB containment at the center point. */
   const queueNonStrokeHits = (px: number, py: number, r: number): boolean => {
     let any = false
     for (const sh of opts.callbacks.getShapes()) {
