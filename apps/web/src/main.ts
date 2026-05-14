@@ -84,6 +84,7 @@ import { attachPointer } from './pointer'
 import { dismissAllPopovers, findPopoverByTag } from './popover'
 import { applyCamera, clearLayer, drawStrokeOntoLayer, drawStrokePath, setupCanvas } from './render'
 import { renderImages } from './renderimages'
+import { renderShapes } from './rendershapes'
 import { renderTexts } from './rendertexts'
 import { createResetFlow } from './resetflow'
 import {
@@ -1370,6 +1371,8 @@ async function main(): Promise<void> {
         sels.length > 1 ? new Set(sels.filter((s) => s.kind === 'image').map((s) => s.id)) : null
       const multiSelectedTextIds =
         sels.length > 1 ? new Set(sels.filter((s) => s.kind === 'text').map((s) => s.id)) : null
+      const multiSelectedShapeIds =
+        sels.length > 1 ? new Set(sels.filter((s) => s.kind === 'shape').map((s) => s.id)) : null
       renderImages({
         images,
         layer: target.committed,
@@ -1391,6 +1394,20 @@ async function main(): Promise<void> {
         resolveColor: resolveInkColor,
         editingId: textTool.getEditingId(),
         isMultiSelected: multiSelectedTextIds ? (id) => multiSelectedTextIds.has(id) : () => false,
+      })
+
+      // Shapes render above texts and below the strokes composite, so
+      // pen ink can naturally annotate on top of vector shapes the same
+      // way it does on top of images and text.
+      renderShapes({
+        shapes,
+        layer: target.committed,
+        camera,
+        viewBBox,
+        resolveColor: resolveInkColor,
+        isMultiSelected: multiSelectedShapeIds
+          ? (id) => multiSelectedShapeIds.has(id)
+          : () => false,
       })
 
       // Composite the strokes offscreen onto committed in pixel space

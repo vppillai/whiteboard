@@ -88,6 +88,7 @@ export type Selection =
   | { kind: 'image'; id: string }
   | { kind: 'text'; id: string }
   | { kind: 'stroke'; id: string }
+  | { kind: 'shape'; id: string }
 
 /**
  * Live view of the currently-selected object. Both `obj` and `transform`
