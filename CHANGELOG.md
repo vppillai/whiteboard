@@ -6,6 +6,20 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-05-14
+
+Patch — pinned right-click tool menu now genuinely stays pinned across every action, including ones that open another popover (Grid…, Export…, Color picker) or a side panel (Settings) or a confirm flow (Clear board). Previously a pin survived "selection events" in the popover primitive but any explicit `showPopover` call dismissed every existing popover regardless of pin state, so opening Grid / Export from a pinned tools menu killed the pin.
+
+### Fixed
+
+- **Popover primitive supports multi-popover coexistence.** The single-slot `active` registry becomes an array; new popovers replace only same-tag entries (so toggle shortcuts stay deterministic), while different-tag popovers — including pinned ones — coexist. Pinned tools menu now survives the user opening Grid / Export / Color from it.
+- **`toolmenu.ts` Grid / Export / Clear handlers use `onAction`**, matching every other body interaction. Pinned menu rebuilds its content (showing fresh active-state highlights) instead of dismissing on every action.
+- **Toggle keymap callers (`toggleColor`, `toggleOptions`, `openExport`) dismiss only their own tag** instead of nuking every active popover. Same-tag toggle dispatch via the new `findPopoverByTag` helper.
+
+### Internal
+
+- **`findPopoverByTag(tag)` + `isPopoverActive(tag)`** added to the popover module. `getActiveTag` / `getActivePopover` kept for back-compat but documented as deprecated — the "active" popover is ambiguous when multiple coexist.
+
 ## [1.3.0] — 2026-05-13
 
 **Lasso → Select absorption + whiteboard-native clipboard + 4-lane review hardening.** Two major UX overhauls — the Lasso tool's selection model merges into the Select tool (single, multi, marquee all live there now), and `Cmd/Ctrl+C` / `Cmd/Ctrl+V` round-trip strokes + texts as vectors when pasting back inside the whiteboard (still PNG into external apps). Two parallel 4-lane critical code reviews fed substantial refactors: drag-state discriminated union, op-pipeline `transform-many` composite for the upcoming sync, clipboard subsystem extracted into its own module. Several small Tier-A bug fixes shipped along the way.

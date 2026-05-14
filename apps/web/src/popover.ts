@@ -4,8 +4,21 @@
  * keeps a popover alive across click-outside and selection events but `Esc`
  * and the close button always dismiss.
  *
- * Used by the color picker and the options menu. Future: brush picker, brush
- * settings, anything else that wants pen-friendly transient UI.
+ * Coexistence rules:
+ *   - Pinned popovers SURVIVE the opening of a new popover with a different
+ *     tag — e.g. a pinned tools menu stays alive when the user opens the
+ *     export popover from it. Pin is the user's "keep this alive" promise.
+ *   - Opening a popover with the SAME tag as an existing one always
+ *     replaces (pinned or not). This makes toggle shortcuts behave
+ *     consistently — pressing `C` twice with a pinned color picker open
+ *     dismisses the picker; opening the same picker again from the menu
+ *     replaces rather than stacking duplicates.
+ *   - Untagged popovers replace any existing untagged popover (and only
+ *     each other). Tags + untagged are independent slots.
+ *
+ * Used by the right-click tool menu, color picker, options menu, export
+ * popover. Future: brush picker, brush settings, anything else that wants
+ * pen-friendly transient UI.
  */
 
 export interface PopoverOptions {
@@ -18,9 +31,10 @@ export interface PopoverOptions {
   /** Initial pin state. Defaults to false. */
   pinned?: boolean
   /**
-   * Identity tag, exposed via `getActiveTag()`. Lets callers implement toggle
-   * behavior — pressing the same shortcut again to dismiss the popover —
-   * without having to retain a reference to the Popover themselves.
+   * Identity tag — used by the same-tag-replaces dispatch rule and by
+   * `findPopoverByTag` / `isPopoverActive` toggle-shortcut callers
+   * (pressing the same shortcut twice to dismiss the popover) without
+   * having to retain a reference to the Popover themselves.
    */
   tag?: string
   /** Called after the popover dismisses (manually or via outside / Esc). */
@@ -44,11 +58,16 @@ export interface Popover {
   flashAttention(): void
 }
 
-// Single-instance: at most one popover is alive at a time. Opening another
-// replaces the previous one (regardless of pin state — pin keeps a popover
-// alive across click-outside and selection events, not across explicit
-// requests to open a different popover).
-let active: { popover: Popover; tag?: string } | null = null
+/** Registry of all currently-alive popovers. Replaces the prior single-
+ *  slot model so pinned popovers can survive the opening of a popover
+ *  with a different tag (e.g. pin tools menu, open export — both stay
+ *  visible). Same-tag opens always replace (regardless of pin) so
+ *  toggle shortcuts stay deterministic. */
+interface ActiveEntry {
+  popover: Popover
+  tag?: string
+}
+const activeRegistry: ActiveEntry[] = []
 
 const PIN_SVG_OUTLINE =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>'
@@ -60,8 +79,18 @@ const CLOSE_SVG =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
 
 export function showPopover(opts: PopoverOptions): Popover {
-  // Single-instance: replace any existing popover.
-  active?.popover.dismiss()
+  // Same-tag replacement: dismiss any existing popover whose tag
+  // matches. Different-tag popovers — including PINNED ones — survive
+  // so the user's "keep this alive" promise across opening a different
+  // popover is honored. Untagged popovers replace any existing
+  // untagged popover (so transient anonymous popovers don't stack).
+  for (let i = activeRegistry.length - 1; i >= 0; i--) {
+    const entry = activeRegistry[i]
+    if (!entry) continue
+    if (entry.tag === opts.tag) {
+      entry.popover.dismiss()
+    }
+  }
 
   const el = document.createElement('div')
   el.className = 'whiteboard-popover'
@@ -111,7 +140,8 @@ export function showPopover(opts: PopoverOptions): Popover {
   function dismiss(): void {
     if (dismissed) return
     dismissed = true
-    if (active?.popover === popover) active = null
+    const idx = activeRegistry.findIndex((e) => e.popover === popover)
+    if (idx >= 0) activeRegistry.splice(idx, 1)
     document.removeEventListener('keydown', onKey, true)
     document.removeEventListener('pointerdown', onOutsidePointer, true)
     el.remove()
@@ -209,28 +239,56 @@ export function showPopover(opts: PopoverOptions): Popover {
     },
     flashAttention,
   }
-  active = { popover, tag: opts.tag }
+  activeRegistry.push({ popover, tag: opts.tag })
   return popover
 }
 
-/** Dismisses the active popover, if any. Returns true if one was dismissed. */
+/** Dismisses EVERY currently-alive popover, including pinned ones.
+ *  Used by Esc (the universal close-all) and by distraction-free mode
+ *  enter. Returns true if any popover was dismissed. Iterates in
+ *  reverse so each dismiss can safely splice itself out of the array. */
 export function dismissAllPopovers(): boolean {
-  if (!active) return false
-  active.popover.dismiss()
+  if (activeRegistry.length === 0) return false
+  // Snapshot the list before iterating — dismiss() mutates the registry.
+  const snapshot = activeRegistry.slice()
+  for (const entry of snapshot) {
+    entry.popover.dismiss()
+  }
   return true
 }
 
-/** Returns the tag of the active popover, or undefined if none is open. */
-export function getActiveTag(): string | undefined {
-  return active?.tag
+/** Find an active popover by tag. Returns the most-recently-opened
+ *  one with that tag, or null if none. Used by toggle-shortcut callers
+ *  (press `C` to open/close color picker) and by the right-click tool
+ *  menu re-open detector. */
+export function findPopoverByTag(tag: string): Popover | null {
+  for (let i = activeRegistry.length - 1; i >= 0; i--) {
+    const entry = activeRegistry[i]
+    if (entry?.tag === tag) return entry.popover
+  }
+  return null
 }
 
-/** Returns the active popover, or null if none is open. Lets callers
- *  inspect pin state (e.g. to suppress dismiss on a repeat-open) or
- *  call flashAttention to draw the eye when the user tries to open a
- *  new popover while a pinned one is alive. */
+/** True if a popover with the given tag is currently active. Thin
+ *  wrapper over `findPopoverByTag` for call sites that don't need
+ *  the popover reference itself. */
+export function isPopoverActive(tag: string): boolean {
+  return findPopoverByTag(tag) !== null
+}
+
+/** Deprecated. Kept for back-compat — returns the tag of the most-
+ *  recently-opened popover, or undefined. New callers should prefer
+ *  `findPopoverByTag(specificTag)` since multiple popovers can be
+ *  alive simultaneously and "the active one" is ambiguous. */
+export function getActiveTag(): string | undefined {
+  return activeRegistry[activeRegistry.length - 1]?.tag
+}
+
+/** Returns the most-recently-opened popover, or null. Same caveat as
+ *  `getActiveTag` — prefer `findPopoverByTag` when a specific
+ *  popover is intended. */
 export function getActivePopover(): Popover | null {
-  return active?.popover ?? null
+  return activeRegistry[activeRegistry.length - 1]?.popover ?? null
 }
 
 function positionPopover(el: HTMLElement, anchor: { x: number; y: number }): void {
