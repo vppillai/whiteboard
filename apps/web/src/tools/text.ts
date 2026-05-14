@@ -127,6 +127,14 @@ export interface TextTool extends Tool {
    *  through the same factory + same op as on-canvas text creation. Does
    *  NOT enter edit mode — the paste content is already final. */
   createTextAt(content: string, board: { x: number; y: number }): string
+  /** Adjust the EDITING text's font size by `delta` board pixels.
+   *  No-op when not in edit mode. Updates the live editable's CSS so
+   *  the change is visible immediately; the edit-text op lands on
+   *  commit (Esc) along with any typed content. Used by the keymap
+   *  shortcut Cmd/Ctrl+Shift+,/. for fine-grained size adjustment.
+   *  Also updates the sticky `textSize` setting so the NEXT new text
+   *  inherits the user's preference. v1.4. */
+  adjustEditingFontSize(delta: number): boolean
 }
 
 interface EditingState {
@@ -650,6 +658,23 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       deps.pushOp({ kind: 'create-text', textId: t.id })
       deps.markCommittedDirty()
       return t.id
+    },
+    adjustEditingFontSize(delta: number): boolean {
+      if (!editing) return false
+      const MIN_SIZE = 6
+      const MAX_SIZE = 200
+      const next = Math.max(MIN_SIZE, Math.min(MAX_SIZE, editing.text.font.size + delta))
+      if (next === editing.text.font.size) return false
+      editing.text.font = { ...editing.text.font, size: next }
+      const sized = resizeToFit(editing.text)
+      editing.text.transform = sized.transform
+      if (lastCtx) applyEditorStyles(editing.el, editing.text, lastCtx)
+      deps.markCommittedDirty()
+      // Update the sticky size so the next new text inherits this
+      // preference — matches the way the contextual-menu size pills
+      // also write through setTextSize.
+      setTextSize(next)
+      return true
     },
   }
 }

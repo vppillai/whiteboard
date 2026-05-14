@@ -68,6 +68,11 @@ export interface KeyHandlers {
   toggleTextBold: () => void
   toggleTextItalic: () => void
   toggleTextUnderline: () => void
+  /** Adjust the active text's font size by `delta` board-pixels. Active =
+   *  text in edit mode OR a single text selected in Select mode. Routed
+   *  from Cmd/Ctrl+Shift+, (decrease) and Cmd/Ctrl+Shift+. (increase) —
+   *  the `<` and `>` keys on a US layout. v1.4 fine-grained size step. */
+  adjustTextSize: (delta: number) => void
   /** Delete the active Select-tool selection (single or multi). Returns
    *  `true` if anything was actually deleted; the dispatcher uses this
    *  to decide whether to preventDefault (so Backspace doesn't trigger
@@ -163,6 +168,20 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       }
       if (!shift && k === 'u') {
         preventAndCall(e, handlers.toggleTextUnderline)
+        return
+      }
+      // Cmd/Ctrl+Shift+, (= `<`) decreases the active text's font size
+      // by 1 board-px. Cmd/Ctrl+Shift+. (= `>`) increases it. Matches
+      // the Google Docs / common-editor convention. The handler no-ops
+      // if no text is active. `e.key` is `<` / `>` on most layouts when
+      // Shift is held; the `k === ','` / `k === '.'` fallbacks cover
+      // layouts that don't shift-modify those keys. v1.4.
+      if (shift && (e.key === '<' || k === ',')) {
+        preventAndCall(e, () => handlers.adjustTextSize(-1))
+        return
+      }
+      if (shift && (e.key === '>' || k === '.')) {
+        preventAndCall(e, () => handlers.adjustTextSize(1))
         return
       }
     }

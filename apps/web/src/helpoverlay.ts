@@ -30,6 +30,7 @@ const SHORTCUTS = [
   'T                  tool: text   (mono, 12px default — change in menu)',
   'R / O / A / L      tool: shape — rectangle / ellipse / arrow / line  (Shift = constrain)',
   '⌘/Ctrl + B/I/U     bold / italic / underline (in text edit or on selected text)',
+  '⌘/Ctrl + Shift + ,/.  decrease / increase text font size by 1 px',
   'Esc Esc            toggle Draw ↔ Select',
   'Esc (text edit)    commit + return to previous tool',
   'Esc (select)       clear selection',

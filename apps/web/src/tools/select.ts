@@ -337,6 +337,12 @@ export interface SelectTool extends Tool {
    *  delete op for each. Returns true if anything was deleted. Single
    *  and multi cases share the same path. */
   deleteSelected(): boolean
+  /** Adjust the SELECTED text's font size by `delta` board pixels.
+   *  No-op when no single text is selected (multi-selection or non-
+   *  text). Emits one edit-text op per keystroke so Cmd+Z restores
+   *  the prior size. Used by the Cmd/Ctrl+Shift+,/. keyboard shortcut
+   *  for fine-grained size adjustment. v1.4. */
+  adjustSelectedTextFontSize(delta: number): boolean
 }
 
 /**
@@ -2458,6 +2464,38 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       setSelection([])
       deps.markCommittedDirty()
       return didDelete
+    },
+    adjustSelectedTextFontSize(delta: number): boolean {
+      const sel = singleSelection()
+      if (!sel || sel.kind !== 'text') return false
+      const t = deps.getTexts().find((x) => x.id === sel.id)
+      if (!t || t.deleted) return false
+      const MIN_SIZE = 6
+      const MAX_SIZE = 200
+      const nextSize = Math.max(MIN_SIZE, Math.min(MAX_SIZE, t.font.size + delta))
+      if (nextSize === t.font.size) return false
+      // Snapshot before mutating so the edit-text op gets accurate
+      // before/after payloads. Same pattern as the contextual-menu
+      // size pills: mutate font + re-fit transform + persist + push op.
+      const before = {
+        content: t.content,
+        font: { ...t.font },
+        color: t.color,
+        wrapWidth: t.wrapWidth,
+      }
+      t.font = { ...t.font, size: nextSize }
+      const fitted = resizeToFit(t)
+      t.transform = fitted.transform
+      deps.saveText(t)
+      const after = {
+        content: t.content,
+        font: { ...t.font },
+        color: t.color,
+        wrapWidth: t.wrapWidth,
+      }
+      deps.pushOp({ kind: 'edit-text', textId: t.id, before, after })
+      deps.markCommittedDirty()
+      return true
     },
   }
 }

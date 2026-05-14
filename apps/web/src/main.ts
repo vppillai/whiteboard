@@ -1318,6 +1318,20 @@ async function main(): Promise<void> {
       toggleTextBold: () => toggleTextFormat('bold'),
       toggleTextItalic: () => toggleTextFormat('italic'),
       toggleTextUnderline: () => toggleTextFormat('underline'),
+      adjustTextSize: (delta) => {
+        // Route to whichever text is currently "active":
+        //   - Text tool in edit mode → adjust the editing text
+        //     (mutation + sticky-setting update; op lands on commit)
+        //   - Select tool with a single text selected → adjust that
+        //     text and emit an edit-text op
+        // Both helpers return false when their precondition isn't met,
+        // so this is a no-op when no text is active. v1.4.
+        if (textTool.isEditing()) {
+          textTool.adjustEditingFontSize(delta)
+        } else if (tool.current === selectTool) {
+          selectTool.adjustSelectedTextFontSize(delta)
+        }
+      },
       deleteSelection: () => {
         // Multi-aware Select tool owns the single-and-multi delete path
         // for all object kinds (Lasso absorbed; ADR 0014).
