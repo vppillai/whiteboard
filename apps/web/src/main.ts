@@ -38,12 +38,7 @@ import type { BrushConfig, ImageObject, Sample, Stroke, TextObject } from '@whit
 import { BRUSH_IDS, BRUSH_PRESETS } from './brushes'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
 import { createClearFlow } from './clearflow'
-import {
-  type ClipboardStrokeBundle,
-  blobToDataUrl,
-  buildClipboardHtml,
-  extractStrokesFromHtml,
-} from './clipboardstrokes'
+import { extractStrokesFromHtml } from './clipboardstrokes'
 import { CURATED_COLORS, cyclePaletteIndex, openColorPicker } from './colorpicker'
 import { exitDistractionFree, isDistractionFree, toggleDistractionFree } from './distractionfree'
 import { attachEraserHold } from './eraserhold'
@@ -51,9 +46,7 @@ import { openExportPopover } from './exportpopover'
 import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid, invalidateGridColors } from './grid'
 import { createHelpOverlay } from './helpoverlay'
-import { makeStrokeId, makeTextId } from './ids'
 import { _clearImageCache, evictImageElement, loadImageElement } from './imagecache'
-import { writeImageToClipboard, writePngBlobToClipboard } from './imageclipboard'
 import {
   type ImagePasteContext,
   pasteImageFromBlob,
@@ -75,6 +68,11 @@ import { applyCamera, clearLayer, drawStrokeOntoLayer, drawStrokePath, setupCanv
 import { renderImages } from './renderimages'
 import { renderTexts } from './rendertexts'
 import { createResetFlow } from './resetflow'
+import {
+  type SelectionClipboardContext,
+  pasteSelectionBundle,
+  performSelectCopy,
+} from './selectionclipboard'
 import {
   getBrushId,
   getColor,
@@ -702,96 +700,32 @@ async function main(): Promise<void> {
     showInfoToast('Text pasted')
   }
 
-  /** Paste a whiteboard-native bundle (strokes + texts) at the given
-   *  board point. Each pasted object gets a fresh id (so it doesn't
-   *  collide with the source if both are on the canvas) and its
-   *  position is translated by `(cursor - bundle.origin)` so the
-   *  union bbox top-left lands at the cursor while relative layout
-   *  among the pasted items is preserved.
-   *
-   *  Strokes: samples and erasedStamps translated; startedAt bumped to
-   *  a monotone `now + i` so render-order sort stays stable and pasted
-   *  strokes consistently render above the originals (later startedAt
-   *  wins).
-   *
-   *  Texts: transform.x/y translated; z reassigned via nextTextZ() so
-   *  stack order is stable and pasted texts render above originals.
-   *
-   *  One op pushed per item (create / create-text) — N undo steps for
-   *  N pasted items, matching the per-item convention used by v1.1
-   *  image batch and the Cmd+A multi-delete. */
-  const pasteSelectionBundle = (
-    bundle: ClipboardStrokeBundle,
-    board: { x: number; y: number },
-  ): void => {
-    const bundleTexts = bundle.texts ?? []
-    if (bundle.strokes.length === 0 && bundleTexts.length === 0) return
-    const dx = board.x - bundle.origin.x
-    const dy = board.y - bundle.origin.y
-    const now = Date.now()
-    const newSelection: Selection[] = []
-
-    for (let i = 0; i < bundle.strokes.length; i++) {
-      const src = bundle.strokes[i]
-      if (!src) continue
-      const id = makeStrokeId()
-      const translatedSamples = src.samples.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy }))
-      const translatedStamps = src.erasedStamps?.map((s) => ({ ...s, x: s.x + dx, y: s.y + dy }))
-      const pasted: Stroke = {
-        ...src,
-        id,
-        samples: translatedSamples,
-        erasedStamps: translatedStamps,
-        startedAt: now + i,
-        deleted: undefined,
-      }
-      strokes.push(pasted)
-      void strokeStore.save(pasted).catch((err) => {
-        console.warn('whiteboard/web: failed to persist pasted stroke:', err)
-      })
-      pushUndoOp({ kind: 'create', strokeId: id })
-      newSelection.push({ kind: 'stroke', id })
-    }
-
-    for (const src of bundleTexts) {
-      if (!src) continue
-      const id = makeTextId()
-      const pasted: TextObject = {
-        ...src,
-        id,
-        transform: {
-          ...src.transform,
-          x: src.transform.x + dx,
-          y: src.transform.y + dy,
-        },
-        // Deep-copy the nested font object so future edits don't mutate
-        // the bundle's source record (which the user might paste again).
-        font: { ...src.font },
-        z: nextTextZ(),
-        createdAt: now,
-        deleted: undefined,
-      }
-      texts.push(pasted)
-      persistText(pasted)
-      pushUndoOp({ kind: 'create-text', textId: id })
-      newSelection.push({ kind: 'text', id })
-    }
-
-    committedDirty = true
-    // Auto-switch to Select and pre-select the pasted items — same
-    // affordance as image / text paste so the user can immediately
-    // adjust position with another drag.
-    //
-    // setTool is a no-op when Select is already active (e.g. user
-    // pasted, then pasted again without leaving Select), so its
-    // implicit cleanup() — which commits in-flight drags — doesn't
-    // fire on the second call. clearSelection() explicitly commits
-    // any pending drag (single, multi, or marquee) so a ghost op
-    // from the prior session can't combine with the new selection.
-    setTool('select')
-    selectTool.clearSelection()
-    selectTool.selectByIds(newSelection)
-    showInfoToast(`Pasted ${bundleSummary(bundle)}`)
+  /** Subsystem context for `selectionclipboard.ts`. Built once at boot
+   *  with closure references to the orchestrator's state; the
+   *  subsystem reads via getters (so it sees live state) and writes
+   *  through the exposed callbacks (so all side effects funnel through
+   *  the orchestrator). */
+  const selectionClipboardCtx: SelectionClipboardContext = {
+    getStrokes: () => strokes,
+    getImages: () => images,
+    getTexts: () => texts,
+    getSelections: () => selectTool.getSelections(),
+    getSelectedImage: () => selectTool.getSelectedImage(),
+    getSettings,
+    loadImageBlob: (ref) => imageStore.loadBlob(ref),
+    strokes,
+    texts,
+    saveStroke: (s) => strokeStore.save(s),
+    saveText: persistText,
+    pushOp: pushUndoOp,
+    nextTextZ,
+    showInfoToast,
+    setToolSelect: () => setTool('select'),
+    selectByIds: (items) => selectTool.selectByIds(items),
+    clearSelection: () => selectTool.clearSelection(),
+    markCommittedDirty: () => {
+      committedDirty = true
+    },
   }
 
   // ---------------------------------------------------------------------
@@ -829,7 +763,7 @@ async function main(): Promise<void> {
         const bundle = extractStrokesFromHtml(html)
         if (bundle) {
           e.preventDefault()
-          pasteSelectionBundle(bundle, pasteAt())
+          pasteSelectionBundle(bundle, pasteAt(), selectionClipboardCtx)
           return
         }
       }
@@ -904,177 +838,16 @@ async function main(): Promise<void> {
     el instanceof HTMLTextAreaElement ||
     (el instanceof HTMLElement && el.isContentEditable)
 
-  const clipboardImageDeps = {
-    loadBlob: (ref: string) => imageStore.loadBlob(ref),
-    onToast: showInfoToast,
-  }
-
-  /** Compute the unrotated, unpadded union bbox top-left across the
-   *  given strokes' samples + texts' rects. Used as the `origin` field
-   *  of the whiteboard-native clipboard bundle so paste-back can
-   *  translate to the cursor while preserving relative layout among
-   *  all items in the bundle (strokes and texts retain their relative
-   *  positions). Differs from `computeBoardBounds`'s output, which
-   *  carries EXPORT_MARGIN for PNG breathing room.
-   *
-   *  Edge case: a selection of strokes whose samples are all empty
-   *  (degenerate erased-but-not-compacted strokes, or future partial-
-   *  commit paths) returns null only if the texts list is ALSO empty.
-   *  Otherwise the texts' rects provide the origin. Falls back to
-   *  `{0, 0}` only when no item contributes — but the caller already
-   *  short-circuits on empty selections, so reaching the fallback is
-   *  defensive-only. */
-  const selectionOrigin = (ss: Stroke[], ts: TextObject[]): { x: number; y: number } => {
-    let minX = Number.POSITIVE_INFINITY
-    let minY = Number.POSITIVE_INFINITY
-    for (const s of ss) {
-      for (const p of s.samples) {
-        if (p.x < minX) minX = p.x
-        if (p.y < minY) minY = p.y
-      }
-    }
-    for (const t of ts) {
-      if (t.transform.x < minX) minX = t.transform.x
-      if (t.transform.y < minY) minY = t.transform.y
-    }
-    if (!Number.isFinite(minX)) {
-      // All strokes had zero samples AND no texts contributed. Rather
-      // than silently fall back to PNG-only by returning null, anchor
-      // at the origin — paste-back still works (translates by (cursor
-      // - 0, 0) so the strokes' samples land RELATIVE to cursor by
-      // their existing coordinates, which is the same UX as the
-      // "drag onto a fresh canvas" case).
-      return { x: 0, y: 0 }
-    }
-    return { x: minX, y: minY }
-  }
-
-  /** Snapshot of the current Select selection categorized by kind. */
-  interface SelectionSnapshot {
-    strokes: Stroke[]
-    images: ImageObject[]
-    texts: TextObject[]
-  }
-  const collectSelection = (): SelectionSnapshot | null => {
-    const sels = selectTool.getSelections()
-    if (sels.length === 0) return null
-    const strokeIds = new Set<string>()
-    const imageIds = new Set<string>()
-    const textIds = new Set<string>()
-    for (const s of sels) {
-      if (s.kind === 'stroke') strokeIds.add(s.id)
-      else if (s.kind === 'image') imageIds.add(s.id)
-      else textIds.add(s.id)
-    }
-    return {
-      strokes: strokes.filter((s) => strokeIds.has(s.id) && !s.deleted),
-      images: images.filter((i) => imageIds.has(i.id) && !i.deleted),
-      texts: texts.filter((t) => textIds.has(t.id) && !t.deleted),
-    }
-  }
-
-  /** Render the categorized selection to a PNG blob using the shared
-   *  export pipeline. Transparent background so the paste lands cleanly
-   *  in Google Docs / Slack / Confluence. */
-  const renderSelectionAsPng = async (snap: SelectionSnapshot): Promise<Blob | null> => {
-    if (snap.strokes.length === 0 && snap.images.length === 0 && snap.texts.length === 0) {
-      return null
-    }
-    const { computeBoardBounds } = await import('./export/bounds')
-    const { exportPNG } = await import('./export/png')
-    const bounds = computeBoardBounds(snap.strokes, snap.images, snap.texts)
-    if (!bounds) return null
-    return exportPNG(snap.strokes, snap.images, snap.texts, bounds, getSettings(), null, {
-      dpr: 2,
-      transparentBg: true,
-    })
-  }
-
-  /** Build a short user-facing message describing the bundle contents.
-   *  Used in copy / paste toasts so the user knows what landed. */
-  const bundleSummary = (bundle: ClipboardStrokeBundle): string => {
-    const nS = bundle.strokes.length
-    const nT = bundle.texts?.length ?? 0
-    if (nT === 0) return nS === 1 ? '1 stroke' : `${nS} strokes`
-    if (nS === 0) return nT === 1 ? '1 text' : `${nT} texts`
-    return `${nS} stroke${nS === 1 ? '' : 's'} + ${nT} text${nT === 1 ? '' : 's'}`
-  }
-
-  /** Write the "whiteboard-native" clipboard payload: ClipboardItem
-   *  with both `image/png` (for external paste targets) and `text/html`
-   *  carrying a `data-whiteboard-v1` attribute (for paste back into
-   *  the whiteboard as vector strokes + texts). Returns true on
-   *  success — callers gate cut-then-delete on this. */
-  const writeSelectionBundleToClipboard = async (
-    pngBlob: Blob,
-    bundle: ClipboardStrokeBundle,
-    onToast: (msg: string) => void,
-  ): Promise<boolean> => {
-    try {
-      const dataUrl = await blobToDataUrl(pngBlob)
-      const html = buildClipboardHtml(bundle, dataUrl)
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          'image/png': pngBlob,
-          'text/html': new Blob([html], { type: 'text/html' }),
-        }),
-      ])
-      onToast(`Copied ${bundleSummary(bundle)}`)
-      return true
-    } catch (err) {
-      console.warn('whiteboard/web: selection-bundle clipboard write failed:', err)
-      // Fall back to PNG-only — at least the external paste path works.
-      return writePngBlobToClipboard(pngBlob, onToast)
-    }
-  }
-
-  /** Unified copy/cut for the Select tool. Path selection:
-   *    - Single image                 → raw bytes (best fidelity)
-   *    - Selection with NO images     → whiteboard-native bundle
-   *                                     (strokes + texts) + PNG. Vector
-   *                                     round-trip inside the whiteboard;
-   *                                     PNG for external apps.
-   *    - Selection includes an image  → PNG-only. Image bytes can't be
-   *                                     round-tripped via the bundle
-   *                                     without a separate blob slot;
-   *                                     deferred.
-   *
-   *  Returns true on success so cut callers can gate the delete. */
-  const performSelectCopy = async (): Promise<boolean> => {
-    const snap = collectSelection()
-    if (!snap) return false
-
-    // Single-image fast path: raw bytes, preserves original format.
-    if (snap.images.length === 1 && snap.strokes.length === 0 && snap.texts.length === 0) {
-      const img = snap.images[0]
-      if (img) return writeImageToClipboard(img, clipboardImageDeps)
-    }
-
-    const pngBlob = await renderSelectionAsPng(snap)
-    if (!pngBlob) return false
-
-    // No images → write native bundle + PNG. Strokes and/or texts
-    // round-trip as vectors on paste-back inside the whiteboard.
-    if (snap.images.length === 0 && (snap.strokes.length > 0 || snap.texts.length > 0)) {
-      const bundle: ClipboardStrokeBundle = {
-        v: 1,
-        strokes: snap.strokes,
-        texts: snap.texts.length > 0 ? snap.texts : undefined,
-        origin: selectionOrigin(snap.strokes, snap.texts),
-      }
-      return writeSelectionBundleToClipboard(pngBlob, bundle, showInfoToast)
-    }
-
-    // Selection contains image(s) → PNG only.
-    return writePngBlobToClipboard(pngBlob, showInfoToast)
-  }
-
+  // Copy / cut event wiring. The actual clipboard pipeline lives in
+  // `selectionclipboard.ts`; this layer just gates on context and
+  // delegates. Cut's delete is gated on clipboard-write success —
+  // data-loss-prevention rule that's been here since v1.1's image cut.
   const onCopy = (e: ClipboardEvent): void => {
     if (isTextEditableTarget(e.target)) return
     if (tool.current !== selectTool) return
     if (selectTool.getSelections().length === 0) return
     e.preventDefault()
-    void performSelectCopy()
+    void performSelectCopy(selectionClipboardCtx)
   }
 
   const onCut = (e: ClipboardEvent): void => {
@@ -1083,9 +856,7 @@ async function main(): Promise<void> {
     if (selectTool.getSelections().length === 0) return
     e.preventDefault()
     void (async () => {
-      const ok = await performSelectCopy()
-      // Only delete after the clipboard write succeeded — data-loss-
-      // prevention rule that's been here since v1.1's image cut.
+      const ok = await performSelectCopy(selectionClipboardCtx)
       if (ok) selectTool.deleteSelected()
     })()
   }
