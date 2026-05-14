@@ -794,7 +794,15 @@ async function main(): Promise<void> {
     // Auto-switch to Select and pre-select the pasted items — same
     // affordance as image / text paste so the user can immediately
     // adjust position with another drag.
+    //
+    // setTool is a no-op when Select is already active (e.g. user
+    // pasted, then pasted again without leaving Select), so its
+    // implicit cleanup() — which commits in-flight drags — doesn't
+    // fire on the second call. clearSelection() explicitly commits
+    // any pending drag (single, multi, or marquee) so a ghost op
+    // from the prior session can't combine with the new selection.
     setTool('select')
+    selectTool.clearSelection()
     selectTool.selectByIds(newSelection)
     showInfoToast(`Pasted ${bundleSummary(bundle)}`)
   }
@@ -1386,9 +1394,16 @@ async function main(): Promise<void> {
         }
         if (clearFlow.cancel()) handled = true
         if (dismissAllPopovers()) handled = true
-        // Esc clears any Select-tool selection (single or multi). Mirrors
-        // Esc clears any Select-tool selection (single or multi).
-        if (tool.current === selectTool && selectTool.getSelections().length > 0) {
+        // Esc cancels any Select-tool selection state — either a
+        // committed multi-selection OR a marquee drag still in
+        // progress. The marquee check matters because a user mid-
+        // marquee has `getSelections().length === 0` until release,
+        // so Esc would otherwise not abort the gesture and the
+        // marquee would commit on the next pointer-up.
+        if (
+          tool.current === selectTool &&
+          (selectTool.getSelections().length > 0 || selectTool.hasPendingMarquee())
+        ) {
           selectTool.clearSelection()
           handled = true
         }

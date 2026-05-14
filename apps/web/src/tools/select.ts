@@ -263,34 +263,59 @@ export interface SelectTool extends Tool {
    *  is pre-selected for immediate positioning. Items whose underlying
    *  object is missing / deleted are silently skipped. */
   selectByIds(items: readonly Selection[]): void
-  /** Drop any current selection. Used by Esc when a selection is
-   *  active. Distinct from cleanup() — clearSelection doesn't switch
-   *  tools or interact with the in-flight drag (use cleanup for that). */
+  /** Drop any current selection AND abort any in-progress marquee /
+   *  drag. Used by Esc to cancel either a committed selection or a
+   *  selection gesture in progress. Distinct from cleanup() —
+   *  clearSelection doesn't switch tools (use cleanup for that). */
   clearSelection(): void
+  /** True when a live (past-threshold) marquee drag is in flight.
+   *  Used by main.ts's Esc handler to detect "user is mid-marquee and
+   *  wants to abort" — without this, Esc only fires `clearSelection()`
+   *  when there are already selected objects, leaving a candidate
+   *  marquee to commit on the next pointer-up. */
+  hasPendingMarquee(): boolean
   /** Soft-delete every selected object and emit the matching per-kind
    *  delete op for each. Returns true if anything was deleted. Single
    *  and multi cases share the same path. */
   deleteSelected(): boolean
 }
 
+/**
+ * The Select tool has three drag modes — single-object transform,
+ * multi-object move, marquee selection. They are mutually exclusive
+ * (at most one is active at a time). Earlier code modeled this as
+ * three independent nullable variables, making the exclusion a runtime
+ * invariant that every transition site had to remember to maintain
+ * (null `drag` before assigning `multiDrag`, etc.). This discriminated-
+ * union variant pushes the invariant into the type system:
+ * `activeDrag = { kind, state }` is one variable; switching modes is
+ * one assignment; exclusion is structural rather than convention.
+ *
+ * The per-mode state shapes are intentionally NOT merged — DragState,
+ * MultiDragState, and MarqueeDragState carry different fields with
+ * different lifetimes. Only the container is unified.
+ *
+ * Inside functions that operate on a specific drag mode, the convention
+ * is to narrow `activeDrag.state` to a local `const` (`drag`,
+ * `multiDrag`, `marquee`) so the body code stays the same shape as
+ * before the refactor and reads naturally.
+ */
+type ActiveDrag =
+  | { kind: 'single'; state: DragState }
+  | { kind: 'multi'; state: MultiDragState }
+  | { kind: 'marquee'; state: MarqueeDragState }
+
 export function createSelectTool(deps: SelectToolDeps): SelectTool {
   // Multi-aware selection: empty array = nothing selected; one element =
   // single-object mode (handles + rotate + transform UI); >1 elements =
   // multi-object mode (only move + delete; no per-object handles). The
   // single-object code paths read this via `singleSelection()` which
-  // returns the lone item or null. Phase B1 of the lasso-into-select
-  // absorption (ADR 0014 migration trigger met: 3rd object kind + new
-  // multi-select use case from Cmd+A).
+  // returns the lone item or null.
   let selected: Selection[] = []
-  let drag: DragState | null = null
-  // Multi-object move drag — mutually exclusive with `drag` (only one is
-  // active at a time). Separate variable keeps the existing single-
-  // object code paths unchanged; multi-drag is a parallel branch that
-  // bypasses the handle / rotate / resize machinery.
-  let multiDrag: MultiDragState | null = null
-  // Drag-rectangle selection (marquee). Mutually exclusive with `drag`
-  // and `multiDrag` — only one drag-class state is active at a time.
-  let marquee: MarqueeDragState | null = null
+  // Active drag — at most one of (single transform, multi move,
+  // marquee selection) at any moment. Discriminated union enforces
+  // mutual exclusion at the type level; see comment block above.
+  let activeDrag: ActiveDrag | null = null
 
   /** Returns the single-selected item when exactly one object is
    *  selected; null when empty or multi. Used by all paths that need
@@ -299,6 +324,31 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
    *  closure-captured value survives nested callbacks. */
   function singleSelection(): Selection | null {
     return selected.length === 1 ? (selected[0] ?? null) : null
+  }
+
+  /** Shared implementation for `selectImageById` / `selectTextById` /
+   *  `selectStrokeById`. Verifies the object exists + isn't deleted,
+   *  commits any in-flight drag (matching `selectAll` / `selectByIds` /
+   *  `clearSelection` for drag-state consistency), and replaces the
+   *  selection with the single item. Silent no-op when the underlying
+   *  object is missing or deleted. */
+  function selectSingleById(sel: Selection): void {
+    let alive = false
+    if (sel.kind === 'image') {
+      const img = deps.getImages().find((i) => i.id === sel.id)
+      alive = !!img && !img.deleted
+    } else if (sel.kind === 'text') {
+      const t = deps.getTexts().find((x) => x.id === sel.id)
+      alive = !!t && !t.deleted
+    } else {
+      const s = deps.getStrokes().find((x) => x.id === sel.id)
+      alive = !!s && !s.deleted
+    }
+    if (!alive) return
+    commitDrag(null)
+    selected = [sel]
+    activeDrag = null
+    deps.markCommittedDirty()
   }
   // Double-click-text-body tracking: most recent pointerdown timestamp +
   // text id, used to dispatch the Text tool handoff when the user clicks
@@ -916,44 +966,79 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
 
   /**
    * Finalize the current drag — dispatch to the per-kind commit helper
-   * and clear `drag`. Called from both onPointerUp (normal release) and
-   * pointercancel-style entry paths (browser revoked the pointer mid-
-   * drag, window blur, OS gesture steal). Without this shared path, a
-   * pointercancel left `drag` non-null and the live transform
+   * and clear drag state. Called from both onPointerUp (normal release)
+   * and pointercancel-style entry paths (browser revoked the pointer
+   * mid-drag, window blur, OS gesture steal). Without this shared path,
+   * a pointercancel left `drag` non-null and the live transform
    * mutations un-recorded in undo.
    *
    * Dispatching to per-kind helpers (instead of branching inline) means
    * adding a 4th object kind is one helper + one dispatch case rather
    * than another ~30-line branch in a 130-line function.
+   *
+   * IMPORTANT: dispatch is on `d.selection.kind` (the snapshot captured
+   * at drag-start) rather than re-resolving via `getView()`. Two
+   * reasons:
+   *   1. If the object was soft-deleted between drag-start and drag-
+   *      end (Cmd+A → Delete race, or future remote/sync state),
+   *      `getView()` returns null and the op would be silently
+   *      dropped despite the per-tick mutations already being live.
+   *   2. If the selection was replaced mid-drag (e.g. Shift+click
+   *      adding to the selection set), `view.selection.kind` could
+   *      differ from `d.selection.kind`, sending the commit down the
+   *      wrong branch and casting an ImageObject to TextObject.
+   *
+   * The per-kind commit helpers themselves guard against the deleted
+   * case (each does its own `.find()` + null check) and push an op
+   * only when the object is still alive AND its state actually changed
+   * during the drag. Pushing the op IS the only correctness-critical
+   * action; missing the per-kind dispatch is what loses the undo
+   * record.
    */
   function commitDrag(e: PointerEvent | null): void {
-    // Multi-move commit path — mutually exclusive with single-drag.
-    if (multiDrag) {
-      const md = multiDrag
-      multiDrag = null
+    if (!activeDrag) return
+    // Marquee has no op to commit (it's a selection-set operation,
+    // finalized in onPointerUp not commit). If commitDrag is called
+    // while a marquee is live (e.g. tool-switch mid-drag), just drop
+    // the marquee — no op needed.
+    if (activeDrag.kind === 'marquee') {
+      activeDrag = null
+      if (e) {
+        ;(e.target as Element | null)?.releasePointerCapture?.(e.pointerId)
+      }
+      return
+    }
+    // Multi-move commit path.
+    if (activeDrag.kind === 'multi') {
+      const md = activeDrag.state
+      activeDrag = null
       if (e) {
         ;(e.target as Element | null)?.releasePointerCapture?.(e.pointerId)
       }
       commitMultiDrag(md)
       return
     }
-    if (!drag) return
-    const d = drag
-    drag = null
+    // Single-object drag.
+    const d = activeDrag.state
+    activeDrag = null
     if (e) {
       ;(e.target as Element | null)?.releasePointerCapture?.(e.pointerId)
     }
-    const view = getView()
-    if (!view) return
     const isRotation = typeof d.kind === 'object' && 'rotate' in d.kind
     const isResize = typeof d.kind === 'object' && 'resize' in d.kind
 
-    if (view.selection.kind === 'image') {
-      commitImageDrag(d, view.obj as ImageObject, isRotation)
-    } else if (view.selection.kind === 'stroke') {
-      commitStrokeDrag(d, view.obj as Stroke)
+    // Dispatch on the drag-start selection snapshot. Each per-kind
+    // helper resolves the live object itself and no-ops if it has been
+    // deleted out from under the drag.
+    if (d.selection.kind === 'image') {
+      const img = deps.getImages().find((i) => i.id === d.selection.id)
+      if (img && !img.deleted) commitImageDrag(d, img, isRotation)
+    } else if (d.selection.kind === 'stroke') {
+      const s = deps.getStrokes().find((x) => x.id === d.selection.id)
+      if (s && !s.deleted) commitStrokeDrag(d, s)
     } else {
-      commitTextDrag(d, view.obj as TextObject, isRotation, isResize)
+      const t = deps.getTexts().find((x) => x.id === d.selection.id)
+      if (t && !t.deleted) commitTextDrag(d, t, isRotation, isResize)
     }
   }
 
@@ -1244,19 +1329,22 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         }
         const center = imageCenter(view.transform)
         const startAngle = Math.atan2(by - center.y, bx - center.x)
-        drag = {
-          selection: view.selection,
-          kind: {
-            rotate: true,
-            startRotation: view.rotation,
-            startAngleFromCenter: startAngle,
+        activeDrag = {
+          kind: 'single',
+          state: {
+            selection: view.selection,
+            kind: {
+              rotate: true,
+              startRotation: view.rotation,
+              startAngleFromCenter: startAngle,
+            },
+            before: { ...view.transform },
+            beforeRotation: view.rotation,
+            beforeFontSize: null,
+            beforeTextSnapshot: null,
+            strokeMoveApplied: null,
+            startBoard: { x: bx, y: by },
           },
-          before: { ...view.transform },
-          beforeRotation: view.rotation,
-          beforeFontSize: null,
-          beforeTextSnapshot: null,
-          strokeMoveApplied: null,
-          startBoard: { x: bx, y: by },
         }
         ;(e.target as Element).setPointerCapture?.(e.pointerId)
         ctx.setCursor(ROTATE_CURSOR)
@@ -1281,18 +1369,21 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
                   wrapWidth: (view.obj as TextObject).wrapWidth,
                 }
               : null
-          drag = {
-            selection: view.selection,
-            kind: {
-              resize: handle,
-              anchorBoard: anchorBoardFor(handle, view.transform, view.rotation),
+          activeDrag = {
+            kind: 'single',
+            state: {
+              selection: view.selection,
+              kind: {
+                resize: handle,
+                anchorBoard: anchorBoardFor(handle, view.transform, view.rotation),
+              },
+              before: { ...view.transform },
+              beforeRotation: view.rotation,
+              beforeFontSize,
+              beforeTextSnapshot,
+              strokeMoveApplied: null,
+              startBoard: { x: bx, y: by },
             },
-            before: { ...view.transform },
-            beforeRotation: view.rotation,
-            beforeFontSize,
-            beforeTextSnapshot,
-            strokeMoveApplied: null,
-            startBoard: { x: bx, y: by },
           }
           ;(e.target as Element).setPointerCapture?.(e.pointerId)
           return
@@ -1345,7 +1436,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         const isHitInMulti =
           selected.length > 1 && selected.some((s) => s.kind === hit.kind && s.id === hit.id)
         if (isHitInMulti) {
-          multiDrag = startMultiDrag({ x: bx, y: by })
+          activeDrag = { kind: 'multi', state: startMultiDrag({ x: bx, y: by }) }
           ;(e.target as Element).setPointerCapture?.(e.pointerId)
           ctx.markCommittedDirty()
           return
@@ -1356,19 +1447,22 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         selected = [hit]
         const fresh = getView()
         if (fresh) {
-          drag = {
-            selection: hit,
-            kind: 'move',
-            before: { ...fresh.transform },
-            beforeRotation: fresh.rotation,
-            beforeFontSize: null,
-            beforeTextSnapshot: null,
-            // For stroke moves, track cumulative dx/dy applied to the
-            // sample array so each tick only translates by the delta.
-            // Null for image/text moves (they re-derive position from
-            // `before` + startBoard each tick).
-            strokeMoveApplied: hit.kind === 'stroke' ? { dx: 0, dy: 0 } : null,
-            startBoard: { x: bx, y: by },
+          activeDrag = {
+            kind: 'single',
+            state: {
+              selection: hit,
+              kind: 'move',
+              before: { ...fresh.transform },
+              beforeRotation: fresh.rotation,
+              beforeFontSize: null,
+              beforeTextSnapshot: null,
+              // For stroke moves, track cumulative dx/dy applied to the
+              // sample array so each tick only translates by the delta.
+              // Null for image/text moves (they re-derive position from
+              // `before` + startBoard each tick).
+              strokeMoveApplied: hit.kind === 'stroke' ? { dx: 0, dy: 0 } : null,
+              startBoard: { x: bx, y: by },
+            },
           }
           ;(e.target as Element).setPointerCapture?.(e.pointerId)
           ctx.markCommittedDirty()
@@ -1384,12 +1478,15 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       // click and deselects.
       lastTextDownAt = Number.NEGATIVE_INFINITY
       lastTextDownId = null
-      marquee = {
-        startBoard: { x: bx, y: by },
-        currentBoard: { x: bx, y: by },
-        startScreen: { x: e.clientX, y: e.clientY },
-        live: false,
-        additive: e.shiftKey,
+      activeDrag = {
+        kind: 'marquee',
+        state: {
+          startBoard: { x: bx, y: by },
+          currentBoard: { x: bx, y: by },
+          startScreen: { x: e.clientX, y: e.clientY },
+          live: false,
+          additive: e.shiftKey,
+        },
       }
       ;(e.target as Element).setPointerCapture?.(e.pointerId)
     },
@@ -1399,7 +1496,8 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
 
       // Marquee drag — promote candidate to live once past threshold,
       // then update the live rect each tick.
-      if (marquee) {
+      if (activeDrag?.kind === 'marquee') {
+        const marquee = activeDrag.state
         if (!marquee.live) {
           const ddx = e.clientX - marquee.startScreen.x
           const ddy = e.clientY - marquee.startScreen.y
@@ -1414,16 +1512,17 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
 
       // Multi-object move tick — translate every selected object by the
       // running delta from drag start.
-      if (multiDrag) {
-        tickMultiDrag(multiDrag, bx, by)
+      if (activeDrag?.kind === 'multi') {
+        tickMultiDrag(activeDrag.state, bx, by)
         ctx.markCommittedDirty()
         return
       }
 
-      if (!drag) {
+      if (!activeDrag || activeDrag.kind !== 'single') {
         updateHoverCursor(ctx, bx, by)
         return
       }
+      const drag = activeDrag.state
 
       const view = getView()
       if (!view) return
@@ -1567,9 +1666,9 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
 
     onPointerUp(e, ctx): void {
       // Marquee finalize: pick hit objects (or clear if it was a tap).
-      if (marquee) {
-        const m = marquee
-        marquee = null
+      if (activeDrag?.kind === 'marquee') {
+        const m = activeDrag.state
+        activeDrag = null
         ;(e.target as Element | null)?.releasePointerCapture?.(e.pointerId)
         if (m.live) {
           finalizeMarquee(m)
@@ -1590,8 +1689,8 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
 
       // Live marquee rect — painted regardless of selection state so
       // the user sees the drag-rectangle even on an empty board.
-      if (marquee?.live) {
-        drawMarquee(marquee, ctx)
+      if (activeDrag?.kind === 'marquee' && activeDrag.state.live) {
+        drawMarquee(activeDrag.state, ctx)
       }
 
       if (selected.length === 0) return
@@ -1786,15 +1885,14 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       // tool-switch (or OS gesture-steal) mid-drag silently dropped the
       // move/transform/rotate ops — the objects were mutated and
       // persisted per-tick but never recorded in undo. commitDrag is a
-      // no-op when both `drag` and `multiDrag` are null, so this is
-      // safe on every cleanup call.
+      // no-op when activeDrag is null, so this is safe on every
+      // cleanup call.
       commitDrag(null)
       selected = []
-      drag = null
-      multiDrag = null
-      // Marquee is purely visual / hit-test state — no op to commit;
-      // dropping it on tool change is correct.
-      marquee = null
+      // commitDrag clears activeDrag for single/multi modes. The
+      // marquee branch also clears it. This re-null is defensive in
+      // case a future commitDrag path forgets — cheap insurance.
+      activeDrag = null
     },
 
     getSelectedImage(): ImageObject | null {
@@ -1819,30 +1917,15 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     },
 
     selectImageById(id: string): void {
-      const img = deps.getImages().find((i) => i.id === id)
-      if (!img || img.deleted) return
-      selected = [{ kind: 'image', id }]
-      // Any in-flight drag from a prior pointer interaction is stale
-      // when the selection is force-changed externally; drop it so the
-      // next pointerdown starts cleanly.
-      drag = null
-      deps.markCommittedDirty()
+      selectSingleById({ kind: 'image', id })
     },
 
     selectTextById(id: string): void {
-      const t = deps.getTexts().find((x) => x.id === id)
-      if (!t || t.deleted) return
-      selected = [{ kind: 'text', id }]
-      drag = null
-      deps.markCommittedDirty()
+      selectSingleById({ kind: 'text', id })
     },
 
     selectStrokeById(id: string): void {
-      const s = deps.getStrokes().find((x) => x.id === id)
-      if (!s || s.deleted) return
-      selected = [{ kind: 'stroke', id }]
-      drag = null
-      deps.markCommittedDirty()
+      selectSingleById({ kind: 'stroke', id })
     },
 
     selectAll(): void {
@@ -1861,7 +1944,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         if (!t.deleted) next.push({ kind: 'text', id: t.id })
       }
       selected = next
-      drag = null
+      activeDrag = null
       deps.markCommittedDirty()
     },
 
@@ -1881,22 +1964,38 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         }
       }
       selected = next
-      drag = null
+      activeDrag = null
       deps.markCommittedDirty()
     },
 
     clearSelection(): void {
-      if (selected.length === 0) return
+      // Bail if there's truly nothing to clear (no selection, no
+      // active drag/marquee). Otherwise commit any in-flight drag and
+      // abort everything — including a live marquee, so Esc-mid-
+      // marquee cancels the gesture before it can finalize on the
+      // next pointer-up.
+      if (selected.length === 0 && !activeDrag) return
       commitDrag(null)
       selected = []
-      drag = null
-      multiDrag = null
-      marquee = null
+      activeDrag = null
       deps.markCommittedDirty()
+    },
+
+    hasPendingMarquee(): boolean {
+      return activeDrag?.kind === 'marquee'
     },
 
     deleteSelected(): boolean {
       if (selected.length === 0) return false
+      // Commit any in-flight drag BEFORE deleting so its op lands in
+      // undo. Without this, a Delete key fired while a move-drag is
+      // still capturing the pointer (two-device path, or keyboard
+      // shortcut during a touch drag) would leave `drag` non-null
+      // pointing at a now-deleted object; the next pointer-up's
+      // commitDrag then no-ops because the object is gone — the
+      // move op silently drops. Matches the pattern selectAll /
+      // selectByIds / clearSelection already use.
+      commitDrag(null)
       // Multi-aware: drain every selected item, emitting the matching
       // per-kind delete op for each. Single-selection takes the same
       // path with N=1 — the loop replaces the earlier three-way switch
