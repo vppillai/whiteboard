@@ -8,12 +8,13 @@
  * for the per-stroke work.
  */
 
-import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
+import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import { makeCamera } from '../camera'
 import { drawGrid } from '../grid'
 import { getImageElement, loadImageElement } from '../imagecache'
 import type { ImageStore } from '../imagestore'
 import { type CanvasLayer, applyCamera, clearLayer, drawStrokeOntoLayer } from '../render'
+import { renderShapes } from '../rendershapes'
 import type { SettingsV1 } from '../settings'
 import { effectiveOpacity, getStrokePath } from '../stroke'
 import { TEXT_PADDING_X, TEXT_PADDING_Y, fontCss, measureText } from '../textgeom'
@@ -47,6 +48,7 @@ export async function exportPNG(
   strokes: Stroke[],
   images: readonly ImageObject[],
   texts: readonly TextObject[],
+  shapes: readonly ShapeObject[],
   bounds: Bounds,
   settings: SettingsV1,
   imageStore: ImageStore | null,
@@ -182,6 +184,25 @@ export async function exportPNG(
       cCtx.restore()
     }
   }
+
+  // Shapes render above texts and below the strokes composite — same
+  // stacking as the on-screen pass (see renderShapes.ts). We reuse
+  // renderShapes directly so the in-app render and the exported PNG
+  // can't visually drift. viewBBox is the full export bounds — no
+  // culling is desired for export.
+  renderShapes({
+    shapes,
+    layer: committedLayer,
+    camera,
+    viewBBox: {
+      minX: bounds.x,
+      minY: bounds.y,
+      maxX: bounds.x + bounds.width,
+      maxY: bounds.y + bounds.height,
+    },
+    resolveColor: resolveInkColor,
+    isMultiSelected: () => false,
+  })
 
   cCtx.save()
   cCtx.setTransform(1, 0, 0, 1, 0, 0)

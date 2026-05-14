@@ -60,6 +60,7 @@ describe('export/svg', () => {
       [],
       new Map(),
       [],
+      [],
       { x: -10, y: -10, width: 30, height: 30 },
       baseSettings,
     )
@@ -75,6 +76,7 @@ describe('export/svg', () => {
       [s],
       [],
       new Map(),
+      [],
       [],
       { x: -10, y: -10, width: 30, height: 30 },
       baseSettings,
@@ -112,6 +114,7 @@ describe('export/svg', () => {
       [],
       new Map(),
       [],
+      [],
       { x: -10, y: -10, width: 30, height: 30 },
       baseSettings,
     )
@@ -128,6 +131,7 @@ describe('export/svg', () => {
       [s],
       [],
       new Map(),
+      [],
       [],
       { x: -10, y: -10, width: 30, height: 30 },
       baseSettings,
@@ -151,6 +155,7 @@ describe('export/svg', () => {
       [],
       new Map(),
       [],
+      [],
       { x: -10, y: -10, width: 30, height: 30 },
       baseSettings,
     )
@@ -169,6 +174,7 @@ describe('export/svg', () => {
       [s],
       [],
       new Map(),
+      [],
       [],
       { x: -10, y: -10, width: 30, height: 30 },
       baseSettings,
@@ -191,6 +197,7 @@ describe('export/svg', () => {
       [],
       new Map(),
       [],
+      [],
       { x: -10, y: -10, width: 30, height: 30 },
       dotted,
     )
@@ -209,7 +216,15 @@ describe('export/svg', () => {
       ...baseSettings,
       grid: { type: 'lines', spacing: 24 },
     }
-    const blob = exportSVG([s], [], new Map(), [], { x: -10, y: -10, width: 30, height: 30 }, lines)
+    const blob = exportSVG(
+      [s],
+      [],
+      new Map(),
+      [],
+      [],
+      { x: -10, y: -10, width: 30, height: 30 },
+      lines,
+    )
     const text = await blob.text()
     expect(text).toContain('<pattern')
     expect(text).toContain('M 0 0 L 24 0 M 0 0 L 0 24')
@@ -226,6 +241,7 @@ describe('export/svg', () => {
       [s],
       [],
       new Map(),
+      [],
       [],
       { x: -10, y: -10, width: 40, height: 40 },
       baseSettings,
@@ -249,6 +265,7 @@ describe('export/svg', () => {
       [s],
       [],
       new Map(),
+      [],
       [],
       { x: -10, y: -10, width: 30, height: 30 },
       baseSettings,

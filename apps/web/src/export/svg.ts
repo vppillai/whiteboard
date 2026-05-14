@@ -12,13 +12,21 @@
  * in a Blob — so tests can verify content without jsdom.
  */
 
-import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
+import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import { getStroke } from 'perfect-freehand'
 import { imageAABB, imageCenter } from '../imagegeom'
+import { shapeAABB } from '../rendershapes'
 import type { GridType, SettingsV1 } from '../settings'
 import { FONT_CSS, TEXT_PADDING_X, TEXT_PADDING_Y, measureText, textAABB } from '../textgeom'
 import { resolveInkColor } from '../theme'
 import type { Bounds } from './bounds'
+
+/** Alpha for filled shapes — matches FILL_ALPHA in rendershapes.ts so
+ *  the SVG export and on-screen render visually match. */
+const SHAPE_FILL_ALPHA = 0.25
+/** Arrow head sizing — same constants as rendershapes.ts. */
+const ARROW_HEAD_LENGTH_PER_STROKE = 4
+const ARROW_HEAD_ANGLE = Math.PI / 6
 
 /** Image bytes pre-encoded as a data URI, keyed by image id. The caller
  *  prepares this so the serializer stays pure-string-out (no DOM/IO). */
@@ -29,6 +37,7 @@ export function exportSVG(
   images: readonly ImageObject[],
   imageDataUris: ImageDataUriMap,
   texts: readonly TextObject[],
+  shapes: readonly ShapeObject[],
   bounds: Bounds,
   settings: SettingsV1,
 ): Blob {
@@ -180,9 +189,72 @@ export function exportSVG(
     parts.push(`<defs>${maskDefs.join('')}</defs>`)
   }
   for (const el of textEls) parts.push(el)
+
+  // Shapes go above texts and below strokes. Mirrors the on-screen
+  // stacking in rendershapes.ts. Each kind emits a primitive SVG element
+  // (rect / ellipse / line / polyline) — kept simple rather than going
+  // through a generic <path> so an SVG opened in another editor stays
+  // editable as its native shape.
+  const sortedShapes = [...shapes].filter((s) => !s.deleted).sort((a, b) => a.z - b.z)
+  for (const sh of sortedShapes) {
+    const bb = shapeAABB(sh)
+    if (bb.maxX < bounds.x || bb.minX > boundsMaxX) continue
+    if (bb.maxY < bounds.y || bb.minY > boundsMaxY) continue
+    parts.push(shapeToSvg(sh))
+  }
+
   for (const el of strokeEls) parts.push(el)
   parts.push('</svg>')
   return new Blob([parts.join('\n')], { type: 'image/svg+xml' })
+}
+
+/** Render a single shape as an SVG element string. Rotation is applied
+ *  via SVG's `transform="rotate(deg cx cy)"` so the underlying primitive
+ *  stays in its natural form (rect / ellipse / line / polyline). */
+function shapeToSvg(s: ShapeObject): string {
+  const r = s.rotation ?? 0
+  const { x, y, w, h } = s.transform
+  const cx = x + w / 2
+  const cy = y + h / 2
+  const transformAttr =
+    Math.abs(r) < 1e-9
+      ? ''
+      : ` transform="rotate(${fmt((r * 180) / Math.PI)} ${fmt(cx)} ${fmt(cy)})"`
+  const stroke = escapeAttr(resolveInkColor(s.color))
+  const fillToken = s.fill ? escapeAttr(resolveInkColor(s.fill)) : 'none'
+  const fillOpacity = s.fill ? ` fill-opacity="${fmt(SHAPE_FILL_ALPHA)}"` : ''
+  const strokeWidth = fmt(s.strokeWidth)
+
+  if (s.shape === 'rect') {
+    const nx = w >= 0 ? x : x + w
+    const ny = h >= 0 ? y : y + h
+    const nw = Math.abs(w)
+    const nh = Math.abs(h)
+    return `<rect x="${fmt(nx)}" y="${fmt(ny)}" width="${fmt(nw)}" height="${fmt(nh)}" fill="${fillToken}"${fillOpacity} stroke="${stroke}" stroke-width="${strokeWidth}"${transformAttr}/>`
+  }
+  if (s.shape === 'ellipse') {
+    const rx = Math.abs(w / 2)
+    const ry = Math.abs(h / 2)
+    return `<ellipse cx="${fmt(cx)}" cy="${fmt(cy)}" rx="${fmt(rx)}" ry="${fmt(ry)}" fill="${fillToken}"${fillOpacity} stroke="${stroke}" stroke-width="${strokeWidth}"${transformAttr}/>`
+  }
+  // line / arrow: shared body, arrow adds two head segments at the tip.
+  const lineEl = `<line x1="${fmt(x)}" y1="${fmt(y)}" x2="${fmt(x + w)}" y2="${fmt(y + h)}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round"/>`
+  if (s.shape === 'line') {
+    return `<g${transformAttr}>${lineEl}</g>`
+  }
+  // arrow head: two segments from the tip back at ±ARROW_HEAD_ANGLE.
+  const len = Math.hypot(w, h)
+  if (len < 1e-6) return `<g${transformAttr}>${lineEl}</g>`
+  const angle = Math.atan2(h, w)
+  const headLen = s.strokeWidth * ARROW_HEAD_LENGTH_PER_STROKE
+  const tipX = x + w
+  const tipY = y + h
+  const ax1 = tipX - headLen * Math.cos(angle - ARROW_HEAD_ANGLE)
+  const ay1 = tipY - headLen * Math.sin(angle - ARROW_HEAD_ANGLE)
+  const ax2 = tipX - headLen * Math.cos(angle + ARROW_HEAD_ANGLE)
+  const ay2 = tipY - headLen * Math.sin(angle + ARROW_HEAD_ANGLE)
+  const headEl = `<polyline points="${fmt(ax1)},${fmt(ay1)} ${fmt(tipX)},${fmt(tipY)} ${fmt(ax2)},${fmt(ay2)}" fill="none" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"/>`
+  return `<g${transformAttr}>${lineEl}${headEl}</g>`
 }
 
 function renderGridDefs(

@@ -10,7 +10,7 @@
  * scope choice — the right-click row defaults to 'all' for the quick path.
  */
 
-import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
+import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import type { Camera } from './camera'
 import { type ExportFormat, type ExportScope, exportBoard } from './export'
 import type { ImageStore } from './imagestore'
@@ -24,6 +24,8 @@ export interface ExportPopoverOptions {
   imageStore?: ImageStore | null
   /** Optional — supply for text objects (v1.2). */
   getTexts?: () => readonly TextObject[]
+  /** Optional — supply for shape objects (v1.4). */
+  getShapes?: () => readonly ShapeObject[]
   camera: Camera
   viewportWidth: number
   viewportHeight: number
@@ -89,6 +91,7 @@ export function openExportPopover(opts: ExportPopoverOptions): Popover {
         getStrokes: opts.getStrokes,
         getImages: opts.getImages,
         getTexts: opts.getTexts,
+        getShapes: opts.getShapes,
         imageStore: opts.imageStore,
         camera: opts.camera,
         viewportWidth: opts.viewportWidth,
