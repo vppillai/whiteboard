@@ -33,7 +33,6 @@
  */
 
 import type { ShapeKind, ShapeObject } from '@whiteboard/shared'
-import { CURATED_COLORS as PALETTE } from '../colorpicker'
 import { makeShapeId } from '../ids'
 import {
   iconFillOutline,
@@ -44,7 +43,7 @@ import {
   iconShapeRect,
   iconStrokeWidth,
 } from '../menu-icons'
-import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
+import { pill, pillRow, sectionLabel, separator } from '../menu-ui'
 import type { Op } from '../ops'
 import { applyCamera, clearLayer } from '../render'
 import { drawInFlightShape } from '../rendershapes'
@@ -60,6 +59,7 @@ import {
   setShapeKind,
   setShapeStrokeWidth,
 } from '../settings'
+import { buildSwatchPalette } from '../swatchpalette'
 import type { Tool, ToolContext } from './types'
 
 /** Minimum size (board pixels) below which both dimensions count as
@@ -276,29 +276,31 @@ export function createShapeTool(deps: ShapeToolDeps): ShapeTool {
       redrawLive(ctx)
     },
 
-    renderContextualMenu(host, dismiss) {
+    renderContextualMenu(host, dismiss, rebuild, anchor) {
       // Section order (per the v1.4 user brief):
-      //   Color (swatch) → Shape sub-mode → Stroke width → Fill toggle
-      //   → Fill opacity (only when fill is enabled)
+      //   Color (swatch + custom + "+") → Shape sub-mode → Stroke width
+      //   → Fill toggle → Fill opacity (only when fill is enabled)
       // Color first matches the user's "shapes below swatch" feedback.
 
       // ── Color ───────────────────────────────────────────────────
+      // Shared palette helper (curated + custom + "+") matches the
+      // standalone Color picker (Shift+C). The "+" tile opens the
+      // swatch-add subpopover; on completion we rebuild the menu so
+      // the new swatch shows immediately. anchor falls back to (0,0)
+      // for safety — pre-v1.4 menu callers didn't pass it, but the
+      // menu in main.ts always does.
       host.appendChild(sectionLabel('Color'))
-      const palette = paletteGrid()
-      const activeColor = getShapeColor()
-      for (const c of PALETTE) {
-        palette.appendChild(
-          swatch({
-            color: c,
-            active: activeColor === c,
-            onClick: () => {
-              setShapeColor(c)
-              dismiss()
-            },
-          }),
-        )
-      }
-      host.appendChild(palette)
+      host.appendChild(
+        buildSwatchPalette({
+          active: getShapeColor(),
+          onPick: (c) => {
+            setShapeColor(c)
+            dismiss()
+          },
+          addAt: anchor ?? { x: 0, y: 0 },
+          onAddDone: () => rebuild?.(),
+        }),
+      )
 
       host.appendChild(separator())
 

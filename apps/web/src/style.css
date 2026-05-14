@@ -529,24 +529,33 @@ body {
 
 .whiteboard-tools-palette {
   display: grid;
-  /* v1.4: denser palette — 8 columns shrinks each swatch from ~47 px
-   * to ~28 px in the default menu width, freeing room for the
-   * surrounding rows (Stroke width, Fill, Fill opacity slider) and
-   * keeping the menu compact. */
-  grid-template-columns: repeat(8, 1fr);
-  gap: 4px;
+  /* v1.4: 5-column grid mirrors the standalone Color picker (Shift+C)
+   * so the right-click swatch grid looks like a compact version of the
+   * full picker. 10 curated colors land as a clean 2x5; custom swatches
+   * + the "+" add tile flow into row 3 without a sparse row-2 "hang"
+   * that the earlier 8-col grid produced.
+   *
+   * Earlier explored: 8 cols (sparse row 2, the user-reported "hanging"
+   * look); auto-fill (variable swatch counts per row read as ragged).
+   * 5 cols is the layout the user pointed at when asking for it. */
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
 }
 
 /* Right-click menu swatch: fills its grid column (width: 100% over a
- * `repeat(8, 1fr)` grid), with `aspect-ratio: 1` to stay square as the
+ * `repeat(5, 1fr)` grid), with `aspect-ratio: 1` to stay square as the
  * menu width grows. `min-width: 0` is the standard fix for letting a
  * grid item shrink below its intrinsic content size (browsers default
- * grid items to `min-width: auto`, which can break the 1fr math). */
+ * grid items to `min-width: auto`, which can break the 1fr math).
+ * `max-width: 32px` caps the swatch size in a wider menu so we don't
+ * regress to the original ~47 px tiles. */
 .whiteboard-color-swatch-small {
   width: 100%;
   height: auto;
   aspect-ratio: 1;
   min-width: 0;
+  max-width: 32px;
+  justify-self: center;
   border-radius: 6px;
 }
 

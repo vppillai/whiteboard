@@ -77,15 +77,15 @@ import type {
   TextFontFamily,
   TextObject,
 } from '@whiteboard/shared'
-import { CURATED_COLORS as PALETTE } from '../colorpicker'
 import { imageAABB, imageCenter, pointInImage, rotateAroundPoint } from '../imagegeom'
 import { iconFillOutline, iconFillSolid, iconStrokeWidth } from '../menu-icons'
-import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
+import { pill, pillRow, sectionLabel, separator } from '../menu-ui'
 import type { Op, TransformManyItem } from '../ops'
 import { applyCamera, clearLayer } from '../render'
 import { pointInShape, shapeAABB } from '../rendershapes'
 import { getShapeFillOpacity } from '../settings'
 import { getStrokeBBox, getStrokePath, invalidateStrokeBBox } from '../stroke'
+import { buildSwatchPalette } from '../swatchpalette'
 import { TEXT_PADDING_X, pointInText, resizeToFit, textAABB } from '../textgeom'
 import type { Tool, ToolContext } from './types'
 
@@ -1413,6 +1413,8 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     host: HTMLElement,
     sh: ShapeObject,
     dismiss: () => void,
+    rebuild?: () => void,
+    anchor?: { x: number; y: number },
   ): void {
     type EditPayload = {
       color: string
@@ -1436,26 +1438,26 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       deps.markCommittedDirty()
     }
 
-    // Color first (per v1.4 brief — "shapes below swatch").
+    // Color first (per v1.4 brief — "shapes below swatch"). Shared
+    // palette helper (curated + custom + "+") matches the standalone
+    // Color picker and the Shape tool's menu — adding a custom swatch
+    // here is reflected immediately via rebuild.
     host.appendChild(sectionLabel('Color'))
-    const palette = paletteGrid()
-    for (const c of PALETTE) {
-      palette.appendChild(
-        swatch({
-          color: c,
-          active: sh.color === c,
-          onClick: () => {
-            applyEdit((s) => {
-              s.color = c
-              // If fill was on, keep it synced to the new stroke color.
-              if (s.fill) s.fill = c
-            })
-            dismiss()
-          },
-        }),
-      )
-    }
-    host.appendChild(palette)
+    host.appendChild(
+      buildSwatchPalette({
+        active: sh.color,
+        onPick: (c) => {
+          applyEdit((s) => {
+            s.color = c
+            // If fill was on, keep it synced to the new stroke color.
+            if (s.fill) s.fill = c
+          })
+          dismiss()
+        },
+        addAt: anchor ?? { x: 0, y: 0 },
+        onAddDone: () => rebuild?.(),
+      }),
+    )
 
     host.appendChild(separator())
 
@@ -2039,7 +2041,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       c.restore()
     },
 
-    renderContextualMenu(host, dismiss): void {
+    renderContextualMenu(host, dismiss, rebuild, anchor): void {
       // Right-click contextual menu — content depends on what's selected.
       // Text gets the rich Color / Font / Size / B / I / U menu. Shape
       // gets a compact Color / Stroke width / Fill toggle (mirrors the
@@ -2052,7 +2054,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       if (sel?.kind === 'shape') {
         const sh = deps.getShapes().find((x) => x.id === sel.id)
         if (!sh || sh.deleted) return
-        renderShapeContextualMenu(host, sh, dismiss)
+        renderShapeContextualMenu(host, sh, dismiss, rebuild, anchor)
         return
       }
 
@@ -2089,24 +2091,21 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         deps.markCommittedDirty()
       }
 
-      // COLOR
+      // COLOR — shared palette (curated + custom + "+").
       host.appendChild(sectionLabel('Color'))
-      const palette = paletteGrid()
-      for (const c of PALETTE) {
-        palette.appendChild(
-          swatch({
-            color: c,
-            active: t.color === c,
-            onClick: () => {
-              applyEdit((x) => {
-                x.color = c
-              })
-              dismiss()
-            },
-          }),
-        )
-      }
-      host.appendChild(palette)
+      host.appendChild(
+        buildSwatchPalette({
+          active: t.color,
+          onPick: (c) => {
+            applyEdit((x) => {
+              x.color = c
+            })
+            dismiss()
+          },
+          addAt: anchor ?? { x: 0, y: 0 },
+          onAddDone: () => rebuild?.(),
+        }),
+      )
 
       // FONT
       host.appendChild(separator())

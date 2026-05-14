@@ -124,7 +124,11 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
     // refresh on every click when pinned.
     const activeTool = opts.getActiveTool()
     if (activeTool.renderContextualMenu) {
-      activeTool.renderContextualMenu(root, onAction)
+      // Pass `rebuild` (rebuilds the menu content in place — used after
+      // sub-popover actions like the swatch-add flow that mutate state
+      // the menu reads from) and `anchor` (so the tool can open sub-
+      // popovers at the same client coords as the parent menu).
+      activeTool.renderContextualMenu(root, onAction, rebuildContent, opts.at)
     }
 
     // TOOL section — icon pills in 2 rows of 3 so each tool gets a

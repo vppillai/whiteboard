@@ -22,7 +22,7 @@ import type { BrushConfig, Sample, Stroke } from '@whiteboard/shared'
 import { BRUSH_IDS, BRUSH_LABELS, BRUSH_PRESETS } from '../brushes'
 import { boardToScreen } from '../camera'
 import { makeStrokeId } from '../ids'
-import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
+import { pill, pillRow, sectionLabel, separator } from '../menu-ui'
 import { applyCamera, clearLayer, drawStrokePath } from '../render'
 import { getBrushId, getColor, getSettings, setBrushId, setColor } from '../settings'
 import {
@@ -109,9 +109,9 @@ interface SampleSource {
   timeStamp: number
 }
 
-// Curated palette imported from colorpicker.ts to keep the right-click COLOR
-// section and the C-key popover synchronized (one list = one source of truth).
-import { CURATED_COLORS as PALETTE } from '../colorpicker'
+// Right-click COLOR section uses the shared palette helper so it stays
+// in sync with the standalone Color picker (curated + customs + "+").
+import { buildSwatchPalette } from '../swatchpalette'
 
 export function createPenTool(opts: PenToolOptions): Tool {
   let active: Stroke | null = null
@@ -486,23 +486,20 @@ export function createPenTool(opts: PenToolOptions): Tool {
       renderHover(board.x, board.y, ctx)
     },
 
-    renderContextualMenu(host, dismiss) {
-      // COLOR section.
+    renderContextualMenu(host, dismiss, rebuild, anchor) {
+      // COLOR section — shared palette (curated + custom + "+").
       host.appendChild(sectionLabel('Color'))
-      const palette = paletteGrid()
-      for (const c of PALETTE) {
-        palette.appendChild(
-          swatch({
-            color: c,
-            active: getColor() === c,
-            onClick: () => {
-              setColor(c)
-              dismiss()
-            },
-          }),
-        )
-      }
-      host.appendChild(palette)
+      host.appendChild(
+        buildSwatchPalette({
+          active: getColor(),
+          onPick: (c) => {
+            setColor(c)
+            dismiss()
+          },
+          addAt: anchor ?? { x: 0, y: 0 },
+          onAddDone: () => rebuild?.(),
+        }),
+      )
 
       // BRUSH section.
       host.appendChild(separator())

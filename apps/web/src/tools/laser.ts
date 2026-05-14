@@ -25,9 +25,9 @@
  * setting (not pen `color`) so the laser-red doesn't bleed into draw mode.
  */
 
-import { CURATED_COLORS as PALETTE } from '../colorpicker'
-import { paletteGrid, sectionLabel, swatch } from '../menu-ui'
+import { sectionLabel } from '../menu-ui'
 import { applyCamera, clearLayer } from '../render'
+import { buildSwatchPalette } from '../swatchpalette'
 import type { Tool, ToolContext } from './types'
 
 export interface LaserToolDeps {
@@ -217,27 +217,24 @@ export function createLaserTool(deps: LaserToolDeps): Tool {
       c.restore()
     },
 
-    renderContextualMenu(host, dismiss) {
-      // COLOR section — sets `laserColor` (NOT pen `color`). Same curated
-      // palette as the pen tool's right-click section so the visual is
-      // consistent; the active-state mark reflects the laser-specific
+    renderContextualMenu(host, dismiss, rebuild, anchor) {
+      // COLOR section — sets `laserColor` (NOT pen `color`). Shared
+      // palette helper (curated + customs + "+") so the visual matches
+      // the standalone Color picker and every other tool's right-click
+      // COLOR row. The active-state mark reflects the laser-specific
       // color so the user can see what's selected for this tool.
       host.appendChild(sectionLabel('Laser color'))
-      const palette = paletteGrid()
-      const activeColor = deps.getColor()
-      for (const c of PALETTE) {
-        palette.appendChild(
-          swatch({
-            color: c,
-            active: activeColor === c,
-            onClick: () => {
-              deps.setColor(c)
-              dismiss()
-            },
-          }),
-        )
-      }
-      host.appendChild(palette)
+      host.appendChild(
+        buildSwatchPalette({
+          active: deps.getColor(),
+          onPick: (c) => {
+            deps.setColor(c)
+            dismiss()
+          },
+          addAt: anchor ?? { x: 0, y: 0 },
+          onAddDone: () => rebuild?.(),
+        }),
+      )
     },
 
     cleanup() {

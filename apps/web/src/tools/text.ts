@@ -33,9 +33,8 @@
  */
 
 import type { TextFontFamily, TextObject } from '@whiteboard/shared'
-import { CURATED_COLORS as PALETTE } from '../colorpicker'
 import { makeTextId } from '../ids'
-import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
+import { pill, pillRow, sectionLabel, separator } from '../menu-ui'
 import type { Op } from '../ops'
 import {
   getTextBold,
@@ -51,6 +50,7 @@ import {
   setTextSize,
   setTextUnderline,
 } from '../settings'
+import { buildSwatchPalette } from '../swatchpalette'
 import {
   FONT_CSS,
   LINE_HEIGHT_MULT,
@@ -541,29 +541,26 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       })
     },
 
-    renderContextualMenu(host, dismiss) {
-      // COLOR
+    renderContextualMenu(host, dismiss, rebuild, anchor) {
+      // COLOR — shared palette (curated + custom + "+").
       host.appendChild(sectionLabel('Color'))
-      const palette = paletteGrid()
       const activeColor = editing ? editing.text.color : getTextColor()
-      for (const c of PALETTE) {
-        palette.appendChild(
-          swatch({
-            color: c,
-            active: activeColor === c,
-            onClick: () => {
-              if (editing) {
-                editing.text.color = c
-                if (lastCtx) applyEditorStyles(editing.el, editing.text, lastCtx)
-                deps.markCommittedDirty()
-              }
-              setTextColor(c)
-              dismiss()
-            },
-          }),
-        )
-      }
-      host.appendChild(palette)
+      host.appendChild(
+        buildSwatchPalette({
+          active: activeColor,
+          onPick: (c) => {
+            if (editing) {
+              editing.text.color = c
+              if (lastCtx) applyEditorStyles(editing.el, editing.text, lastCtx)
+              deps.markCommittedDirty()
+            }
+            setTextColor(c)
+            dismiss()
+          },
+          addAt: anchor ?? { x: 0, y: 0 },
+          onAddDone: () => rebuild?.(),
+        }),
+      )
 
       // FONT
       host.appendChild(separator())
