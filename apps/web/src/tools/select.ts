@@ -345,6 +345,16 @@ export interface SelectTool extends Tool {
   adjustSelectedTextFontSize(delta: number): boolean
 }
 
+export function _shouldPushStrokeTransformManyItem(
+  stroke: { id?: string; deleted?: boolean } | undefined,
+  dx: number,
+  dy: number,
+): boolean {
+  if (dx === 0 && dy === 0) return false
+  if (!stroke || stroke.deleted) return false
+  return true
+}
+
 /**
  * The Select tool has three drag modes — single-object transform,
  * multi-object move, marquee selection. They are mutually exclusive
@@ -770,6 +780,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     if (isRotation) {
       const afterR = img.rotation ?? 0
       if (d.beforeRotation !== afterR) {
+        deps.saveImageMeta(img)
         deps.pushOp({
           kind: 'rotate-image',
           imageId: img.id,
@@ -782,6 +793,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     // Move or resize → transform-image (both end up overwriting the rect).
     const after = { ...img.transform }
     if (transformChanged(d.before, after)) {
+      deps.saveImageMeta(img)
       deps.pushOp({ kind: 'transform-image', imageId: img.id, before: d.before, after })
     }
   }
@@ -794,6 +806,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     if (isRotation) {
       const afterR = sh.rotation ?? 0
       if (d.beforeRotation !== afterR) {
+        deps.saveShape(sh)
         deps.pushOp({
           kind: 'rotate-shape',
           shapeId: sh.id,
@@ -805,6 +818,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     }
     const after = { ...sh.transform }
     if (transformChanged(d.before, after)) {
+      deps.saveShape(sh)
       deps.pushOp({ kind: 'transform-shape', shapeId: sh.id, before: d.before, after })
     }
   }
@@ -824,6 +838,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
   function commitStrokeDrag(d: DragState, stroke: Stroke): void {
     const applied = d.strokeMoveApplied
     if (!applied || (applied.dx === 0 && applied.dy === 0)) return
+    deps.saveStroke(stroke)
     deps.pushOp({
       kind: 'move',
       strokeIds: [stroke.id],
@@ -849,6 +864,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     if (isRotation) {
       const afterR = t.rotation ?? 0
       if (d.beforeRotation !== afterR) {
+        deps.saveText(t)
         deps.pushOp({
           kind: 'rotate-text',
           textId: t.id,
@@ -877,6 +893,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         before.font.underline !== after.font.underline ||
         before.wrapWidth !== after.wrapWidth
       if (changed) {
+        deps.saveText(t)
         deps.pushOp({ kind: 'edit-text', textId: t.id, before, after })
       }
       return
@@ -884,6 +901,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     // Move → transform-text
     const after = { ...t.transform }
     if (transformChanged(d.before, after)) {
+      deps.saveText(t)
       deps.pushOp({ kind: 'transform-text', textId: t.id, before: d.before, after })
     }
   }
@@ -1031,17 +1049,14 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         const img = deps.getImages().find((i) => i.id === item.id)
         if (!img || img.deleted) continue
         img.transform = { ...item.before, x: item.before.x + dx, y: item.before.y + dy }
-        deps.saveImageMeta(img)
       } else if (item.kind === 'text') {
         const t = deps.getTexts().find((x) => x.id === item.id)
         if (!t || t.deleted) continue
         t.transform = { ...item.before, x: item.before.x + dx, y: item.before.y + dy }
-        deps.saveText(t)
       } else if (item.kind === 'shape') {
         const sh = deps.getShapes().find((x) => x.id === item.id)
         if (!sh || sh.deleted) continue
         sh.transform = { ...item.before, x: item.before.x + dx, y: item.before.y + dy }
-        deps.saveShape(sh)
       } else {
         const stroke = deps.getStrokes().find((x) => x.id === item.id)
         if (!stroke || stroke.deleted) continue
@@ -1059,7 +1074,6 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
           }
         }
         invalidateStrokeBBox(stroke)
-        deps.saveStroke(stroke)
         item.applied.dx = dx
         item.applied.dy = dy
       }
@@ -1088,21 +1102,27 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         if (!img || img.deleted) continue
         const after = { ...img.transform }
         if (!transformChanged(item.before, after)) continue
+        deps.saveImageMeta(img)
         items.push({ kind: 'image', imageId: item.id, before: item.before, after })
       } else if (item.kind === 'text') {
         const t = deps.getTexts().find((x) => x.id === item.id)
         if (!t || t.deleted) continue
         const after = { ...t.transform }
         if (!transformChanged(item.before, after)) continue
+        deps.saveText(t)
         items.push({ kind: 'text', textId: item.id, before: item.before, after })
       } else if (item.kind === 'shape') {
         const sh = deps.getShapes().find((x) => x.id === item.id)
         if (!sh || sh.deleted) continue
         const after = { ...sh.transform }
         if (!transformChanged(item.before, after)) continue
+        deps.saveShape(sh)
         items.push({ kind: 'shape', shapeId: item.id, before: item.before, after })
       } else {
-        if (item.applied.dx === 0 && item.applied.dy === 0) continue
+        const stroke = deps.getStrokes().find((x) => x.id === item.id)
+        if (!_shouldPushStrokeTransformManyItem(stroke, item.applied.dx, item.applied.dy)) continue
+        if (!stroke || stroke.deleted) continue
+        deps.saveStroke(stroke)
         items.push({
           kind: 'stroke',
           strokeId: item.id,
@@ -2057,17 +2077,8 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
         }
       }
 
-      // Live-render: mutating the in-memory transform; persist via the
-      // matching save callback so reloads pick up the in-progress state.
-      if (view.selection.kind === 'image') {
-        deps.saveImageMeta(view.obj as ImageObject)
-      } else if (view.selection.kind === 'text') {
-        deps.saveText(view.obj as TextObject)
-      } else if (view.selection.kind === 'shape') {
-        deps.saveShape(view.obj as ShapeObject)
-      } else {
-        deps.saveStroke(view.obj as Stroke)
-      }
+      // Live-render mutates in-memory state; persistence is committed once
+      // per completed drag in commitDrag/commitMultiDrag.
       ctx.markCommittedDirty()
     },
 

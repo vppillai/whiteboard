@@ -25,8 +25,9 @@
  *     intact while still giving immediate visual feedback during a
  *     sweep.
  *
- *   - **Object** (single tap): deletes the **topmost** whole stroke
- *     under the cursor. Selected from the right-click menu, OR
+ *   - **Object** (single tap): deletes the **topmost** board object
+ *     under the cursor (stroke, shape, text, or image). Selected from
+ *     the right-click menu, OR
  *     temporarily activated by holding Shift at pointerdown when in
  *     Wipe mode. Emits a `delete` op (whole-stroke soft-delete).
  *
@@ -79,8 +80,8 @@ export interface EraserToolCallbacks {
   getTexts: () => readonly TextObject[]
   /** Returns the live images list. Same whole-object delete semantics. v1.4. */
   getImages: () => readonly ImageObject[]
-  /** Object mode: emit a whole-stroke delete op for the topmost stroke at
-   *  the tap point. Called at most once per gesture at pointerup. */
+  /** Object mode: emit a whole-stroke delete op when stroke is topmost
+   *  at the tap point. Called at most once per gesture at pointerup. */
   onObjectErase: (strokeId: string) => void
   /** Wipe mode: emit a pixel-mask op for the per-stroke stamp edits.
    *  Called once per gesture at pointerup. */
@@ -147,21 +148,10 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
   // `eraseStamps` op at pointerup. Read by the render loop via
   // `getPendingStamps()` so the cut shows live before the op commits.
   const pending = new Map<string, Stamp[]>()
-  // Object-mode is single-tap: only the topmost stroke under the cursor at
-  // pointerup is deleted. The matched id is captured at pointerup and
-  // handed to `onObjectErase` exactly once. (Pre-#7 this was a Set wired
-  // for sweep-delete that was never implemented.)
+  // Object-mode is single-tap: one topmost board object under the cursor
+  // at pointerup is deleted. If a stroke is topmost we call onObjectErase;
+  // otherwise we call onWholeObjectErase for one non-stroke object.
   let objectDeletedId: string | null = null
-  // Non-stroke deletes accumulated per gesture. Both wipe mode (sweep
-  // crosses an object) and object mode (single tap on an object) write
-  // here; the flush at pointerup emits a single onWholeObjectErase
-  // batch. Sets so a sweep that re-crosses the same shape doesn't
-  // double-queue. v1.4. */
-  const wholeDeletes = {
-    shapes: new Set<string>(),
-    texts: new Set<string>(),
-    images: new Set<string>(),
-  }
   let active = false
   let mode: EraserGestureMode = 'wipe'
   // Last cursor position + mode the live layer was painted with. The render
@@ -207,47 +197,44 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
     return any
   }
 
-  /** Scan shapes / texts / images for any that the eraser disk at
-   *  (px, py) with radius `r` overlaps. Add the ids to the whole-
-   *  delete queue (deduped by Set). Returns true if anything new
-   *  was queued so the caller can mark dirty / preview the deletion.
+  /** Object-mode non-stroke hit test. Picks ONE topmost target across
+   *  shapes / texts / images at the tap point.
    *
    *  Object-mode tap only. Wipe mode is intentionally strokes-only —
    *  scrubbing strokes off an image shouldn't also delete the image
    *  underneath. Whole-object delete is a deliberate single-tap
    *  gesture in object mode.
    *
-   *  Tolerance: the disk radius. Texts and images use a rotated-rect
-   *  AABB containment at the center point. */
-  const queueNonStrokeHits = (px: number, py: number, r: number): boolean => {
-    let any = false
+   *  Tolerance: the disk radius for shapes. Texts and images use their
+   *  existing center-point contains semantics. */
+  const topNonStrokeHit = (
+    px: number,
+    py: number,
+    r: number,
+  ): { kind: 'shape' | 'text' | 'image'; id: string } | null => {
+    let top: { kind: 'shape' | 'text' | 'image'; id: string; z: number } | null = null
     for (const sh of opts.callbacks.getShapes()) {
       if (sh.deleted) continue
-      if (wholeDeletes.shapes.has(sh.id)) continue
       // pointInShape takes a screen-relative tolerance — feeding it
       // the eraser radius gives "disk touches the shape" semantics.
       if (pointInShape({ x: px, y: py }, sh, r)) {
-        wholeDeletes.shapes.add(sh.id)
-        any = true
+        if (!top || sh.z > top.z) top = { kind: 'shape', id: sh.id, z: sh.z }
       }
     }
     for (const t of opts.callbacks.getTexts()) {
       if (t.deleted) continue
-      if (wholeDeletes.texts.has(t.id)) continue
       if (pointInText({ x: px, y: py }, t)) {
-        wholeDeletes.texts.add(t.id)
-        any = true
+        if (!top || t.z > top.z) top = { kind: 'text', id: t.id, z: t.z }
       }
     }
     for (const img of opts.callbacks.getImages()) {
       if (img.deleted) continue
-      if (wholeDeletes.images.has(img.id)) continue
       if (pointInImage({ x: px, y: py }, img)) {
-        wholeDeletes.images.add(img.id)
-        any = true
+        if (!top || img.z > top.z) top = { kind: 'image', id: img.id, z: img.z }
       }
     }
-    return any
+    if (!top) return null
+    return { kind: top.kind, id: top.id }
   }
 
   /** Object-mode hit: identify the topmost whole stroke under the cursor.
@@ -321,9 +308,6 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
       mode = wantObject ? 'object' : 'wipe'
       pending.clear()
       objectDeletedId = null
-      wholeDeletes.shapes.clear()
-      wholeDeletes.texts.clear()
-      wholeDeletes.images.clear()
       if (mode === 'wipe') {
         if (sweepHit(x, y)) ctx.markCommittedDirty()
       }
@@ -358,13 +342,20 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
       if (mode === 'object') {
         const { x, y } = ctx.toBoard(e.clientX, e.clientY)
         objectDeletedId = objectHit(x, y)
-        // Object-mode tap also targets the topmost non-stroke kind
-        // under the cursor: shapes / texts / images get whole-object
-        // delete the same way a tapped stroke does. queueNonStrokeHits
-        // populates wholeDeletes; the flush below emits one batched
-        // onWholeObjectErase callback.
-        queueNonStrokeHits(x, y, radius())
-        if (objectDeletedId) opts.callbacks.onObjectErase(objectDeletedId)
+        // Object mode picks one topmost target per tap. Strokes sit on
+        // top visually, so a stroke hit suppresses non-stroke deletes.
+        if (objectDeletedId) {
+          opts.callbacks.onObjectErase(objectDeletedId)
+        } else {
+          const hit = topNonStrokeHit(x, y, radius())
+          if (hit) {
+            opts.callbacks.onWholeObjectErase({
+              shapes: hit.kind === 'shape' ? [hit.id] : [],
+              texts: hit.kind === 'text' ? [hit.id] : [],
+              images: hit.kind === 'image' ? [hit.id] : [],
+            })
+          }
+        }
       } else if (pending.size > 0) {
         // Build edits, drain pending, then emit op. Drain BEFORE emit so
         // the render pass triggered by applyOp's markDirty doesn't double-
@@ -375,24 +366,6 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
         }
         pending.clear()
         opts.callbacks.onWipeErase(edits)
-      }
-      // Flush non-stroke whole-object deletes accumulated during this
-      // gesture. Single batched callback so undo gets ONE step
-      // covering everything the eraser pass touched, regardless of
-      // mode and regardless of how many objects were crossed.
-      if (
-        wholeDeletes.shapes.size > 0 ||
-        wholeDeletes.texts.size > 0 ||
-        wholeDeletes.images.size > 0
-      ) {
-        opts.callbacks.onWholeObjectErase({
-          shapes: [...wholeDeletes.shapes],
-          texts: [...wholeDeletes.texts],
-          images: [...wholeDeletes.images],
-        })
-        wholeDeletes.shapes.clear()
-        wholeDeletes.texts.clear()
-        wholeDeletes.images.clear()
       }
       objectDeletedId = null
       // Gesture is over. Clear the cached cursor + live layer; hover render
@@ -413,7 +386,7 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
             label: spec.label,
             title:
               spec.config.mode === 'item'
-                ? 'Tap a single stroke to delete it'
+                ? 'Tap a single object to delete it'
                 : `Wipe — ${spec.label.toLowerCase()} radius`,
             active: spec.isActive(m, s),
             onClick: () => {

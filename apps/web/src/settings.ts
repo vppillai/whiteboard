@@ -334,8 +334,15 @@ function persistSettings(s: SettingsV1): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
   } catch (err) {
+    if (_isMissingLocalStorageError(err)) return
     console.warn('whiteboard/settings: failed to persist:', err)
   }
+}
+
+export function _isMissingLocalStorageError(err: unknown): boolean {
+  if (!(err instanceof ReferenceError)) return false
+  const message = err.message ?? ''
+  return message.includes('localStorage is not defined')
 }
 
 /** Synchronous write — strips the session-only `eraserMode` and shoves the

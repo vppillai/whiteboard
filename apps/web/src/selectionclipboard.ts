@@ -91,6 +91,20 @@ interface SelectionSnapshot {
   shapes: ShapeObject[]
 }
 
+export function _shouldUseSingleImageFastPath(counts: {
+  imageCount: number
+  strokeCount: number
+  textCount: number
+  shapeCount: number
+}): boolean {
+  return (
+    counts.imageCount === 1 &&
+    counts.strokeCount === 0 &&
+    counts.textCount === 0 &&
+    counts.shapeCount === 0
+  )
+}
+
 function collectSelection(ctx: SelectionClipboardContext): SelectionSnapshot | null {
   const sels = ctx.getSelections()
   if (sels.length === 0) return null
@@ -220,7 +234,14 @@ export async function performSelectCopy(ctx: SelectionClipboardContext): Promise
   if (!snap) return false
 
   // Single-image fast path: raw bytes, preserves original format.
-  if (snap.images.length === 1 && snap.strokes.length === 0 && snap.texts.length === 0) {
+  if (
+    _shouldUseSingleImageFastPath({
+      imageCount: snap.images.length,
+      strokeCount: snap.strokes.length,
+      textCount: snap.texts.length,
+      shapeCount: snap.shapes.length,
+    })
+  ) {
     const img = snap.images[0]
     if (img) {
       return writeImageToClipboard(img, {
