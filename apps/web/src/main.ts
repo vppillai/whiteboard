@@ -110,7 +110,7 @@ import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from 
 import { type StrokeStore, createLocalStrokeStore } from './strokestore'
 import { type TextStore, createLocalTextStore } from './textstore'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
-import { openToolMenu } from './toolmenu'
+import { getPersistedPinnedAnchor, openToolMenu } from './toolmenu'
 import { createToolPill } from './toolpill'
 import {
   type EraserTool,
@@ -626,6 +626,12 @@ async function main(): Promise<void> {
     // tool change (the cleanup hook fires via the line above). Just mark
     // dirty so the next frame paints without the removed selection halos.
     committedDirty = true
+    // If a pinned tool menu is open, refresh it so its contextual
+    // section reflects the new tool. The menu's rebuild hook is set
+    // by the toolmenu factory; popovers without it (e.g. color picker)
+    // are unaffected. v1.4 — without this, keyboard / double-Esc tool
+    // switches left the pinned menu showing the old tool's section.
+    findPopoverByTag('tools')?.rebuild?.()
   }
 
   // Last-pointer (for popover anchoring on keyboard shortcuts AND for
@@ -938,6 +944,55 @@ async function main(): Promise<void> {
     document.removeEventListener('cut', onCut)
   })
 
+  // Factored so the right-click handler AND the boot-restore path
+  // (auto-open a pinned menu from a prior session) can both use the
+  // same set of deps without duplication. v1.4.
+  const openToolMenuAt = (at: { x: number; y: number }): void => {
+    openToolMenu({
+      at,
+      getActiveTool: () => tool.current,
+      onSelectTool: setTool,
+      onResetZoom: () => {
+        // "Reset zoom" should land the user at the canonical origin
+        // view — scale 1 AND the pan at (0, 0).
+        resetZoom(camera)
+        camera.x = 0
+        camera.y = 0
+        onCameraChange()
+      },
+      onZoomToFit: () => {
+        const fit = fitToContent(
+          camera,
+          { strokes, images, texts, shapes },
+          { width: target.width, height: target.height },
+        )
+        if (!fit) {
+          resetZoom(camera)
+          camera.x = 0
+          camera.y = 0
+        }
+        onCameraChange()
+      },
+      onClear: clearFlow.request,
+      togglePanel,
+      onExport: () => {
+        openExportPopover({
+          anchor: at,
+          getStrokes: () => strokes,
+          getImages: () => images,
+          getTexts: () => texts,
+          getShapes: () => shapes,
+          imageStore,
+          camera,
+          viewportWidth: target.width,
+          viewportHeight: target.height,
+          onEmptyBoard: () => showInfoToast('Nothing to export'),
+          onSuccess: (fmt) => showInfoToast(`Exported ${fmt.toUpperCase()}`),
+        })
+      },
+    })
+  }
+
   root.addEventListener(
     'pointerdown',
     (e) => {
@@ -960,61 +1015,23 @@ async function main(): Promise<void> {
         }
         return
       }
-      openToolMenu({
-        at: { x: e.clientX, y: e.clientY },
-        getActiveTool: () => tool.current,
-        onSelectTool: setTool,
-        onResetZoom: () => {
-          // "Reset zoom" should land the user at the canonical origin
-          // view — scale 1 AND the pan at (0, 0). The prior scale-only
-          // behavior left users at scale 1 but still panned somewhere,
-          // which read as "nothing happened" when they hit reset
-          // expecting a true reset. v1.4 fix.
-          resetZoom(camera)
-          camera.x = 0
-          camera.y = 0
-          onCameraChange()
-        },
-        onZoomToFit: () => {
-          // Empty board → reset zoom (fitToContent returns false on
-          // empty). Fall through so "Fit to view" always does something
-          // visible rather than no-op'ing on a fresh canvas. v1.4
-          // extension: pass shapes too so a shapes-only board fits.
-          const fit = fitToContent(
-            camera,
-            { strokes, images, texts, shapes },
-            { width: target.width, height: target.height },
-          )
-          if (!fit) {
-            resetZoom(camera)
-            camera.x = 0
-            camera.y = 0
-          }
-          onCameraChange()
-        },
-        onClear: clearFlow.request,
-        togglePanel,
-        onExport: () => {
-          // Open the export popover at the same anchor — scope + format
-          // choice live there. Single source of truth for export decisions.
-          openExportPopover({
-            anchor: { x: e.clientX, y: e.clientY },
-            getStrokes: () => strokes,
-            getImages: () => images,
-            getTexts: () => texts,
-            getShapes: () => shapes,
-            imageStore,
-            camera,
-            viewportWidth: target.width,
-            viewportHeight: target.height,
-            onEmptyBoard: () => showInfoToast('Nothing to export'),
-            onSuccess: (fmt) => showInfoToast(`Exported ${fmt.toUpperCase()}`),
-          })
-        },
-      })
+      openToolMenuAt({ x: e.clientX, y: e.clientY })
     },
     { capture: true },
   )
+
+  // Auto-open the pinned tool menu from a prior session. localStorage
+  // remembers (pin flag, anchor) — restore at the same anchor so the
+  // menu reappears where the user last had it. Falls back to no-op
+  // if the user wasn't pinned, or storage is unavailable. v1.4.
+  const persistedAnchor = getPersistedPinnedAnchor()
+  if (persistedAnchor) {
+    // Clamp restored anchor into the current viewport in case the
+    // window was resized between sessions.
+    const ax = Math.max(8, Math.min(persistedAnchor.x, window.innerWidth - 8))
+    const ay = Math.max(8, Math.min(persistedAnchor.y, window.innerHeight - 8))
+    openToolMenuAt({ x: ax, y: ay })
+  }
 
   // ---------------------------------------------------------------------
   //  Wheel — pan (plain) or zoom (Cmd/Ctrl/pinch).

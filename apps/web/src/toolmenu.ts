@@ -279,19 +279,29 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
     content: root,
     tag: 'tools',
     pinned: readPersistedPinned(),
-    onPinnedChange: writePersistedPinned,
+    onPinnedChange: (pinned) => {
+      writePersistedPinned(pinned)
+      // On pin, snapshot the current anchor (the click point that
+      // opened this menu) so a future page-refresh can re-open here.
+      if (pinned) writePersistedAnchor(opts.at)
+    },
     onDismiss: settingsUnsub,
   })
+  // Expose a rebuild hook so external state changes (tool switch via
+  // keymap / double-Esc) can refresh the menu's contextual section
+  // without forcing the user to re-open it. v1.4.
+  popoverRef.current.rebuild = rebuildContent
   return popoverRef.current
 }
 
 const PINNED_STORAGE_KEY = 'whiteboard:toolmenu-pinned'
+const ANCHOR_STORAGE_KEY = 'whiteboard:toolmenu-anchor'
 
 /** Pin state lives in localStorage so the preference survives browser
  *  restarts — the user explicitly asked for cross-session persistence,
- *  not just per-tab. SessionStorage was the v1.4-initial choice and
- *  proved too narrow. Falls back to in-memory false on private-mode
- *  storage failures. */
+ *  not just per-tab. Anchor (the original click point) is stored
+ *  alongside so a page refresh can re-open the pinned menu where the
+ *  user last had it. */
 function readPersistedPinned(): boolean {
   try {
     return localStorage.getItem(PINNED_STORAGE_KEY) === 'true'
@@ -306,4 +316,40 @@ function writePersistedPinned(pinned: boolean): void {
   } catch {
     // ignore storage failures (private mode / quota)
   }
+}
+
+function writePersistedAnchor(anchor: { x: number; y: number }): void {
+  try {
+    localStorage.setItem(ANCHOR_STORAGE_KEY, JSON.stringify(anchor))
+  } catch {
+    // ignore storage failures
+  }
+}
+
+/** Read the persisted anchor. Returns null if absent or malformed. */
+export function readPersistedAnchor(): { x: number; y: number } | null {
+  try {
+    const raw = localStorage.getItem(ANCHOR_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as unknown
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      typeof (parsed as { x?: unknown }).x === 'number' &&
+      typeof (parsed as { y?: unknown }).y === 'number'
+    ) {
+      return { x: (parsed as { x: number }).x, y: (parsed as { y: number }).y }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** Convenience for the boot path: returns the anchor to re-open the
+ *  menu at if (and only if) the previous session left it pinned.
+ *  Null when there's nothing to restore. */
+export function getPersistedPinnedAnchor(): { x: number; y: number } | null {
+  if (!readPersistedPinned()) return null
+  return readPersistedAnchor()
 }

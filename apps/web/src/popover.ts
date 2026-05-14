@@ -71,6 +71,11 @@ export interface Popover {
    *  without programmatically moving the OS cursor (which browsers
    *  don't allow). */
   flashAttention(): void
+  /** Optional rebuild hook — set by the caller post-creation. Lets
+   *  external state changes (active tool switch, settings update)
+   *  ask the popover to re-render its body without dismissing it.
+   *  No-op when the popover doesn't define one. v1.4. */
+  rebuild?: () => void
 }
 
 /** Registry of all currently-alive popovers. Replaces the prior single-
