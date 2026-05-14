@@ -28,7 +28,7 @@
     "install-hooks": "bash scripts/install-hooks.sh"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
+    "@biomejs/biome": "^2.4.15",
     "typescript": "^5.6.3"
   },
   "engines": {
