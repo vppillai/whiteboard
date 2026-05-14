@@ -271,6 +271,30 @@ export function createTextTool(deps: TextToolDeps): TextTool {
     deps.markCommittedDirty()
   }
 
+  /** Adjust the editing text's font size by `delta` board pixels.
+   *  No-op when not editing. Mutates font + re-fits transform +
+   *  updates the editable's CSS so the change is visible immediately
+   *  (the edit-text op lands at commit). Also updates the sticky
+   *  textSize so future texts inherit. v1.4.
+   *
+   *  Lives outside the returned object so the local keydown handler
+   *  inside startEdit can call it without going through the public
+   *  method (which would shadow itself). */
+  const FONT_SIZE_MIN = 6
+  const FONT_SIZE_MAX = 200
+  const adjustEditingFontSize = (delta: number): boolean => {
+    if (!editing) return false
+    const next = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, editing.text.font.size + delta))
+    if (next === editing.text.font.size) return false
+    editing.text.font = { ...editing.text.font, size: next }
+    const sized = resizeToFit(editing.text)
+    editing.text.transform = sized.transform
+    if (lastCtx) applyEditorStyles(editing.el, editing.text, lastCtx)
+    deps.markCommittedDirty()
+    setTextSize(next)
+    return true
+  }
+
   const startEdit = (text: TextObject, ctx: ToolContext, isNewText: boolean): void => {
     if (editing) commitEdit()
     const before = {
@@ -345,6 +369,25 @@ export function createTextTool(deps: TextToolDeps): TextTool {
         if (k === 'b' || k === 'i' || k === 'u') {
           e.preventDefault()
           toggleFormat(k === 'b' ? 'bold' : k === 'i' ? 'italic' : 'underline', lastCtx)
+          return
+        }
+      }
+      // Cmd/Ctrl+Shift+,/. — fine-grained font-size step (mirrors the
+      // global keymap binding). Stays inside this handler because the
+      // global keymap can't see the event: we stopPropagation above to
+      // prevent typing-letters-as-tool-switches, which also blocks
+      // every other document-level shortcut while editing. Dispatch
+      // here so the same shortcut works whether the user is in edit
+      // mode or has the text selected. v1.4. */
+      if (meta && e.shiftKey && !e.altKey) {
+        if (e.key === '<' || e.key === ',') {
+          e.preventDefault()
+          adjustEditingFontSize(-1)
+          return
+        }
+        if (e.key === '>' || e.key === '.') {
+          e.preventDefault()
+          adjustEditingFontSize(1)
           return
         }
       }
@@ -660,21 +703,7 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       return t.id
     },
     adjustEditingFontSize(delta: number): boolean {
-      if (!editing) return false
-      const MIN_SIZE = 6
-      const MAX_SIZE = 200
-      const next = Math.max(MIN_SIZE, Math.min(MAX_SIZE, editing.text.font.size + delta))
-      if (next === editing.text.font.size) return false
-      editing.text.font = { ...editing.text.font, size: next }
-      const sized = resizeToFit(editing.text)
-      editing.text.transform = sized.transform
-      if (lastCtx) applyEditorStyles(editing.el, editing.text, lastCtx)
-      deps.markCommittedDirty()
-      // Update the sticky size so the next new text inherits this
-      // preference — matches the way the contextual-menu size pills
-      // also write through setTextSize.
-      setTextSize(next)
-      return true
+      return adjustEditingFontSize(delta)
     },
   }
 }
