@@ -103,6 +103,7 @@ import {
   setLaserColor,
 } from './settings'
 import { createPanelContent } from './settings/panel-content'
+import { type ShapeStore, createLocalShapeStore } from './shapestore'
 import { dismissSidePanel, isSidePanelOpen, showSidePanel } from './sidepanel'
 import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
 import { type StrokeStore, createLocalStrokeStore } from './strokestore'
@@ -181,6 +182,10 @@ async function main(): Promise<void> {
   // TextStore — analog of StrokeStore / ImageStore for text objects. Single
   // store (no companion blob) since text records carry payload inline.
   const textStore: TextStore = createLocalTextStore()
+
+  // ShapeStore — analog of TextStore for shape objects (rect / ellipse /
+  // line / arrow). Single store, payload-inline, same pattern.
+  const shapeStore: ShapeStore = createLocalShapeStore()
 
   const root = document.getElementById('app')
   if (!root) throw new Error('#app not found')
@@ -317,6 +322,14 @@ async function main(): Promise<void> {
     console.warn('whiteboard/web: failed to load persisted texts:', err)
   }
 
+  try {
+    const persistedShapes = await shapeStore.load()
+    shapes.push(...persistedShapes)
+    committedDirty = true
+  } catch (err) {
+    console.warn('whiteboard/web: failed to load persisted shapes:', err)
+  }
+
   // ---------------------------------------------------------------------
   //  Pointer-coordinate mapping. Cached canvas rect (M1.5 perf fix).
   // ---------------------------------------------------------------------
@@ -372,6 +385,14 @@ async function main(): Promise<void> {
     })
   }
 
+  // Same pattern for shape records — single closure used by opCtx (and the
+  // Shape tool, in SH5). Errors are warn-and-continue.
+  const persistShape = (s: ShapeObject): void => {
+    void shapeStore.update(s).catch((err) => {
+      console.warn('whiteboard/web: failed to persist shape:', err)
+    })
+  }
+
   const opCtx: OpContext = {
     strokes,
     saveStroke: (s) => {
@@ -384,9 +405,7 @@ async function main(): Promise<void> {
     texts,
     saveText: persistText,
     shapes,
-    // Persistence wires through ShapeStore in SH3. For now ops mutate
-    // the in-memory shapes array; no IDB writes happen yet.
-    saveShape: () => {},
+    saveShape: persistShape,
     markDirty: () => {
       committedDirty = true
     },
@@ -1001,6 +1020,7 @@ async function main(): Promise<void> {
       strokes.length = 0
       images.length = 0
       texts.length = 0
+      shapes.length = 0
       selectTool.clearSelection()
       undoStack.length = 0
       redoStack.length = 0
@@ -1017,6 +1037,9 @@ async function main(): Promise<void> {
       })
       void textStore.clear().catch((err) => {
         console.warn('whiteboard/web: text clear failed:', err)
+      })
+      void shapeStore.clear().catch((err) => {
+        console.warn('whiteboard/web: shape clear failed:', err)
       })
       _clearImageCache()
     },
