@@ -1196,6 +1196,27 @@ async function main(): Promise<void> {
       selectSelectTool: () => setTool('select'),
       selectLaserTool: () => setTool('laser'),
       selectTextTool: () => setTool('text'),
+      // Shape tool sub-mode shortcuts (v1.4). Each entry activates the
+      // Shape tool and switches sub-mode in one stroke. Keymap binds
+      // R/O/A/L to these — see keymap.ts for the rebind rationale
+      // (L's prior laser binding moved to P; O's options-menu moved
+      // to Shift+O).
+      selectShapeRect: () => {
+        shapeTool.setKind('rect')
+        setTool('shape')
+      },
+      selectShapeEllipse: () => {
+        shapeTool.setKind('ellipse')
+        setTool('shape')
+      },
+      selectShapeLine: () => {
+        shapeTool.setKind('line')
+        setTool('shape')
+      },
+      selectShapeArrow: () => {
+        shapeTool.setKind('arrow')
+        setTool('shape')
+      },
       // Cmd+B/I/U routed to the text tool's external entry. No-ops when
       // not in edit mode (the tool's own contenteditable handler also
       // intercepts these; this is a backup for the edge case where the
