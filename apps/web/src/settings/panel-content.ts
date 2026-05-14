@@ -29,6 +29,12 @@ export interface PanelContentOptions {
   /** Called when the user clicks "Reset to defaults" — typically wires
    *  to a resetflow.request() in main.ts. */
   onResetClick: () => void
+  /** Called when the user clicks "Factory reset". Typically wires to
+   *  a factoryreset.request() in main.ts. Wipes ALL per-origin state
+   *  (IDB, localStorage, caches, service workers) and reloads.
+   *  Distinct from `onResetClick` (which only resets in-app
+   *  settings — keeps your boards). */
+  onFactoryResetClick: () => void
 }
 
 interface Section {
@@ -52,6 +58,7 @@ export function createPanelContent(opts: PanelContentOptions): {
     renderInputSection(),
     renderAdvancedSection(),
     renderResetFooter(opts.onResetClick),
+    renderFactoryResetFooter(opts.onFactoryResetClick),
   ]
   for (const s of sections) root.appendChild(s.el)
 
@@ -565,6 +572,31 @@ function renderResetFooter(onResetClick: () => void): Section {
   btn.textContent = 'Reset to defaults'
   btn.addEventListener('click', onResetClick)
   el.appendChild(btn)
+  return { el }
+}
+
+/** Factory-reset footer — destructive, separated visually from
+ *  "Reset to defaults" by a divider + a "Danger zone" label so the
+ *  user has to specifically aim for it. Wipes ALL per-origin browser
+ *  state (boards, settings, caches) and reloads. Distinct from the
+ *  "Reset to defaults" button above, which only touches in-app
+ *  scalar settings. */
+function renderFactoryResetFooter(onClick: () => void): Section {
+  const el = document.createElement('section')
+  el.className = 'whiteboard-settings-footer whiteboard-settings-danger'
+  const label = document.createElement('div')
+  label.className = 'whiteboard-settings-danger-label'
+  label.textContent = 'Danger zone'
+  const desc = document.createElement('p')
+  desc.className = 'whiteboard-settings-danger-desc'
+  desc.textContent =
+    'Wipes every board, setting, custom color, and cached file for this site, then reloads. Use this to recover from a stuck app state.'
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'whiteboard-settings-reset-btn whiteboard-settings-factory-reset-btn'
+  btn.textContent = 'Factory reset…'
+  btn.addEventListener('click', onClick)
+  el.append(label, desc, btn)
   return { el }
 }
 

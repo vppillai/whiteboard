@@ -3,6 +3,8 @@ export type {
   BrushConfig,
   ImageObject,
   Sample,
+  ShapeKind,
+  ShapeObject,
   Stroke,
   TextFontFamily,
   TextObject,

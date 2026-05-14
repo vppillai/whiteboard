@@ -39,7 +39,7 @@
  * we don't half-paste.
  */
 
-import type { Stroke, TextObject } from '@whiteboard/shared'
+import type { ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 
 const MARKER_VERSION = 1
 
@@ -50,12 +50,16 @@ export interface ClipboardStrokeBundle {
    *  selections (the field is also called out as optional so existing
    *  pre-text-support callers and persisted snapshots still type-check). */
   texts?: TextObject[]
+  /** Shapes in the bundle. Optional for the same reason as `texts` — a
+   *  v1.2-or-earlier consumer (or a bundle copied before shapes existed)
+   *  parses without this field present. v1.4. */
+  shapes?: ShapeObject[]
   /** Bounding-box top-left of the selection at copy time. On paste, the
    *  whole selection translates by `(cursor - origin)` so relative
    *  layout is preserved and the user's pasted group lands under the
-   *  pointer. Computed across ALL items in the bundle (strokes' samples
-   *  plus texts' rects) so the union bbox top-left is what lands at
-   *  the cursor — strokes and texts retain their relative positions. */
+   *  pointer. Computed across ALL items in the bundle (strokes' samples,
+   *  texts' rects, shapes' rects) so the union bbox top-left is what
+   *  lands at the cursor — every object retains its relative position. */
   origin: { x: number; y: number }
 }
 
@@ -100,6 +104,7 @@ const ATTR_MATCH = /data-whiteboard-v1="([^"]*)"/
  *  null), and the caller falls through to the PNG paste path. */
 const MAX_BUNDLE_STROKES = 5000
 const MAX_BUNDLE_TEXTS = 5000
+const MAX_BUNDLE_SHAPES = 5000
 const MAX_STROKE_SAMPLES = 50000
 
 /** Hand-rolled field validator for the structural shape of a stroke /
@@ -132,6 +137,28 @@ function isValidTextShape(t: unknown): boolean {
   if (!o.transform || typeof o.transform !== 'object') return false
   if (!o.font || typeof o.font !== 'object') return false
   if (typeof o.color !== 'string') return false
+  return true
+}
+
+/** v1.4: bundle-shape entries carry the same BoardObject layout as
+ *  texts (id / transform / z / createdAt) plus the shape-specific
+ *  `shape` discriminator and style fields. */
+function isValidShapeShape(s: unknown): boolean {
+  if (!s || typeof s !== 'object') return false
+  const o = s as {
+    id?: unknown
+    shape?: unknown
+    transform?: unknown
+    color?: unknown
+    strokeWidth?: unknown
+  }
+  if (typeof o.id !== 'string') return false
+  if (o.shape !== 'rect' && o.shape !== 'ellipse' && o.shape !== 'line' && o.shape !== 'arrow') {
+    return false
+  }
+  if (!o.transform || typeof o.transform !== 'object') return false
+  if (typeof o.color !== 'string') return false
+  if (typeof o.strokeWidth !== 'number') return false
   return true
 }
 
@@ -172,6 +199,10 @@ export function extractStrokesFromHtml(html: string): ClipboardStrokeBundle | nu
       if (!Array.isArray(parsed.texts)) return null
       if (parsed.texts.length > MAX_BUNDLE_TEXTS) return null
     }
+    if (parsed.shapes !== undefined) {
+      if (!Array.isArray(parsed.shapes)) return null
+      if (parsed.shapes.length > MAX_BUNDLE_SHAPES) return null
+    }
     // Per-item shape validation.
     for (const s of parsed.strokes) {
       if (!isValidStrokeShape(s)) return null
@@ -179,6 +210,11 @@ export function extractStrokesFromHtml(html: string): ClipboardStrokeBundle | nu
     if (parsed.texts) {
       for (const t of parsed.texts) {
         if (!isValidTextShape(t)) return null
+      }
+    }
+    if (parsed.shapes) {
+      for (const sh of parsed.shapes) {
+        if (!isValidShapeShape(sh)) return null
       }
     }
     if (

@@ -8,10 +8,11 @@
  * there's nothing to fit, so we leave the camera alone.
  */
 
-import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
+import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import type { Camera } from './camera'
 import { MAX_SCALE, MIN_SCALE } from './camera'
 import { imageAABB } from './imagegeom'
+import { shapeAABB } from './rendershapes'
 import { getStrokeBBox } from './stroke'
 import { textAABB } from './textgeom'
 
@@ -26,6 +27,7 @@ export interface FitContent {
   strokes: readonly Stroke[]
   images?: readonly ImageObject[]
   texts?: readonly TextObject[]
+  shapes?: readonly ShapeObject[]
 }
 
 export function fitToContent(camera: Camera, content: FitContent, view: Viewport): boolean {
@@ -57,6 +59,12 @@ export function fitToContent(camera: Camera, content: FitContent, view: Viewport
     for (const t of content.texts) {
       if (t.deleted) continue
       include(textAABB(t))
+    }
+  }
+  if (content.shapes) {
+    for (const sh of content.shapes) {
+      if (sh.deleted) continue
+      include(shapeAABB(sh))
     }
   }
   if (!any) return false

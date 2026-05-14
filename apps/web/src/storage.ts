@@ -14,7 +14,7 @@
  * scan in the render loop and the heavy bytes pageable independently.
  */
 
-import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
+import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 
 const DB_NAME = 'whiteboard-local'
 /**
@@ -32,6 +32,9 @@ const DB_NAME = 'whiteboard-local'
  *       texts store gets created. Users with healthy v3 DBs pass
  *       through onupgradeneeded with all contains-checks returning
  *       false; no-op upgrade, just bumps the recorded version.
+ *   v5: + shapes (v1.4 — Shape tool: rect / ellipse / line / arrow).
+ *       No companion blob store — shape records carry their full
+ *       payload inline (transform + style fields).
  *
  * Existing databases at any earlier version upgrade in place: the
  * onupgradeneeded branch creates only the missing stores so prior data
@@ -51,17 +54,18 @@ const DB_NAME = 'whiteboard-local'
  *   skip the mutation step. The `oldVersion` is available on the
  *   IDBVersionChangeEvent passed to `onupgradeneeded`.
  *
- *   v1 → v4 multi-step jumps work today because IDB fires
- *   `onupgradeneeded` once with `oldVersion = 1, newVersion = 4`, and
- *   all four `if (!contains)` guards run in sequence to create each
+ *   v1 → v5 multi-step jumps work today because IDB fires
+ *   `onupgradeneeded` once with `oldVersion = 1, newVersion = 5`, and
+ *   all five `if (!contains)` guards run in sequence to create each
  *   missing store. This is the create-only-good path; mutate paths
  *   need the version-range guard.
  */
-const DB_VERSION = 4
+const DB_VERSION = 5
 const STORE_STROKES = 'strokes'
 const STORE_IMAGES = 'images'
 const STORE_IMAGES_BLOB = 'images-blob'
 const STORE_TEXTS = 'texts'
+const STORE_SHAPES = 'shapes'
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -91,9 +95,27 @@ function getDb(): Promise<IDBDatabase> {
         if (!db.objectStoreNames.contains(STORE_TEXTS)) {
           db.createObjectStore(STORE_TEXTS, { keyPath: 'id' })
         }
+        // shapes added in v5. No companion blob — shape records are
+        // tiny (transform + a few style fields).
+        if (!db.objectStoreNames.contains(STORE_SHAPES)) {
+          db.createObjectStore(STORE_SHAPES, { keyPath: 'id' })
+        }
       }
       req.onsuccess = () => resolve(req.result)
       req.onerror = () => reject(req.error)
+      // If another tab holds an older-version connection open, the
+      // upgrade is BLOCKED and neither onsuccess nor onerror fires —
+      // boot would hang silently. Reject loudly so the load try/catch
+      // can warn and the user sees a console message instead of a
+      // mysterious blank canvas. Diagnosed during M3 (shape tool work)
+      // when a v4-holding tab blocked a v5 upgrade.
+      req.onblocked = () => {
+        reject(
+          new Error(
+            'whiteboard/storage: IDB upgrade blocked — close other tabs of this app and reload',
+          ),
+        )
+      }
     })
   }
   return dbPromise
@@ -375,6 +397,82 @@ export async function clearAllTexts(): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_TEXTS, 'readwrite')
     tx.objectStore(STORE_TEXTS).clear()
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+/**
+ * Persist a shape object. Single-store (no companion blob) since shape
+ * records carry their full payload inline (transform + style fields).
+ * Same shape as `saveText`.
+ */
+export async function saveShape(shape: ShapeObject): Promise<void> {
+  const db = await getDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_SHAPES, 'readwrite')
+    tx.objectStore(STORE_SHAPES).put(shape)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'))
+  })
+}
+
+/**
+ * Pure compaction predicate for shapes. Mirrors stroke / image / text
+ * variants — a shape with `deleted === true` from a prior session has
+ * no undo path (undo stack resets on reload), so it's safe to hard-
+ * delete.
+ */
+export function partitionShapesForCompaction(shapes: readonly ShapeObject[]): {
+  kept: ShapeObject[]
+  toCompact: string[]
+} {
+  const kept: ShapeObject[] = []
+  const toCompact: string[] = []
+  for (const s of shapes) {
+    if (s.deleted === true) toCompact.push(s.id)
+    else kept.push(s)
+  }
+  return { kept, toCompact }
+}
+
+/** Load all shapes, sorted by z asc (same convention as images/texts).
+ *  Fires a fire-and-forget compaction for soft-deleted records. */
+export async function loadAllShapes(): Promise<ShapeObject[]> {
+  const db = await getDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_SHAPES, 'readonly')
+    const req = tx.objectStore(STORE_SHAPES).getAll()
+    req.onsuccess = () => {
+      const all = req.result as ShapeObject[]
+      const { kept, toCompact } = partitionShapesForCompaction(all)
+      kept.sort((a, b) => a.z - b.z)
+      if (toCompact.length > 0) {
+        void Promise.all(toCompact.map((id) => deleteShape(id).catch(() => undefined)))
+      }
+      resolve(kept)
+    }
+    req.onerror = () => reject(req.error)
+  })
+}
+
+export async function deleteShape(id: string): Promise<void> {
+  const db = await getDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_SHAPES, 'readwrite')
+    tx.objectStore(STORE_SHAPES).delete(id)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'))
+  })
+}
+
+export async function clearAllShapes(): Promise<void> {
+  const db = await getDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_SHAPES, 'readwrite')
+    tx.objectStore(STORE_SHAPES).clear()
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })

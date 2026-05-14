@@ -7,7 +7,7 @@
  * in the side panel's Custom swatches section.
  */
 
-import { type Popover, dismissAllPopovers, showPopover } from './popover'
+import { type Popover, findPopoverByTag, showPopover } from './popover'
 import {
   getColor,
   getCustomSwatches,
@@ -17,6 +17,7 @@ import {
   setColor,
 } from './settings'
 import { createSwatchAdd } from './swatchadd'
+import { makeSwatchDeleteBadge } from './swatchpalette'
 
 export const CURATED_COLORS: readonly string[] = [
   'ink',
@@ -57,7 +58,12 @@ export function openColorPicker(at: { x: number; y: number }): Popover {
       palette.appendChild(makeSwatch(c, false, () => onPick(c)))
     }
     for (const c of getCustomSwatches()) {
-      palette.appendChild(makeSwatch(c, true, () => onPick(c)))
+      // Custom swatches get a hover-revealed × delete badge — shared
+      // factory in swatchpalette.ts so the badge's DOM, accessibility,
+      // and event-suppression rules match the right-click menu version.
+      const sw = makeSwatch(c, true, () => onPick(c))
+      sw.appendChild(makeSwatchDeleteBadge(c))
+      palette.appendChild(sw)
     }
     palette.appendChild(makeAddTile(() => openSwatchAddSubpopover()))
     syncActive()
@@ -92,17 +98,17 @@ export function openColorPicker(at: { x: number; y: number }): Popover {
   }
 
   const openSwatchAddSubpopover = (): void => {
-    const wasPinned = popoverRef.current?.isPinned() ?? false
+    // Dismiss only the swatch-add subpopover; the parent color picker
+    // stays open. Its `onChange` subscription auto-rebuilds the
+    // palette so a newly-added swatch shows up immediately. Pre-v1.4
+    // this path nuked all popovers and re-opened the picker, which
+    // killed the pin and produced a visual flicker. v1.4 fix.
     const subRoot = createSwatchAdd({
       onAdded: () => {
-        dismissAllPopovers()
-        const next = openColorPicker(at)
-        next.setPinned(wasPinned)
+        findPopoverByTag('swatch-add')?.dismiss()
       },
       onCancel: () => {
-        dismissAllPopovers()
-        const next = openColorPicker(at)
-        next.setPinned(wasPinned)
+        findPopoverByTag('swatch-add')?.dismiss()
       },
     })
     showPopover({

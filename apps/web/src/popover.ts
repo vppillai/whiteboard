@@ -22,8 +22,18 @@
  */
 
 export interface PopoverOptions {
-  /** Anchor point in client coordinates (e.g., last-pointer position). */
+  /** Anchor point in client coordinates (e.g., last-pointer position).
+   *  Interpretation depends on `placement`:
+   *    - 'below' (default): popover is centered horizontally on `anchor.x`
+   *      and placed `offset` px below `anchor.y` (or above if no room).
+   *    - 'right-of': `anchor.x` becomes the LEFT edge of the popover and
+   *      `anchor.y` becomes the TOP edge — used for sub-popovers that
+   *      should layer beside a parent menu rather than over it. Falls
+   *      back to mirroring on the left if `anchor.x` doesn't leave room
+   *      to the right of the viewport. v1.4. */
   anchor: { x: number; y: number }
+  /** Optional placement hint. See `anchor` docs. Defaults to 'below'. */
+  placement?: 'below' | 'right-of'
   /** Header title (uppercased small label). */
   title: string
   /** Body content. The popover takes ownership of this element. */
@@ -39,6 +49,11 @@ export interface PopoverOptions {
   tag?: string
   /** Called after the popover dismisses (manually or via outside / Esc). */
   onDismiss?: () => void
+  /** Called after the pinned state changes — either via the pin button
+   *  in the header or a programmatic `setPinned` call. Lets the caller
+   *  persist the state (e.g., toolmenu writes to sessionStorage so the
+   *  pin choice survives a menu close / reopen within the tab). v1.4. */
+  onPinnedChange?: (pinned: boolean) => void
 }
 
 export interface Popover {
@@ -56,6 +71,11 @@ export interface Popover {
    *  without programmatically moving the OS cursor (which browsers
    *  don't allow). */
   flashAttention(): void
+  /** Optional rebuild hook — set by the caller post-creation. Lets
+   *  external state changes (active tool switch, settings update)
+   *  ask the popover to re-render its body without dismissing it.
+   *  No-op when the popover doesn't define one. v1.4. */
+  rebuild?: () => void
 }
 
 /** Registry of all currently-alive popovers. Replaces the prior single-
@@ -126,7 +146,7 @@ export function showPopover(opts: PopoverOptions): Popover {
   el.appendChild(opts.content)
   document.body.appendChild(el)
 
-  positionPopover(el, opts.anchor)
+  positionPopover(el, opts.anchor, opts.placement ?? 'below')
 
   let pinned = opts.pinned ?? false
   syncPinUI()
@@ -149,7 +169,14 @@ export function showPopover(opts: PopoverOptions): Popover {
   }
 
   function onKey(e: KeyboardEvent): void {
-    if (e.key === 'Escape') {
+    // Esc closes only NON-pinned popovers. A pinned popover survives
+    // Esc the same way it survives outside-pointer clicks — the user
+    // explicitly opted into "stay open." Pinned dismissal requires the
+    // X button or an explicit programmatic dismiss(). v1.4 fix: prior
+    // behavior had Esc dismiss every popover on the document including
+    // pinned ones, which was inconsistent with the outside-pointer
+    // pinned-survival logic.
+    if (e.key === 'Escape' && !pinned) {
       e.preventDefault()
       dismiss()
     }
@@ -164,6 +191,7 @@ export function showPopover(opts: PopoverOptions): Popover {
   pinBtn.addEventListener('click', () => {
     pinned = !pinned
     syncPinUI()
+    opts.onPinnedChange?.(pinned)
   })
   closeBtn.addEventListener('click', dismiss)
 
@@ -179,12 +207,11 @@ export function showPopover(opts: PopoverOptions): Popover {
     drag = { dx: e.clientX - rect.left, dy: e.clientY - rect.top, pointerId: e.pointerId }
     header.setPointerCapture(e.pointerId)
     header.style.cursor = 'grabbing'
-    // Once user drags, become pinned — they want to keep this popover open
-    // to interact with it from a new position.
-    if (!pinned) {
-      pinned = true
-      syncPinUI()
-    }
+    // Dragging is just a reposition — it does NOT auto-pin the
+    // popover. Auto-pinning on drag was confusing because the user
+    // who just wanted to nudge the menu out of the way ended up with
+    // a permanently-pinned menu they had to manually unpin. Pin is
+    // user-initiated only (header pin button). v1.4 review fix.
   })
   header.addEventListener('pointermove', (e: PointerEvent) => {
     if (!drag || e.pointerId !== drag.pointerId) return
@@ -230,8 +257,10 @@ export function showPopover(opts: PopoverOptions): Popover {
     el,
     isPinned: () => pinned,
     setPinned: (p) => {
+      if (pinned === p) return
       pinned = p
       syncPinUI()
+      opts.onPinnedChange?.(pinned)
     },
     dismiss,
     noteSelection: () => {
@@ -243,13 +272,37 @@ export function showPopover(opts: PopoverOptions): Popover {
   return popover
 }
 
-/** Dismisses EVERY currently-alive popover, including pinned ones.
- *  Used by Esc (the universal close-all) and by distraction-free mode
- *  enter. Returns true if any popover was dismissed. Iterates in
- *  reverse so each dismiss can safely splice itself out of the array. */
+/** Dismisses every NON-PINNED popover. Returns true if any popover
+ *  was dismissed. Pinned popovers are skipped — they only close via
+ *  the X button or `dismissAllPopoversForced` (distraction-free mode
+ *  enter etc., where a global state shift overrides the pin).
+ *
+ *  v1.4 change: pre-v1.4 this always dismissed pinned too, so any Esc
+ *  through main.ts → cancel → dismissAllPopovers() killed pinned
+ *  menus. The popover's own Esc handler already respected pin; this
+ *  was the second dismissal path that the user was hitting.
+ *
+ *  Iterates a snapshot of the registry so each dismiss can safely
+ *  splice itself out without invalidating iteration. */
 export function dismissAllPopovers(): boolean {
   if (activeRegistry.length === 0) return false
-  // Snapshot the list before iterating — dismiss() mutates the registry.
+  const snapshot = activeRegistry.slice()
+  let dismissed = false
+  for (const entry of snapshot) {
+    if (entry.popover.isPinned()) continue
+    entry.popover.dismiss()
+    dismissed = true
+  }
+  return dismissed
+}
+
+/** Dismisses every popover regardless of pin state. Used by global
+ *  state transitions where the pin choice doesn't apply — e.g.
+ *  distraction-free mode enter (the chrome itself disappears) or
+ *  clear-board confirmations (the user is intentionally tearing
+ *  down). Returns true if any popover was dismissed. v1.4. */
+export function dismissAllPopoversForced(): boolean {
+  if (activeRegistry.length === 0) return false
   const snapshot = activeRegistry.slice()
   for (const entry of snapshot) {
     entry.popover.dismiss()
@@ -291,7 +344,11 @@ export function getActivePopover(): Popover | null {
   return activeRegistry[activeRegistry.length - 1]?.popover ?? null
 }
 
-function positionPopover(el: HTMLElement, anchor: { x: number; y: number }): void {
+function positionPopover(
+  el: HTMLElement,
+  anchor: { x: number; y: number },
+  placement: 'below' | 'right-of',
+): void {
   // Offscreen-render to measure.
   el.style.left = '0px'
   el.style.top = '0px'
@@ -302,17 +359,34 @@ function positionPopover(el: HTMLElement, anchor: { x: number; y: number }): voi
   el.style.visibility = ''
 
   const margin = 8
-  const offset = 12 // gap below pointer
-  let x = anchor.x - rect.width / 2
-  let y = anchor.y + offset
+  const offset = 12 // gap from anchor (below for 'below', side-gap for 'right-of')
 
-  // Clamp horizontally.
-  x = Math.max(margin, Math.min(x, window.innerWidth - rect.width - margin))
+  let x: number
+  let y: number
 
-  // If popover would overflow bottom, place above the pointer instead.
-  if (y + rect.height + margin > window.innerHeight) {
-    y = anchor.y - rect.height - offset
+  if (placement === 'right-of') {
+    // Anchor specifies the LEFT/TOP of a region to layer beside —
+    // typically a parent menu's right-edge midpoint passed by the
+    // caller. Place the popover's left edge `offset` px to the right
+    // of `anchor.x`. If that would overflow the viewport, mirror to
+    // the left of the parent (anchor.x becomes the RIGHT edge minus
+    // popover width minus offset). Vertically aligned to anchor.y
+    // with the same overflow clamp.
+    const wantsLeft = anchor.x + offset + rect.width + margin > window.innerWidth
+    x = wantsLeft ? anchor.x - rect.width - offset : anchor.x + offset
+    y = anchor.y
+  } else {
+    // 'below' (default) — center horizontally on anchor.x, below
+    // anchor.y; flip above if no room below.
+    x = anchor.x - rect.width / 2
+    y = anchor.y + offset
+    if (y + rect.height + margin > window.innerHeight) {
+      y = anchor.y - rect.height - offset
+    }
   }
+
+  // Clamp to viewport in both dimensions.
+  x = Math.max(margin, Math.min(x, window.innerWidth - rect.width - margin))
   y = Math.max(margin, Math.min(y, window.innerHeight - rect.height - margin))
 
   el.style.left = `${x}px`

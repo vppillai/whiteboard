@@ -45,7 +45,14 @@
  */
 
 import './style.css'
-import type { BrushConfig, ImageObject, Sample, Stroke, TextObject } from '@whiteboard/shared'
+import type {
+  BrushConfig,
+  ImageObject,
+  Sample,
+  ShapeObject,
+  Stroke,
+  TextObject,
+} from '@whiteboard/shared'
 import { BRUSH_IDS, BRUSH_PRESETS } from './brushes'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
 import { createClearFlow } from './clearflow'
@@ -54,6 +61,7 @@ import { CURATED_COLORS, cyclePaletteIndex, openColorPicker } from './colorpicke
 import { exitDistractionFree, isDistractionFree, toggleDistractionFree } from './distractionfree'
 import { attachEraserHold } from './eraserhold'
 import { openExportPopover } from './exportpopover'
+import { createFactoryResetFlow } from './factoryreset'
 import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid, invalidateGridColors } from './grid'
 import { createHelpOverlay } from './helpoverlay'
@@ -77,6 +85,7 @@ import { attachPointer } from './pointer'
 import { dismissAllPopovers, findPopoverByTag } from './popover'
 import { applyCamera, clearLayer, drawStrokeOntoLayer, drawStrokePath, setupCanvas } from './render'
 import { renderImages } from './renderimages'
+import { renderShapes } from './rendershapes'
 import { renderTexts } from './rendertexts'
 import { createResetFlow } from './resetflow'
 import {
@@ -96,12 +105,13 @@ import {
   setLaserColor,
 } from './settings'
 import { createPanelContent } from './settings/panel-content'
+import { type ShapeStore, createLocalShapeStore } from './shapestore'
 import { dismissSidePanel, isSidePanelOpen, showSidePanel } from './sidepanel'
 import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
 import { type StrokeStore, createLocalStrokeStore } from './strokestore'
 import { type TextStore, createLocalTextStore } from './textstore'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
-import { openToolMenu } from './toolmenu'
+import { getPersistedPinnedAnchor, openToolMenu } from './toolmenu'
 import { createToolPill } from './toolpill'
 import {
   type EraserTool,
@@ -113,6 +123,7 @@ import {
   createLaserTool,
   createPenTool,
   createSelectTool,
+  createShapeTool,
   createTextTool,
 } from './tools'
 import { clearView, loadView, makeViewSaver } from './viewstate'
@@ -174,6 +185,10 @@ async function main(): Promise<void> {
   // TextStore — analog of StrokeStore / ImageStore for text objects. Single
   // store (no companion blob) since text records carry payload inline.
   const textStore: TextStore = createLocalTextStore()
+
+  // ShapeStore — analog of TextStore for shape objects (rect / ellipse /
+  // line / arrow). Single store, payload-inline, same pattern.
+  const shapeStore: ShapeStore = createLocalShapeStore()
 
   const root = document.getElementById('app')
   if (!root) throw new Error('#app not found')
@@ -260,17 +275,32 @@ async function main(): Promise<void> {
   // above the current max so newly-pasted images stack on top.
   const images: ImageObject[] = []
   const texts: TextObject[] = []
-  // Shared next-z sequence for images + texts so the user-visible stack
-  // order interleaves naturally between object types. New objects always
-  // appear above all existing ones.
+  const shapes: ShapeObject[] = []
+  // Shared next-z sequence for images + texts + shapes so the user-
+  // visible stack order interleaves naturally between object types.
+  // New objects always appear above all existing ones.
+  //
+  // Implemented as a monotone counter rather than an O(n) max-scan
+  // on each call. The counter is seeded LAZILY on first use (so the
+  // arrays have already been populated from IDB at that point) by
+  // scanning once across the existing objects; subsequent calls just
+  // increment. Future batch-insert paths (M5 AI shape recognition)
+  // benefit linearly over the prior per-call O(n) scan. v1.4 fix.
+  let nextZCounter = -1
   const nextObjectZ = (): number => {
-    let max = 0
-    for (const img of images) if (!img.deleted && img.z > max) max = img.z
-    for (const t of texts) if (!t.deleted && t.z > max) max = t.z
-    return max + 1
+    if (nextZCounter < 0) {
+      let max = 0
+      for (const img of images) if (!img.deleted && img.z > max) max = img.z
+      for (const t of texts) if (!t.deleted && t.z > max) max = t.z
+      for (const sh of shapes) if (!sh.deleted && sh.z > max) max = sh.z
+      nextZCounter = max
+    }
+    nextZCounter += 1
+    return nextZCounter
   }
   const nextImageZ = nextObjectZ
   const nextTextZ = nextObjectZ
+  const nextShapeZ = nextObjectZ
 
   try {
     const { images: persistedImages, compactedBlobRefs } = await imageStore.load()
@@ -307,6 +337,14 @@ async function main(): Promise<void> {
     committedDirty = true
   } catch (err) {
     console.warn('whiteboard/web: failed to load persisted texts:', err)
+  }
+
+  try {
+    const persistedShapes = await shapeStore.load()
+    shapes.push(...persistedShapes)
+    committedDirty = true
+  } catch (err) {
+    console.warn('whiteboard/web: failed to load persisted shapes:', err)
   }
 
   // ---------------------------------------------------------------------
@@ -364,6 +402,14 @@ async function main(): Promise<void> {
     })
   }
 
+  // Same pattern for shape records — single closure used by opCtx (and the
+  // Shape tool, in SH5). Errors are warn-and-continue.
+  const persistShape = (s: ShapeObject): void => {
+    void shapeStore.update(s).catch((err) => {
+      console.warn('whiteboard/web: failed to persist shape:', err)
+    })
+  }
+
   const opCtx: OpContext = {
     strokes,
     saveStroke: (s) => {
@@ -375,6 +421,8 @@ async function main(): Promise<void> {
     saveImageMeta: persistImageMeta,
     texts,
     saveText: persistText,
+    shapes,
+    saveShape: persistShape,
     markDirty: () => {
       committedDirty = true
     },
@@ -426,6 +474,9 @@ async function main(): Promise<void> {
   const eraserTool: EraserTool = createEraserTool({
     callbacks: {
       getStrokes: () => strokes,
+      getShapes: () => shapes,
+      getTexts: () => texts,
+      getImages: () => images,
       onObjectErase: (id) => {
         const op: Op = { kind: 'delete', strokeIds: [id] }
         applyOp(op, opCtx)
@@ -440,6 +491,28 @@ async function main(): Promise<void> {
         applyOp(op, opCtx)
         pushUndoOp(op)
       },
+      onWholeObjectErase: ({ shapes: shapeIds, texts: textIds, images: imageIds }) => {
+        // Non-stroke whole-object deletes from the eraser pass. Emit
+        // one delete op per object (same per-kind ops the Select tool
+        // uses for Cmd+Delete). All applied + pushed in sequence so a
+        // single Cmd+Z reverses the whole eraser gesture in one step
+        // for the user, even though it's N undo entries internally.
+        for (const id of shapeIds) {
+          const op: Op = { kind: 'delete-shape', shapeId: id }
+          applyOp(op, opCtx)
+          pushUndoOp(op)
+        }
+        for (const id of textIds) {
+          const op: Op = { kind: 'delete-text', textId: id }
+          applyOp(op, opCtx)
+          pushUndoOp(op)
+        }
+        for (const id of imageIds) {
+          const op: Op = { kind: 'delete-image', imageId: id }
+          applyOp(op, opCtx)
+          pushUndoOp(op)
+        }
+      },
     },
   })
 
@@ -448,6 +521,8 @@ async function main(): Promise<void> {
     saveImageMeta: persistImageMeta,
     getTexts: () => texts,
     saveText: persistText,
+    getShapes: () => shapes,
+    saveShape: persistShape,
     getStrokes: () => strokes,
     // Stroke persistence — same warn-and-continue policy as
     // persistImageMeta / persistText. Used by the Select tool's
@@ -471,6 +546,11 @@ async function main(): Promise<void> {
       setTool('text')
       textTool.editTextById(id, ctx)
     },
+    // Refresh the pinned right-click menu whenever the selection
+    // changes so its contextual section reflects the newly-selected
+    // object (shape style row, text font row, etc.). No-op when the
+    // menu isn't open. v1.4 review fix.
+    onSelectionChange: () => findPopoverByTag('tools')?.rebuild?.(),
   })
 
   const laserTool = createLaserTool({
@@ -496,12 +576,24 @@ async function main(): Promise<void> {
     onEscExit: () => setTool(previousToolId ?? 'pen'),
   })
 
+  const shapeTool = createShapeTool({
+    getShapes: () => shapes,
+    nextZ: nextShapeZ,
+    pushOp: pushUndoOp,
+    saveShape: persistShape,
+    markCommittedDirty: () => {
+      committedDirty = true
+    },
+    resolveColor: resolveInkColor,
+  })
+
   const allTools: Record<ToolId, Tool> = {
     pen: penTool,
     eraser: eraserTool,
     select: selectTool,
     laser: laserTool,
     text: textTool,
+    shape: shapeTool,
   }
   const tool: { current: Tool } = { current: penTool }
   // Apply the initial tool's cursor — `setTool` only fires on changes, so
@@ -517,6 +609,7 @@ async function main(): Promise<void> {
   //  close via the cleanup callback the panel-content factory returns.
   // ---------------------------------------------------------------------
   const resetFlow = createResetFlow({ refocusOnClose: root })
+  const factoryResetFlow = createFactoryResetFlow({ refocusOnClose: root })
   const togglePanel = (): void => {
     if (isSidePanelOpen()) {
       dismissSidePanel()
@@ -524,6 +617,7 @@ async function main(): Promise<void> {
     }
     const content = createPanelContent({
       onResetClick: () => resetFlow.request(),
+      onFactoryResetClick: () => factoryResetFlow.request(),
     })
     showSidePanel({
       title: 'Settings',
@@ -552,7 +646,14 @@ async function main(): Promise<void> {
   document.body.appendChild(toolPill.el)
   const setTool = (id: ToolId): void => {
     if (tool.current.id === id) return
-    if (id !== 'pen' && id !== 'eraser' && id !== 'select' && id !== 'laser' && id !== 'text')
+    if (
+      id !== 'pen' &&
+      id !== 'eraser' &&
+      id !== 'select' &&
+      id !== 'laser' &&
+      id !== 'text' &&
+      id !== 'shape'
+    )
       return
     // Capture the OUTGOING tool id as "previous" — but only when leaving
     // a non-text tool. The Text tool's Esc-handler uses this to return
@@ -570,6 +671,12 @@ async function main(): Promise<void> {
     // tool change (the cleanup hook fires via the line above). Just mark
     // dirty so the next frame paints without the removed selection halos.
     committedDirty = true
+    // If a pinned tool menu is open, refresh it so its contextual
+    // section reflects the new tool. The menu's rebuild hook is set
+    // by the toolmenu factory; popovers without it (e.g. color picker)
+    // are unaffected. v1.4 — without this, keyboard / double-Esc tool
+    // switches left the pinned menu showing the old tool's section.
+    findPopoverByTag('tools')?.rebuild?.()
   }
 
   // Last-pointer (for popover anchoring on keyboard shortcuts AND for
@@ -720,16 +827,20 @@ async function main(): Promise<void> {
     getStrokes: () => strokes,
     getImages: () => images,
     getTexts: () => texts,
+    getShapes: () => shapes,
     getSelections: () => selectTool.getSelections(),
     getSelectedImage: () => selectTool.getSelectedImage(),
     getSettings,
     loadImageBlob: (ref) => imageStore.loadBlob(ref),
     strokes,
     texts,
+    shapes,
     saveStroke: (s) => strokeStore.save(s),
     saveText: persistText,
+    saveShape: persistShape,
     pushOp: pushUndoOp,
     nextTextZ,
+    nextShapeZ,
     showInfoToast,
     setToolSelect: () => setTool('select'),
     selectByIds: (items) => selectTool.selectByIds(items),
@@ -878,6 +989,55 @@ async function main(): Promise<void> {
     document.removeEventListener('cut', onCut)
   })
 
+  // Factored so the right-click handler AND the boot-restore path
+  // (auto-open a pinned menu from a prior session) can both use the
+  // same set of deps without duplication. v1.4.
+  const openToolMenuAt = (at: { x: number; y: number }): void => {
+    openToolMenu({
+      at,
+      getActiveTool: () => tool.current,
+      onSelectTool: setTool,
+      onResetZoom: () => {
+        // "Reset zoom" should land the user at the canonical origin
+        // view — scale 1 AND the pan at (0, 0).
+        resetZoom(camera)
+        camera.x = 0
+        camera.y = 0
+        onCameraChange()
+      },
+      onZoomToFit: () => {
+        const fit = fitToContent(
+          camera,
+          { strokes, images, texts, shapes },
+          { width: target.width, height: target.height },
+        )
+        if (!fit) {
+          resetZoom(camera)
+          camera.x = 0
+          camera.y = 0
+        }
+        onCameraChange()
+      },
+      onClear: clearFlow.request,
+      togglePanel,
+      onExport: () => {
+        openExportPopover({
+          anchor: at,
+          getStrokes: () => strokes,
+          getImages: () => images,
+          getTexts: () => texts,
+          getShapes: () => shapes,
+          imageStore,
+          camera,
+          viewportWidth: target.width,
+          viewportHeight: target.height,
+          onEmptyBoard: () => showInfoToast('Nothing to export'),
+          onSuccess: (fmt) => showInfoToast(`Exported ${fmt.toUpperCase()}`),
+        })
+      },
+    })
+  }
+
   root.addEventListener(
     'pointerdown',
     (e) => {
@@ -900,48 +1060,23 @@ async function main(): Promise<void> {
         }
         return
       }
-      openToolMenu({
-        at: { x: e.clientX, y: e.clientY },
-        getActiveTool: () => tool.current,
-        onSelectTool: setTool,
-        onResetZoom: () => {
-          resetZoom(camera)
-          onCameraChange()
-        },
-        onZoomToFit: () => {
-          // Empty board → reset zoom (fitToContent returns false on
-          // empty). Fall through so "Fit to view" always does something
-          // visible rather than no-op'ing on a fresh canvas.
-          const fit = fitToContent(
-            camera,
-            { strokes, images, texts },
-            { width: target.width, height: target.height },
-          )
-          if (!fit) resetZoom(camera)
-          onCameraChange()
-        },
-        onClear: clearFlow.request,
-        togglePanel,
-        onExport: () => {
-          // Open the export popover at the same anchor — scope + format
-          // choice live there. Single source of truth for export decisions.
-          openExportPopover({
-            anchor: { x: e.clientX, y: e.clientY },
-            getStrokes: () => strokes,
-            getImages: () => images,
-            getTexts: () => texts,
-            imageStore,
-            camera,
-            viewportWidth: target.width,
-            viewportHeight: target.height,
-            onEmptyBoard: () => showInfoToast('Nothing to export'),
-            onSuccess: (fmt) => showInfoToast(`Exported ${fmt.toUpperCase()}`),
-          })
-        },
-      })
+      openToolMenuAt({ x: e.clientX, y: e.clientY })
     },
     { capture: true },
   )
+
+  // Auto-open the pinned tool menu from a prior session. localStorage
+  // remembers (pin flag, anchor) — restore at the same anchor so the
+  // menu reappears where the user last had it. Falls back to no-op
+  // if the user wasn't pinned, or storage is unavailable. v1.4.
+  const persistedAnchor = getPersistedPinnedAnchor()
+  if (persistedAnchor) {
+    // Clamp restored anchor into the current viewport in case the
+    // window was resized between sessions.
+    const ax = Math.max(8, Math.min(persistedAnchor.x, window.innerWidth - 8))
+    const ay = Math.max(8, Math.min(persistedAnchor.y, window.innerHeight - 8))
+    openToolMenuAt({ x: ax, y: ay })
+  }
 
   // ---------------------------------------------------------------------
   //  Wheel — pan (plain) or zoom (Cmd/Ctrl/pinch).
@@ -989,6 +1124,7 @@ async function main(): Promise<void> {
       strokes.length = 0
       images.length = 0
       texts.length = 0
+      shapes.length = 0
       selectTool.clearSelection()
       undoStack.length = 0
       redoStack.length = 0
@@ -1005,6 +1141,9 @@ async function main(): Promise<void> {
       })
       void textStore.clear().catch((err) => {
         console.warn('whiteboard/web: text clear failed:', err)
+      })
+      void shapeStore.clear().catch((err) => {
+        console.warn('whiteboard/web: shape clear failed:', err)
       })
       _clearImageCache()
     },
@@ -1091,7 +1230,11 @@ async function main(): Promise<void> {
       undo,
       redo,
       zoomReset: () => {
+        // Cmd/Ctrl+0: same "true reset" semantics as the right-click
+        // pill — scale 1 plus pan back to origin.
         resetZoom(camera)
+        camera.x = 0
+        camera.y = 0
         onCameraChange()
       },
       zoomIn: () => {
@@ -1104,14 +1247,18 @@ async function main(): Promise<void> {
       },
       zoomToFit: () => {
         // Same fallback as the right-click "Fit to view" pill — empty
-        // board resets zoom so the keyboard shortcut is never a silent
-        // no-op.
+        // board resets to origin so the keyboard shortcut is never a
+        // silent no-op. v1.4: include shapes in the fit bounds.
         const fit = fitToContent(
           camera,
-          { strokes, images, texts },
+          { strokes, images, texts, shapes },
           { width: target.width, height: target.height },
         )
-        if (!fit) resetZoom(camera)
+        if (!fit) {
+          resetZoom(camera)
+          camera.x = 0
+          camera.y = 0
+        }
         onCameraChange()
       },
       clear: clearFlow.request,
@@ -1143,6 +1290,27 @@ async function main(): Promise<void> {
       selectSelectTool: () => setTool('select'),
       selectLaserTool: () => setTool('laser'),
       selectTextTool: () => setTool('text'),
+      // Shape tool sub-mode shortcuts (v1.4). Each entry activates the
+      // Shape tool and switches sub-mode in one stroke. Keymap binds
+      // R/O/A/L to these — see keymap.ts for the rebind rationale
+      // (L's prior laser binding moved to P; O's options-menu moved
+      // to Shift+O).
+      selectShapeRect: () => {
+        shapeTool.setKind('rect')
+        setTool('shape')
+      },
+      selectShapeEllipse: () => {
+        shapeTool.setKind('ellipse')
+        setTool('shape')
+      },
+      selectShapeLine: () => {
+        shapeTool.setKind('line')
+        setTool('shape')
+      },
+      selectShapeArrow: () => {
+        shapeTool.setKind('arrow')
+        setTool('shape')
+      },
       // Cmd+B/I/U routed to the text tool's external entry. No-ops when
       // not in edit mode (the tool's own contenteditable handler also
       // intercepts these; this is a backup for the edge case where the
@@ -1150,6 +1318,20 @@ async function main(): Promise<void> {
       toggleTextBold: () => toggleTextFormat('bold'),
       toggleTextItalic: () => toggleTextFormat('italic'),
       toggleTextUnderline: () => toggleTextFormat('underline'),
+      adjustTextSize: (delta) => {
+        // Route to whichever text is currently "active":
+        //   - Text tool in edit mode → adjust the editing text
+        //     (mutation + sticky-setting update; op lands on commit)
+        //   - Select tool with a single text selected → adjust that
+        //     text and emit an edit-text op
+        // Both helpers return false when their precondition isn't met,
+        // so this is a no-op when no text is active. v1.4.
+        if (textTool.isEditing()) {
+          textTool.adjustEditingFontSize(delta)
+        } else if (tool.current === selectTool) {
+          selectTool.adjustSelectedTextFontSize(delta)
+        }
+      },
       deleteSelection: () => {
         // Multi-aware Select tool owns the single-and-multi delete path
         // for all object kinds (Lasso absorbed; ADR 0014).
@@ -1248,6 +1430,7 @@ async function main(): Promise<void> {
             getStrokes: () => strokes,
             getImages: () => images,
             getTexts: () => texts,
+            getShapes: () => shapes,
             imageStore,
             camera,
             viewportWidth: target.width,
@@ -1335,6 +1518,8 @@ async function main(): Promise<void> {
         sels.length > 1 ? new Set(sels.filter((s) => s.kind === 'image').map((s) => s.id)) : null
       const multiSelectedTextIds =
         sels.length > 1 ? new Set(sels.filter((s) => s.kind === 'text').map((s) => s.id)) : null
+      const multiSelectedShapeIds =
+        sels.length > 1 ? new Set(sels.filter((s) => s.kind === 'shape').map((s) => s.id)) : null
       renderImages({
         images,
         layer: target.committed,
@@ -1356,6 +1541,20 @@ async function main(): Promise<void> {
         resolveColor: resolveInkColor,
         editingId: textTool.getEditingId(),
         isMultiSelected: multiSelectedTextIds ? (id) => multiSelectedTextIds.has(id) : () => false,
+      })
+
+      // Shapes render above texts and below the strokes composite, so
+      // pen ink can naturally annotate on top of vector shapes the same
+      // way it does on top of images and text.
+      renderShapes({
+        shapes,
+        layer: target.committed,
+        camera,
+        viewBBox,
+        resolveColor: resolveInkColor,
+        isMultiSelected: multiSelectedShapeIds
+          ? (id) => multiSelectedShapeIds.has(id)
+          : () => false,
       })
 
       // Composite the strokes offscreen onto committed in pixel space

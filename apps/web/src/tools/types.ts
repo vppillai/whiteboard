@@ -56,7 +56,7 @@ export interface ToolContext {
   getLastPointer(): { x: number; y: number }
 }
 
-export type ToolId = 'pen' | 'eraser' | 'laser' | 'text' | 'select'
+export type ToolId = 'pen' | 'eraser' | 'laser' | 'text' | 'select' | 'shape'
 
 export interface Tool {
   id: ToolId
@@ -73,10 +73,28 @@ export interface Tool {
   /**
    * Append the tool's contextual section to a host element (the right-click
    * menu's content). The tool owns what shows up — colors / brushes for
-   * drawing tools; size pills for the eraser; etc. Call `dismiss()` after a
-   * selection to close the popover.
+   * drawing tools; size pills for the eraser; etc.
+   *
+   * Callbacks (v1.4):
+   *   - `dismiss()` — close the parent popover after a selection.
+   *   - `rebuild()` — request the parent menu rebuild its content in
+   *     place (used after sub-popover actions like "+ Add color" that
+   *     mutate state the menu reads from).
+   *   - `anchor` — the parent menu's anchor in client coords. Tools
+   *     that open sub-popovers (e.g. the swatch-add subpopover from
+   *     a Color palette's "+" tile) anchor them here so they layer
+   *     correctly over the menu.
+   *
+   * Older tools that only need `dismiss` can keep accepting just the
+   * first parameter (extra args are ignored). The signature is
+   * intentionally non-breaking.
    */
-  renderContextualMenu?(host: HTMLElement, dismiss: () => void): void
+  renderContextualMenu?(
+    host: HTMLElement,
+    dismiss: () => void,
+    rebuild?: () => void,
+    anchor?: { x: number; y: number },
+  ): void
   /**
    * Re-render the tool's live-layer content using its current internal state,
    * without an input event. Called after camera changes / committed-layer

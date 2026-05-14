@@ -8,7 +8,7 @@
  * exporting a blank canvas.
  */
 
-import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
+import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import type { Camera } from '../camera'
 import type { ImageStore } from '../imagestore'
 import { getSettings } from '../settings'
@@ -30,6 +30,9 @@ export interface ExportOptions {
   /** Optional. Wired in v1.2 — text objects are rendered above images
    *  and below strokes. Empty default keeps prior callers compatible. */
   getTexts?: () => readonly TextObject[]
+  /** Optional. Wired in v1.4 — shape objects render above texts and
+   *  below strokes. Empty default keeps prior callers compatible. */
+  getShapes?: () => readonly ShapeObject[]
   /** For scope === 'visible'. */
   camera: Camera
   viewportWidth: number
@@ -48,10 +51,11 @@ export async function exportBoard(
   const strokes = opts.getStrokes()
   const images = opts.getImages?.() ?? []
   const texts = opts.getTexts?.() ?? []
+  const shapes = opts.getShapes?.() ?? []
   const bounds =
     scope === 'visible'
       ? computeViewportBounds(opts.camera, opts.viewportWidth, opts.viewportHeight)
-      : computeBoardBounds(strokes, images, texts)
+      : computeBoardBounds(strokes, images, texts, shapes)
   if (!bounds) {
     if (opts.onEmptyBoard) opts.onEmptyBoard()
     else console.warn('whiteboard/export: nothing to export')
@@ -63,6 +67,7 @@ export async function exportBoard(
     strokes,
     images,
     texts,
+    shapes,
     opts.imageStore ?? null,
     bounds,
     snap,
@@ -76,19 +81,20 @@ async function renderFormat(
   strokes: Stroke[],
   images: readonly ImageObject[],
   texts: readonly TextObject[],
+  shapes: readonly ShapeObject[],
   imageStore: ImageStore | null,
   bounds: Bounds,
   snap: ReturnType<typeof getSettings>,
 ): Promise<Blob> {
   switch (format) {
     case 'png':
-      return exportPNG(strokes, images, texts, bounds, snap, imageStore)
+      return exportPNG(strokes, images, texts, shapes, bounds, snap, imageStore)
     case 'svg': {
       const dataUris = await buildImageDataUris(images, imageStore)
-      return exportSVG(strokes, images, dataUris, texts, bounds, snap)
+      return exportSVG(strokes, images, dataUris, texts, shapes, bounds, snap)
     }
     case 'pdf':
-      return exportPDF(strokes, images, texts, bounds, snap, imageStore)
+      return exportPDF(strokes, images, texts, shapes, bounds, snap, imageStore)
   }
 }
 

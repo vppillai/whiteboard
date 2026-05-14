@@ -36,9 +36,9 @@
  *     `selectByIds` so the user can drag the whole group immediately.
  */
 
-import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
+import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import { type ClipboardStrokeBundle, blobToDataUrl, buildClipboardHtml } from './clipboardstrokes'
-import { makeStrokeId, makeTextId } from './ids'
+import { makeShapeId, makeStrokeId, makeTextId } from './ids'
 import { writeImageToClipboard, writePngBlobToClipboard } from './imageclipboard'
 import type { Op } from './ops'
 import type { SettingsV1 } from './settings'
@@ -54,6 +54,7 @@ export interface SelectionClipboardContext {
   getStrokes: () => Stroke[]
   getImages: () => ImageObject[]
   getTexts: () => TextObject[]
+  getShapes: () => ShapeObject[]
   getSelections: () => readonly Selection[]
   getSelectedImage: () => ImageObject | null
   getSettings: () => SettingsV1
@@ -64,10 +65,13 @@ export interface SelectionClipboardContext {
   // Paste-back write paths (in-memory arrays + persistence).
   strokes: Stroke[]
   texts: TextObject[]
+  shapes: ShapeObject[]
   saveStroke: (s: Stroke) => Promise<void>
   saveText: (t: TextObject) => void
+  saveShape: (s: ShapeObject) => void
   pushOp: (op: Op) => void
   nextTextZ: () => number
+  nextShapeZ: () => number
 
   // Post-paste side effects.
   showInfoToast: (msg: string) => void
@@ -84,6 +88,7 @@ interface SelectionSnapshot {
   strokes: Stroke[]
   images: ImageObject[]
   texts: TextObject[]
+  shapes: ShapeObject[]
 }
 
 function collectSelection(ctx: SelectionClipboardContext): SelectionSnapshot | null {
@@ -92,15 +97,18 @@ function collectSelection(ctx: SelectionClipboardContext): SelectionSnapshot | n
   const strokeIds = new Set<string>()
   const imageIds = new Set<string>()
   const textIds = new Set<string>()
+  const shapeIds = new Set<string>()
   for (const s of sels) {
     if (s.kind === 'stroke') strokeIds.add(s.id)
     else if (s.kind === 'image') imageIds.add(s.id)
+    else if (s.kind === 'shape') shapeIds.add(s.id)
     else textIds.add(s.id)
   }
   return {
     strokes: ctx.getStrokes().filter((s) => strokeIds.has(s.id) && !s.deleted),
     images: ctx.getImages().filter((i) => imageIds.has(i.id) && !i.deleted),
     texts: ctx.getTexts().filter((t) => textIds.has(t.id) && !t.deleted),
+    shapes: ctx.getShapes().filter((s) => shapeIds.has(s.id) && !s.deleted),
   }
 }
 
@@ -113,14 +121,19 @@ async function renderSelectionAsPng(
   snap: SelectionSnapshot,
   settings: SettingsV1,
 ): Promise<Blob | null> {
-  if (snap.strokes.length === 0 && snap.images.length === 0 && snap.texts.length === 0) {
+  if (
+    snap.strokes.length === 0 &&
+    snap.images.length === 0 &&
+    snap.texts.length === 0 &&
+    snap.shapes.length === 0
+  ) {
     return null
   }
   const { computeBoardBounds } = await import('./export/bounds')
   const { exportPNG } = await import('./export/png')
-  const bounds = computeBoardBounds(snap.strokes, snap.images, snap.texts)
+  const bounds = computeBoardBounds(snap.strokes, snap.images, snap.texts, snap.shapes)
   if (!bounds) return null
-  return exportPNG(snap.strokes, snap.images, snap.texts, bounds, settings, null, {
+  return exportPNG(snap.strokes, snap.images, snap.texts, snap.shapes, bounds, settings, null, {
     dpr: 2,
     transparentBg: true,
   })
@@ -132,7 +145,11 @@ async function renderSelectionAsPng(
  *  is empty (degenerate erased-but-not-compacted strokes; the paste
  *  path still works — strokes' samples land at their existing absolute
  *  coords relative to cursor). */
-function selectionOrigin(ss: Stroke[], ts: TextObject[]): { x: number; y: number } {
+function selectionOrigin(
+  ss: Stroke[],
+  ts: TextObject[],
+  shs: ShapeObject[],
+): { x: number; y: number } {
   let minX = Number.POSITIVE_INFINITY
   let minY = Number.POSITIVE_INFINITY
   for (const s of ss) {
@@ -145,6 +162,14 @@ function selectionOrigin(ss: Stroke[], ts: TextObject[]): { x: number; y: number
     if (t.transform.x < minX) minX = t.transform.x
     if (t.transform.y < minY) minY = t.transform.y
   }
+  // Shapes: use the normalized rect top-left. Lines/arrows with negative
+  // w/h still need their bbox top-left, not the raw transform.x/y.
+  for (const sh of shs) {
+    const nx = sh.transform.w >= 0 ? sh.transform.x : sh.transform.x + sh.transform.w
+    const ny = sh.transform.h >= 0 ? sh.transform.y : sh.transform.y + sh.transform.h
+    if (nx < minX) minX = nx
+    if (ny < minY) minY = ny
+  }
   if (!Number.isFinite(minX)) return { x: 0, y: 0 }
   return { x: minX, y: minY }
 }
@@ -153,9 +178,12 @@ function selectionOrigin(ss: Stroke[], ts: TextObject[]): { x: number; y: number
 function bundleSummary(bundle: ClipboardStrokeBundle): string {
   const nS = bundle.strokes.length
   const nT = bundle.texts?.length ?? 0
-  if (nT === 0) return nS === 1 ? '1 stroke' : `${nS} strokes`
-  if (nS === 0) return nT === 1 ? '1 text' : `${nT} texts`
-  return `${nS} stroke${nS === 1 ? '' : 's'} + ${nT} text${nT === 1 ? '' : 's'}`
+  const nSh = bundle.shapes?.length ?? 0
+  const parts: string[] = []
+  if (nS > 0) parts.push(`${nS} stroke${nS === 1 ? '' : 's'}`)
+  if (nT > 0) parts.push(`${nT} text${nT === 1 ? '' : 's'}`)
+  if (nSh > 0) parts.push(`${nSh} shape${nSh === 1 ? '' : 's'}`)
+  return parts.length === 0 ? 'nothing' : parts.join(' + ')
 }
 
 /** Write the whiteboard-native bundle to the clipboard. ClipboardItem
@@ -206,12 +234,16 @@ export async function performSelectCopy(ctx: SelectionClipboardContext): Promise
   if (!pngBlob) return false
 
   // No images → write native bundle + PNG.
-  if (snap.images.length === 0 && (snap.strokes.length > 0 || snap.texts.length > 0)) {
+  if (
+    snap.images.length === 0 &&
+    (snap.strokes.length > 0 || snap.texts.length > 0 || snap.shapes.length > 0)
+  ) {
     const bundle: ClipboardStrokeBundle = {
       v: 1,
       strokes: snap.strokes,
       texts: snap.texts.length > 0 ? snap.texts : undefined,
-      origin: selectionOrigin(snap.strokes, snap.texts),
+      shapes: snap.shapes.length > 0 ? snap.shapes : undefined,
+      origin: selectionOrigin(snap.strokes, snap.texts, snap.shapes),
     }
     return writeSelectionBundleToClipboard(pngBlob, bundle, ctx.showInfoToast)
   }
@@ -230,7 +262,8 @@ export function pasteSelectionBundle(
   ctx: SelectionClipboardContext,
 ): void {
   const bundleTexts = bundle.texts ?? []
-  if (bundle.strokes.length === 0 && bundleTexts.length === 0) return
+  const bundleShapes = bundle.shapes ?? []
+  if (bundle.strokes.length === 0 && bundleTexts.length === 0 && bundleShapes.length === 0) return
   const dx = board.x - bundle.origin.x
   const dy = board.y - bundle.origin.y
   const now = Date.now()
@@ -280,6 +313,27 @@ export function pasteSelectionBundle(
     ctx.saveText(pasted)
     ctx.pushOp({ kind: 'create-text', textId: id })
     newSelection.push({ kind: 'text', id })
+  }
+
+  for (const src of bundleShapes) {
+    if (!src) continue
+    const id = makeShapeId()
+    const pasted: ShapeObject = {
+      ...src,
+      id,
+      transform: {
+        ...src.transform,
+        x: src.transform.x + dx,
+        y: src.transform.y + dy,
+      },
+      z: ctx.nextShapeZ(),
+      createdAt: now,
+      deleted: undefined,
+    }
+    ctx.shapes.push(pasted)
+    ctx.saveShape(pasted)
+    ctx.pushOp({ kind: 'create-shape', shapeId: id })
+    newSelection.push({ kind: 'shape', id })
   }
 
   ctx.markCommittedDirty()

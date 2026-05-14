@@ -34,9 +34,11 @@
  * circle, object adds a small filled center dot (target reticle).
  */
 
-import type { Stroke } from '@whiteboard/shared'
+import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
+import { pointInImage } from '../imagegeom'
 import { pill, pillRow, sectionLabel } from '../menu-ui'
 import { applyCamera, clearLayer } from '../render'
+import { pointInShape } from '../rendershapes'
 import {
   ERASER_RADII,
   type EraserMode,
@@ -46,6 +48,7 @@ import {
   setEraserConfig,
 } from '../settings'
 import { getStrokeBBox } from '../stroke'
+import { pointInText } from '../textgeom'
 import type { Tool, ToolContext } from './types'
 
 /** Visual / behavioral mode at the moment of an eraser gesture. */
@@ -67,12 +70,32 @@ export interface StampEdit {
 export interface EraserToolCallbacks {
   /** Returns the live strokes list. Called on each hit-test. */
   getStrokes: () => readonly Stroke[]
+  /** Returns the live shapes list. Object-mode tap and wipe-mode sweep
+   *  both delete the WHOLE shape on hit — vector primitives don't
+   *  have pixel-mask semantics. v1.4. */
+  getShapes: () => readonly ShapeObject[]
+  /** Returns the live texts list. Same whole-object delete semantics
+   *  as shapes. v1.4. */
+  getTexts: () => readonly TextObject[]
+  /** Returns the live images list. Same whole-object delete semantics. v1.4. */
+  getImages: () => readonly ImageObject[]
   /** Object mode: emit a whole-stroke delete op for the topmost stroke at
    *  the tap point. Called at most once per gesture at pointerup. */
   onObjectErase: (strokeId: string) => void
   /** Wipe mode: emit a pixel-mask op for the per-stroke stamp edits.
    *  Called once per gesture at pointerup. */
   onWipeErase: (edits: StampEdit[]) => void
+  /** Whole-object deletes for non-stroke kinds (shapes, texts, images).
+   *  Fired ONCE per gesture at pointerup if any non-stroke object was
+   *  touched. Both wipe and object modes use the same callback — the
+   *  semantics for vector / raster objects are whole-object delete
+   *  regardless of eraser mode. Empty arrays for kinds that weren't
+   *  touched. v1.4. */
+  onWholeObjectErase: (deletes: {
+    shapes: string[]
+    texts: string[]
+    images: string[]
+  }) => void
 }
 
 export interface EraserToolOptions {
@@ -129,6 +152,16 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
   // handed to `onObjectErase` exactly once. (Pre-#7 this was a Set wired
   // for sweep-delete that was never implemented.)
   let objectDeletedId: string | null = null
+  // Non-stroke deletes accumulated per gesture. Both wipe mode (sweep
+  // crosses an object) and object mode (single tap on an object) write
+  // here; the flush at pointerup emits a single onWholeObjectErase
+  // batch. Sets so a sweep that re-crosses the same shape doesn't
+  // double-queue. v1.4. */
+  const wholeDeletes = {
+    shapes: new Set<string>(),
+    texts: new Set<string>(),
+    images: new Set<string>(),
+  }
   let active = false
   let mode: EraserGestureMode = 'wipe'
   // Last cursor position + mode the live layer was painted with. The render
@@ -164,6 +197,55 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
       }
       bucket.push(stamp)
       any = true
+    }
+    // Wipe mode is STROKES-ONLY. Earlier in v1.4 the sweep also queued
+    // whole-object deletes for shapes / texts / images that the disk
+    // touched, but that was too aggressive: a user scrubbing strokes
+    // OFF an image would also nuke the image underneath. Now wipe is
+    // narrowly scoped to "cut through strokes." To delete a shape /
+    // text / image, the user switches to object mode (tap-to-delete).
+    return any
+  }
+
+  /** Scan shapes / texts / images for any that the eraser disk at
+   *  (px, py) with radius `r` overlaps. Add the ids to the whole-
+   *  delete queue (deduped by Set). Returns true if anything new
+   *  was queued so the caller can mark dirty / preview the deletion.
+   *
+   *  Object-mode tap only. Wipe mode is intentionally strokes-only —
+   *  scrubbing strokes off an image shouldn't also delete the image
+   *  underneath. Whole-object delete is a deliberate single-tap
+   *  gesture in object mode.
+   *
+   *  Tolerance: the disk radius. Texts and images use a rotated-rect
+   *  AABB containment at the center point. */
+  const queueNonStrokeHits = (px: number, py: number, r: number): boolean => {
+    let any = false
+    for (const sh of opts.callbacks.getShapes()) {
+      if (sh.deleted) continue
+      if (wholeDeletes.shapes.has(sh.id)) continue
+      // pointInShape takes a screen-relative tolerance — feeding it
+      // the eraser radius gives "disk touches the shape" semantics.
+      if (pointInShape({ x: px, y: py }, sh, r)) {
+        wholeDeletes.shapes.add(sh.id)
+        any = true
+      }
+    }
+    for (const t of opts.callbacks.getTexts()) {
+      if (t.deleted) continue
+      if (wholeDeletes.texts.has(t.id)) continue
+      if (pointInText({ x: px, y: py }, t)) {
+        wholeDeletes.texts.add(t.id)
+        any = true
+      }
+    }
+    for (const img of opts.callbacks.getImages()) {
+      if (img.deleted) continue
+      if (wholeDeletes.images.has(img.id)) continue
+      if (pointInImage({ x: px, y: py }, img)) {
+        wholeDeletes.images.add(img.id)
+        any = true
+      }
     }
     return any
   }
@@ -239,6 +321,9 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
       mode = wantObject ? 'object' : 'wipe'
       pending.clear()
       objectDeletedId = null
+      wholeDeletes.shapes.clear()
+      wholeDeletes.texts.clear()
+      wholeDeletes.images.clear()
       if (mode === 'wipe') {
         if (sweepHit(x, y)) ctx.markCommittedDirty()
       }
@@ -273,6 +358,12 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
       if (mode === 'object') {
         const { x, y } = ctx.toBoard(e.clientX, e.clientY)
         objectDeletedId = objectHit(x, y)
+        // Object-mode tap also targets the topmost non-stroke kind
+        // under the cursor: shapes / texts / images get whole-object
+        // delete the same way a tapped stroke does. queueNonStrokeHits
+        // populates wholeDeletes; the flush below emits one batched
+        // onWholeObjectErase callback.
+        queueNonStrokeHits(x, y, radius())
         if (objectDeletedId) opts.callbacks.onObjectErase(objectDeletedId)
       } else if (pending.size > 0) {
         // Build edits, drain pending, then emit op. Drain BEFORE emit so
@@ -284,6 +375,24 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
         }
         pending.clear()
         opts.callbacks.onWipeErase(edits)
+      }
+      // Flush non-stroke whole-object deletes accumulated during this
+      // gesture. Single batched callback so undo gets ONE step
+      // covering everything the eraser pass touched, regardless of
+      // mode and regardless of how many objects were crossed.
+      if (
+        wholeDeletes.shapes.size > 0 ||
+        wholeDeletes.texts.size > 0 ||
+        wholeDeletes.images.size > 0
+      ) {
+        opts.callbacks.onWholeObjectErase({
+          shapes: [...wholeDeletes.shapes],
+          texts: [...wholeDeletes.texts],
+          images: [...wholeDeletes.images],
+        })
+        wholeDeletes.shapes.clear()
+        wholeDeletes.texts.clear()
+        wholeDeletes.images.clear()
       }
       objectDeletedId = null
       // Gesture is over. Clear the cached cursor + live layer; hover render

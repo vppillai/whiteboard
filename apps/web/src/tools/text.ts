@@ -33,9 +33,8 @@
  */
 
 import type { TextFontFamily, TextObject } from '@whiteboard/shared'
-import { CURATED_COLORS as PALETTE } from '../colorpicker'
 import { makeTextId } from '../ids'
-import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
+import { pill, pillRow, sectionLabel, separator } from '../menu-ui'
 import type { Op } from '../ops'
 import {
   getTextBold,
@@ -51,6 +50,7 @@ import {
   setTextSize,
   setTextUnderline,
 } from '../settings'
+import { buildSwatchPalette } from '../swatchpalette'
 import {
   FONT_CSS,
   LINE_HEIGHT_MULT,
@@ -127,6 +127,14 @@ export interface TextTool extends Tool {
    *  through the same factory + same op as on-canvas text creation. Does
    *  NOT enter edit mode — the paste content is already final. */
   createTextAt(content: string, board: { x: number; y: number }): string
+  /** Adjust the EDITING text's font size by `delta` board pixels.
+   *  No-op when not in edit mode. Updates the live editable's CSS so
+   *  the change is visible immediately; the edit-text op lands on
+   *  commit (Esc) along with any typed content. Used by the keymap
+   *  shortcut Cmd/Ctrl+Shift+,/. for fine-grained size adjustment.
+   *  Also updates the sticky `textSize` setting so the NEXT new text
+   *  inherits the user's preference. v1.4. */
+  adjustEditingFontSize(delta: number): boolean
 }
 
 interface EditingState {
@@ -263,6 +271,30 @@ export function createTextTool(deps: TextToolDeps): TextTool {
     deps.markCommittedDirty()
   }
 
+  /** Adjust the editing text's font size by `delta` board pixels.
+   *  No-op when not editing. Mutates font + re-fits transform +
+   *  updates the editable's CSS so the change is visible immediately
+   *  (the edit-text op lands at commit). Also updates the sticky
+   *  textSize so future texts inherit. v1.4.
+   *
+   *  Lives outside the returned object so the local keydown handler
+   *  inside startEdit can call it without going through the public
+   *  method (which would shadow itself). */
+  const FONT_SIZE_MIN = 6
+  const FONT_SIZE_MAX = 200
+  const adjustEditingFontSize = (delta: number): boolean => {
+    if (!editing) return false
+    const next = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, editing.text.font.size + delta))
+    if (next === editing.text.font.size) return false
+    editing.text.font = { ...editing.text.font, size: next }
+    const sized = resizeToFit(editing.text)
+    editing.text.transform = sized.transform
+    if (lastCtx) applyEditorStyles(editing.el, editing.text, lastCtx)
+    deps.markCommittedDirty()
+    setTextSize(next)
+    return true
+  }
+
   const startEdit = (text: TextObject, ctx: ToolContext, isNewText: boolean): void => {
     if (editing) commitEdit()
     const before = {
@@ -337,6 +369,25 @@ export function createTextTool(deps: TextToolDeps): TextTool {
         if (k === 'b' || k === 'i' || k === 'u') {
           e.preventDefault()
           toggleFormat(k === 'b' ? 'bold' : k === 'i' ? 'italic' : 'underline', lastCtx)
+          return
+        }
+      }
+      // Cmd/Ctrl+Shift+,/. — fine-grained font-size step (mirrors the
+      // global keymap binding). Stays inside this handler because the
+      // global keymap can't see the event: we stopPropagation above to
+      // prevent typing-letters-as-tool-switches, which also blocks
+      // every other document-level shortcut while editing. Dispatch
+      // here so the same shortcut works whether the user is in edit
+      // mode or has the text selected. v1.4. */
+      if (meta && e.shiftKey && !e.altKey) {
+        if (e.key === '<' || e.key === ',') {
+          e.preventDefault()
+          adjustEditingFontSize(-1)
+          return
+        }
+        if (e.key === '>' || e.key === '.') {
+          e.preventDefault()
+          adjustEditingFontSize(1)
           return
         }
       }
@@ -541,29 +592,26 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       })
     },
 
-    renderContextualMenu(host, dismiss) {
-      // COLOR
+    renderContextualMenu(host, dismiss, rebuild, anchor) {
+      // COLOR — shared palette (curated + custom + "+").
       host.appendChild(sectionLabel('Color'))
-      const palette = paletteGrid()
       const activeColor = editing ? editing.text.color : getTextColor()
-      for (const c of PALETTE) {
-        palette.appendChild(
-          swatch({
-            color: c,
-            active: activeColor === c,
-            onClick: () => {
-              if (editing) {
-                editing.text.color = c
-                if (lastCtx) applyEditorStyles(editing.el, editing.text, lastCtx)
-                deps.markCommittedDirty()
-              }
-              setTextColor(c)
-              dismiss()
-            },
-          }),
-        )
-      }
-      host.appendChild(palette)
+      host.appendChild(
+        buildSwatchPalette({
+          active: activeColor,
+          onPick: (c) => {
+            if (editing) {
+              editing.text.color = c
+              if (lastCtx) applyEditorStyles(editing.el, editing.text, lastCtx)
+              deps.markCommittedDirty()
+            }
+            setTextColor(c)
+            dismiss()
+          },
+          addAt: anchor ?? { x: 0, y: 0 },
+          onPaletteChanged: () => rebuild?.(),
+        }),
+      )
 
       // FONT
       host.appendChild(separator())
@@ -653,6 +701,9 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       deps.pushOp({ kind: 'create-text', textId: t.id })
       deps.markCommittedDirty()
       return t.id
+    },
+    adjustEditingFontSize(delta: number): boolean {
+      return adjustEditingFontSize(delta)
     },
   }
 }

@@ -43,9 +43,20 @@ export interface KeyHandlers {
    *  / select tool) AND `S` (preserved muscle memory from the v1.x
    *  lasso tool, which Select absorbed in v1.3). */
   selectSelectTool: () => void
-  /** Activate the laser pointer tool. Bound to `L`. Ephemeral fading
-   *  trail for presentations; nothing persisted. */
+  /** Activate the laser pointer tool. v1.4 moved this binding from `L`
+   *  to `P` to free up `L` for the line-shape shortcut. The pen-default
+   *  shortcut that used to live on `P` now sits on `Shift+P`. */
   selectLaserTool: () => void
+  /** Activate the Shape tool with a specific sub-mode (rect / ellipse /
+   *  line / arrow). v1.4. Pressing R/O/A/L always activates Shape and
+   *  switches sub-mode; pressing the same key while Shape is active is
+   *  idempotent (sub-mode is already set). The sticky `shapeKind` is
+   *  updated so re-entering the tool later via the right-click menu
+   *  remembers the last picked shape. */
+  selectShapeRect: () => void
+  selectShapeEllipse: () => void
+  selectShapeLine: () => void
+  selectShapeArrow: () => void
   /** Activate the text tool. Bound to `T`. (Theme cycling moved to
    *  `Shift+T` to free up the unmodified key for this — per the v1.2
    *  user request that text be primary on T.) */
@@ -57,6 +68,11 @@ export interface KeyHandlers {
   toggleTextBold: () => void
   toggleTextItalic: () => void
   toggleTextUnderline: () => void
+  /** Adjust the active text's font size by `delta` board-pixels. Active =
+   *  text in edit mode OR a single text selected in Select mode. Routed
+   *  from Cmd/Ctrl+Shift+, (decrease) and Cmd/Ctrl+Shift+. (increase) —
+   *  the `<` and `>` keys on a US layout. v1.4 fine-grained size step. */
+  adjustTextSize: (delta: number) => void
   /** Delete the active Select-tool selection (single or multi). Returns
    *  `true` if anything was actually deleted; the dispatcher uses this
    *  to decide whether to preventDefault (so Backspace doesn't trigger
@@ -154,6 +170,20 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
         preventAndCall(e, handlers.toggleTextUnderline)
         return
       }
+      // Cmd/Ctrl+Shift+, (= `<`) decreases the active text's font size
+      // by 1 board-px. Cmd/Ctrl+Shift+. (= `>`) increases it. Matches
+      // the Google Docs / common-editor convention. The handler no-ops
+      // if no text is active. `e.key` is `<` / `>` on most layouts when
+      // Shift is held; the `k === ','` / `k === '.'` fallbacks cover
+      // layouts that don't shift-modify those keys. v1.4.
+      if (shift && (e.key === '<' || k === ',')) {
+        preventAndCall(e, () => handlers.adjustTextSize(-1))
+        return
+      }
+      if (shift && (e.key === '>' || k === '.')) {
+        preventAndCall(e, () => handlers.adjustTextSize(1))
+        return
+      }
     }
 
     // Esc cancels — dispatcher prevents default only if anything was actually
@@ -179,28 +209,23 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
         handlers.selectTextTool()
         return
       }
-      if (k === 'c') {
-        preventAndCall(e, handlers.toggleColor)
-        return
-      }
-      if (k === 'o') {
-        preventAndCall(e, handlers.toggleOptions)
-        return
-      }
       // Brush presets: 1..5 select the corresponding brush.
       if (e.key >= '1' && e.key <= '5') {
         handlers.selectBrush(Number(e.key))
         return
       }
-      // Tool selection. B = drawing tool (brush unchanged); P = drawing tool
-      // + Pen brush preset (i.e. "go to my default drawing setup"). Plain E
-      // is owned by `eraserhold.ts` (pure spring-loaded modifier).
+      // Tool selection. B = drawing tool (brush unchanged). v1.4 rebinds:
+      //   P  → laser (was Shift+P territory; tldraw / Excalidraw-ish)
+      //   Shift+P → selectPenDefault (the prior plain-P)
+      // Plain E is owned by `eraserhold.ts` (pure spring-loaded modifier).
       if (k === 'b') {
         handlers.selectDrawingTool()
         return
       }
       if (k === 'p') {
-        handlers.selectPenDefault()
+        // v1.4: P now activates the laser pointer (was on L). The prior
+        // pen-default binding moved to Shift+P.
+        handlers.selectLaserTool()
         return
       }
       // V AND S — Select tool (universal pointer for any object kind).
@@ -211,9 +236,28 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
         handlers.selectSelectTool()
         return
       }
-      // L — Laser pointer (ephemeral fading trail).
+      // Shape tool sub-mode shortcuts (v1.4). Each key both activates the
+      // Shape tool and sets the sub-mode in one stroke. R / O / A / L
+      // override several prior single-key bindings:
+      //   L → was selectLaserTool; laser moved to P.
+      //   O → was toggleOptions; that moved to Shift+O.
+      // The "set sub-mode + activate" combo is intentional — discoverable
+      // (one key per shape) and idempotent (re-pressing the same key
+      // doesn't re-toggle anything).
+      if (k === 'r') {
+        handlers.selectShapeRect()
+        return
+      }
+      if (k === 'o') {
+        handlers.selectShapeEllipse()
+        return
+      }
+      if (k === 'a') {
+        handlers.selectShapeArrow()
+        return
+      }
       if (k === 'l') {
-        handlers.selectLaserTool()
+        handlers.selectShapeLine()
         return
       }
       // F — toggle distraction-free mode (hides chrome). M2.
@@ -233,6 +277,21 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       // Shift+T cycles theme (moved from plain T when text gained T in v1.2).
       if (k === 't') {
         handlers.toggleTheme()
+        return
+      }
+      // v1.4 rebinds: the prior plain-key bindings for the color picker /
+      // options menu / pen-default move to their Shift-modified forms so
+      // the unshifted keys are free for the Shape tool sub-modes.
+      if (k === 'c') {
+        preventAndCall(e, handlers.toggleColor)
+        return
+      }
+      if (k === 'o') {
+        preventAndCall(e, handlers.toggleOptions)
+        return
+      }
+      if (k === 'p') {
+        preventAndCall(e, handlers.selectPenDefault)
         return
       }
       // Shift+[ / Shift+] — cycle curated palette. M2.

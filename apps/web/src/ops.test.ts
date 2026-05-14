@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, test } from 'bun:test'
-import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
+import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import { type Op, type OpContext, applyOp, unapplyOp } from './ops'
 
 function mkText(id: string, overrides: Partial<TextObject> = {}): TextObject {
@@ -38,6 +38,7 @@ function mkHarness(initialTexts: TextObject[] = []): Harness {
   const strokes: Stroke[] = []
   const images: ImageObject[] = []
   const texts: TextObject[] = initialTexts.map((t) => ({ ...t }))
+  const shapes: ShapeObject[] = []
   const saved: TextObject[] = []
   let dirtyCount = 0
   const ctx: OpContext = {
@@ -49,6 +50,8 @@ function mkHarness(initialTexts: TextObject[] = []): Harness {
     saveText: (t) => {
       saved.push({ ...t, font: { ...t.font }, transform: { ...t.transform } })
     },
+    shapes,
+    saveShape: () => {},
     markDirty: () => {
       dirtyCount++
     },
@@ -199,6 +202,108 @@ describe('ops: edit-text', () => {
   })
 })
 
+describe('ops: shape op kinds', () => {
+  function mkShape(id: string, overrides: Partial<ShapeObject> = {}): ShapeObject {
+    return {
+      id,
+      shape: 'rect',
+      color: 'ink',
+      strokeWidth: 2,
+      transform: { x: 0, y: 0, w: 100, h: 80 },
+      z: 1,
+      createdAt: 0,
+      ...overrides,
+    }
+  }
+
+  function mkShapeHarness(initial: ShapeObject[] = []): { ctx: OpContext; saved: ShapeObject[] } {
+    const shapes: ShapeObject[] = initial.map((s) => ({ ...s, transform: { ...s.transform } }))
+    const saved: ShapeObject[] = []
+    const ctx: OpContext = {
+      strokes: [],
+      saveStroke: () => {},
+      images: [],
+      saveImageMeta: () => {},
+      texts: [],
+      saveText: () => {},
+      shapes,
+      saveShape: (s) => {
+        saved.push({ ...s, transform: { ...s.transform } })
+      },
+      markDirty: () => {},
+    }
+    return { ctx, saved }
+  }
+
+  test('create-shape / delete-shape round-trip soft-delete flag', () => {
+    const h = mkShapeHarness([mkShape('s1', { deleted: true })])
+    applyOp({ kind: 'create-shape', shapeId: 's1' }, h.ctx)
+    expect(h.ctx.shapes[0]?.deleted).toBeUndefined()
+    unapplyOp({ kind: 'create-shape', shapeId: 's1' }, h.ctx)
+    expect(h.ctx.shapes[0]?.deleted).toBe(true)
+  })
+
+  test('transform-shape swaps the rect on apply / unapply', () => {
+    const h = mkShapeHarness([mkShape('s1')])
+    const op: Op = {
+      kind: 'transform-shape',
+      shapeId: 's1',
+      before: { x: 0, y: 0, w: 100, h: 80 },
+      after: { x: 50, y: 25, w: 100, h: 80 },
+    }
+    applyOp(op, h.ctx)
+    expect(h.ctx.shapes[0]?.transform).toEqual({ x: 50, y: 25, w: 100, h: 80 })
+    unapplyOp(op, h.ctx)
+    expect(h.ctx.shapes[0]?.transform).toEqual({ x: 0, y: 0, w: 100, h: 80 })
+  })
+
+  test('rotate-shape swaps the angle and stores undefined for zero', () => {
+    const h = mkShapeHarness([mkShape('s1', { rotation: Math.PI / 4 })])
+    applyOp({ kind: 'rotate-shape', shapeId: 's1', before: Math.PI / 4, after: 0 }, h.ctx)
+    expect(h.ctx.shapes[0]?.rotation).toBeUndefined()
+  })
+
+  test('edit-shape swaps color / strokeWidth / fill / fillOpacity', () => {
+    const h = mkShapeHarness([
+      mkShape('s1', { color: 'ink', strokeWidth: 2, fill: undefined, fillOpacity: undefined }),
+    ])
+    const op: Op = {
+      kind: 'edit-shape',
+      shapeId: 's1',
+      before: { color: 'ink', strokeWidth: 2, fill: undefined, fillOpacity: undefined },
+      after: { color: '#ff0000', strokeWidth: 4, fill: '#ffeeee', fillOpacity: 0.5 },
+    }
+    applyOp(op, h.ctx)
+    expect(h.ctx.shapes[0]?.color).toBe('#ff0000')
+    expect(h.ctx.shapes[0]?.strokeWidth).toBe(4)
+    expect(h.ctx.shapes[0]?.fill).toBe('#ffeeee')
+    expect(h.ctx.shapes[0]?.fillOpacity).toBe(0.5)
+    unapplyOp(op, h.ctx)
+    expect(h.ctx.shapes[0]?.color).toBe('ink')
+    expect(h.ctx.shapes[0]?.fill).toBeUndefined()
+    expect(h.ctx.shapes[0]?.fillOpacity).toBeUndefined()
+  })
+
+  test('transform-many carries shape variants alongside images / texts', () => {
+    const h = mkShapeHarness([mkShape('s1')])
+    const op: Op = {
+      kind: 'transform-many',
+      items: [
+        {
+          kind: 'shape',
+          shapeId: 's1',
+          before: { x: 0, y: 0, w: 100, h: 80 },
+          after: { x: 30, y: 30, w: 100, h: 80 },
+        },
+      ],
+    }
+    applyOp(op, h.ctx)
+    expect(h.ctx.shapes[0]?.transform).toEqual({ x: 30, y: 30, w: 100, h: 80 })
+    unapplyOp(op, h.ctx)
+    expect(h.ctx.shapes[0]?.transform).toEqual({ x: 0, y: 0, w: 100, h: 80 })
+  })
+})
+
 describe('ops: transform-many composite op', () => {
   function mkImg(id: string, overrides: Partial<ImageObject> = {}): ImageObject {
     return {
@@ -217,6 +322,7 @@ describe('ops: transform-many composite op', () => {
     images?: ImageObject[]
     texts?: TextObject[]
     strokes?: Stroke[]
+    shapes?: ShapeObject[]
   }): { ctx: OpContext } {
     const strokes = (opts.strokes ?? []).map((s) => ({
       ...s,
@@ -224,6 +330,7 @@ describe('ops: transform-many composite op', () => {
     }))
     const images = (opts.images ?? []).map((i) => ({ ...i, transform: { ...i.transform } }))
     const texts = (opts.texts ?? []).map((t) => ({ ...t, transform: { ...t.transform } }))
+    const shapes = (opts.shapes ?? []).map((sh) => ({ ...sh, transform: { ...sh.transform } }))
     const ctx: OpContext = {
       strokes,
       saveStroke: () => {},
@@ -231,6 +338,8 @@ describe('ops: transform-many composite op', () => {
       saveImageMeta: () => {},
       texts,
       saveText: () => {},
+      shapes,
+      saveShape: () => {},
       markDirty: () => {},
     }
     return { ctx }

@@ -20,7 +20,7 @@
  * when the user confirms a clear.
  */
 
-import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
+import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import { addErasedStamps, invalidateStrokeBBox, removeErasedStamps } from './stroke'
 import { resizeToFit as resizeTextRect } from './textgeom'
 
@@ -133,6 +133,69 @@ export type Op =
       after: number
     }
   /**
+   * Create a shape (rect / ellipse / line / arrow). Mirrors
+   * `create-text` / `paste-image`: by the time the op is pushed the
+   * ShapeObject is already in `ctx.shapes` with `deleted=false` and
+   * persisted via ShapeStore. Apply (= redo) flips `deleted` to
+   * false; unapply (= undo) flips it to true. The shape stays in
+   * IDB across undo cycles so redo is cheap.
+   */
+  | { kind: 'create-shape'; shapeId: string }
+  /** Soft-delete a shape. Symmetric to `create-shape`. */
+  | { kind: 'delete-shape'; shapeId: string }
+  /**
+   * Move or resize a shape: swap the transform rect. Move + resize
+   * (both corner-drag and edge-drag) end up overwriting the same
+   * `transform` field, so a single op kind covers both. Coalesced
+   * at drag-end (one op per drag, not per pointermove tick). For
+   * line / arrow kinds the transform's w/h encode the from→to
+   * delta so the same op covers all four kinds uniformly.
+   */
+  | {
+      kind: 'transform-shape'
+      shapeId: string
+      before: ShapeObject['transform']
+      after: ShapeObject['transform']
+    }
+  /**
+   * Rotate a shape in place. Symmetric with `rotate-image` /
+   * `rotate-text` — stores before/after radians so undo / redo
+   * swap without recomputation.
+   */
+  | {
+      kind: 'rotate-shape'
+      shapeId: string
+      before: number
+      after: number
+    }
+  /**
+   * Edit a shape's style fields (color / strokeWidth / fill) in
+   * one undoable step. Coalesced at the contextual-menu interaction
+   * scope. Stores the full before/after payload because individual
+   * field deltas would multiply op kinds — the payload is small
+   * so simplicity wins. `fill` may be `undefined` (outline-only) or a
+   * color token; both round-trip cleanly. `fillOpacity` may be
+   * `undefined` (renderer applies its default alpha) or a number in
+   * [0.05, 1.0]. Carrying it on the op is what makes the fill-opacity
+   * slider in the Select-tool's shape menu fully undoable.
+   */
+  | {
+      kind: 'edit-shape'
+      shapeId: string
+      before: {
+        color: string
+        strokeWidth: number
+        fill: string | undefined
+        fillOpacity: number | undefined
+      }
+      after: {
+        color: string
+        strokeWidth: number
+        fill: string | undefined
+        fillOpacity: number | undefined
+      }
+    }
+  /**
    * Composite multi-object move: a single op carrying transforms for
    * every item displaced by one multi-drag gesture. Each item is one of
    * the three existing per-kind move shapes (transform-image,
@@ -162,7 +225,7 @@ export type Op =
 
 /** One entry in a `transform-many` op's `items` array. Per-kind
  *  before/after payload mirrors the existing per-item op shapes:
- *    - image / text: rect transform
+ *    - image / text / shape: rect transform
  *    - stroke: dx/dy delta (matches `move` op's semantics — symmetric
  *      apply/unapply translate samples by ±(dx,dy)). */
 export type TransformManyItem =
@@ -177,6 +240,12 @@ export type TransformManyItem =
       textId: string
       before: TextObject['transform']
       after: TextObject['transform']
+    }
+  | {
+      kind: 'shape'
+      shapeId: string
+      before: ShapeObject['transform']
+      after: ShapeObject['transform']
     }
   | {
       kind: 'stroke'
@@ -200,6 +269,10 @@ export interface OpContext {
   texts: TextObject[]
   /** Persist a single text record. */
   saveText: (t: TextObject) => void
+  /** All shapes (including soft-deleted ones). Mutated in place by shape ops. */
+  shapes: ShapeObject[]
+  /** Persist a single shape record. */
+  saveShape: (s: ShapeObject) => void
   /** Mark the committed canvas dirty for the next render. */
   markDirty: () => void
 }
@@ -245,6 +318,21 @@ export function applyOp(op: Op, ctx: OpContext): void {
       break
     case 'rotate-text':
       setTextRotation(ctx, op.textId, op.after)
+      break
+    case 'create-shape':
+      flipShapeDeleted(ctx, op.shapeId, false)
+      break
+    case 'delete-shape':
+      flipShapeDeleted(ctx, op.shapeId, true)
+      break
+    case 'transform-shape':
+      setShapeTransform(ctx, op.shapeId, op.after)
+      break
+    case 'rotate-shape':
+      setShapeRotation(ctx, op.shapeId, op.after)
+      break
+    case 'edit-shape':
+      setShapeEdit(ctx, op.shapeId, op.after)
       break
     case 'transform-many':
       applyTransformMany(ctx, op.items, false)
@@ -295,6 +383,21 @@ export function unapplyOp(op: Op, ctx: OpContext): void {
     case 'rotate-text':
       setTextRotation(ctx, op.textId, op.before)
       break
+    case 'create-shape':
+      flipShapeDeleted(ctx, op.shapeId, true)
+      break
+    case 'delete-shape':
+      flipShapeDeleted(ctx, op.shapeId, false)
+      break
+    case 'transform-shape':
+      setShapeTransform(ctx, op.shapeId, op.before)
+      break
+    case 'rotate-shape':
+      setShapeRotation(ctx, op.shapeId, op.before)
+      break
+    case 'edit-shape':
+      setShapeEdit(ctx, op.shapeId, op.before)
+      break
     case 'transform-many':
       applyTransformMany(ctx, op.items, true)
       break
@@ -316,6 +419,8 @@ function applyTransformMany(
       setImageTransform(ctx, item.imageId, unapply ? item.before : item.after)
     } else if (item.kind === 'text') {
       setTextTransform(ctx, item.textId, unapply ? item.before : item.after)
+    } else if (item.kind === 'shape') {
+      setShapeTransform(ctx, item.shapeId, unapply ? item.before : item.after)
     } else {
       const dx = unapply ? -item.dx : item.dx
       const dy = unapply ? -item.dy : item.dy
@@ -451,4 +556,47 @@ function setTextRotation(ctx: OpContext, id: string, rotation: number): void {
   // (cheaper schema; backward-compat with rotation-less records).
   t.rotation = rotation || undefined
   ctx.saveText(t)
+}
+function flipShapeDeleted(ctx: OpContext, id: string, deleted: boolean): void {
+  flipDeletedOn(ctx.shapes, id, deleted, ctx.saveShape)
+}
+
+function setShapeTransform(ctx: OpContext, id: string, transform: ShapeObject['transform']): void {
+  const s = ctx.shapes.find((x) => x.id === id)
+  if (!s) return
+  s.transform = { ...transform }
+  ctx.saveShape(s)
+}
+
+function setShapeRotation(ctx: OpContext, id: string, rotation: number): void {
+  const s = ctx.shapes.find((x) => x.id === id)
+  if (!s) return
+  // Symmetric with setImageRotation / setTextRotation: store `undefined`
+  // for the zero case so persisted records stay compact and back-compat
+  // with rotation-less records.
+  s.rotation = rotation || undefined
+  ctx.saveShape(s)
+}
+
+/** Apply an edit-shape op's payload (color / strokeWidth / fill /
+ *  fillOpacity) to the matching shape. Mirrors `setTextEdit` — stores
+ *  the full payload because the field count is small and field-deltas
+ *  would multiply op kinds. */
+function setShapeEdit(
+  ctx: OpContext,
+  id: string,
+  payload: {
+    color: string
+    strokeWidth: number
+    fill: string | undefined
+    fillOpacity: number | undefined
+  },
+): void {
+  const s = ctx.shapes.find((x) => x.id === id)
+  if (!s) return
+  s.color = payload.color
+  s.strokeWidth = payload.strokeWidth
+  s.fill = payload.fill
+  s.fillOpacity = payload.fillOpacity
+  ctx.saveShape(s)
 }

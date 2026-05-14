@@ -179,3 +179,65 @@ export interface Stroke {
    */
   erasedStamps?: { x: number; y: number; r: number }[]
 }
+
+/**
+ * Closed set of shape kinds the Shape tool draws. Each maps to a specific
+ * canvas-render strategy in `renderShapes.ts`; the persisted record stays
+ * small (just an enum tag) so format evolution is cheap.
+ *
+ * Transform model for each kind:
+ * - `rect`    — `transform` is the AABB; draw an outline (+ optional fill).
+ * - `ellipse` — `transform` is the bounding AABB; draw an inscribed ellipse.
+ * - `line`    — `transform` represents from→to: from = (x, y), to =
+ *               (x+w, y+h). The "bbox" is degenerate (negative w/h are
+ *               allowed); rotation rotates the line around its midpoint.
+ * - `arrow`   — same as `line`, with an arrowhead at the (x+w, y+h) end.
+ *
+ * Unified rect-based encoding (rather than `from`/`to` endpoint pairs for
+ * lines/arrows) means every shape kind reuses the existing handle math,
+ * rotate math, and resize semantics that the Select tool already runs over
+ * `BoardObject.transform`. Lines/arrows just happen to allow negative-w/h
+ * rects, which the renderer interprets as direction.
+ */
+export type ShapeKind = 'rect' | 'ellipse' | 'line' | 'arrow'
+
+/**
+ * Drawn shape on the canvas — a first-class object kind alongside images,
+ * texts, and strokes. Created by the Shape tool (`R` / `O` / `A` / `L`
+ * for the four kinds). Rendered in a dedicated `renderShapes` pass below
+ * the strokes composite so pen strokes naturally draw on top of shapes
+ * the same way they draw on top of images.
+ *
+ * Style is OBJECT-LEVEL — the whole shape has one stroke color, one
+ * stroke width, and at most one fill. No per-segment styling. Matches
+ * the Figma / Excalidraw v1 model.
+ *
+ * Fill semantics: absent / 'none' = outline-only. Otherwise a color
+ * token (`'ink'` for theme-aware, or hex). Line + arrow kinds ignore
+ * `fill` — they're stroke-only. Persisted records emit `fill: undefined`
+ * for outline-only rects/ellipses to keep the format compact.
+ *
+ * The Select tool drives move / resize / rotate / delete via the same
+ * BoardObject-shaped handle math used for images and texts; no shape-
+ * specific UX divergence.
+ */
+export interface ShapeObject extends BoardObject {
+  /** Which shape primitive this record draws. */
+  shape: ShapeKind
+  /** Stroke color token — same scheme as brushes (`'ink'` for theme-aware,
+   *  or hex). */
+  color: string
+  /** Stroke width in board pixels (constant under zoom-out, so a 4-px
+   *  stroke at scale=1 renders as 2-px at scale=0.5). */
+  strokeWidth: number
+  /** Optional fill color token. Absent / 'none' = outline-only. Line /
+   *  arrow kinds ignore this. */
+  fill?: string
+  /** Optional fill-opacity multiplier in [0.05, 1.0]. Applied as a
+   *  globalAlpha during the fill pass so the shape reads as a tint
+   *  behind the outline. Absent → renderer's default (currently 0.25).
+   *  Stored per-shape so users can mix soft tints and saturated fills
+   *  on the same board; the Shape tool's contextual menu writes the
+   *  sticky default that new shapes inherit at creation. v1.4. */
+  fillOpacity?: number
+}

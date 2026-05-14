@@ -11,3 +11,4 @@ export {
 export { createLaserTool } from './laser'
 export { createSelectTool, type SelectTool, type Selection } from './select'
 export { createTextTool, type TextTool } from './text'
+export { createShapeTool, type ShapeTool } from './shape'

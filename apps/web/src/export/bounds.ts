@@ -6,9 +6,10 @@
  * viewBox / PDF page to the actual drawn content rather than the viewport.
  */
 
-import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
+import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import type { Camera } from '../camera'
 import { imageAABB } from '../imagegeom'
+import { shapeAABB } from '../rendershapes'
 import { getStrokeBBox } from '../stroke'
 import { textAABB } from '../textgeom'
 
@@ -25,6 +26,7 @@ export function computeBoardBounds(
   strokes: Stroke[],
   images: readonly ImageObject[] = [],
   texts: readonly TextObject[] = [],
+  shapes: readonly ShapeObject[] = [],
 ): Bounds | null {
   let minX = Number.POSITIVE_INFINITY
   let minY = Number.POSITIVE_INFINITY
@@ -55,6 +57,15 @@ export function computeBoardBounds(
   for (const t of texts) {
     if (t.deleted) continue
     const bb = textAABB(t)
+    if (bb.minX < minX) minX = bb.minX
+    if (bb.minY < minY) minY = bb.minY
+    if (bb.maxX > maxX) maxX = bb.maxX
+    if (bb.maxY > maxY) maxY = bb.maxY
+    any = true
+  }
+  for (const sh of shapes) {
+    if (sh.deleted) continue
+    const bb = shapeAABB(sh)
     if (bb.minX < minX) minX = bb.minX
     if (bb.minY < minY) minY = bb.minY
     if (bb.maxX > maxX) maxX = bb.maxX

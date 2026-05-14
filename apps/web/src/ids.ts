@@ -18,6 +18,7 @@
 
 const STROKE_PREFIX = 's_'
 const TEXT_PREFIX = 't_'
+const SHAPE_PREFIX = 'sh_'
 
 function randomId(prefix: string): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -36,4 +37,10 @@ export function makeStrokeId(): string {
  *  + buildTextFromDefaults factory and the clipboard paste-back path. */
 export function makeTextId(): string {
   return randomId(TEXT_PREFIX)
+}
+
+/** Fresh id for a new ShapeObject. v1.4. Prefix `sh_` to keep stroke/
+ *  text/shape ids visually distinct in persisted logs. */
+export function makeShapeId(): string {
+  return randomId(SHAPE_PREFIX)
 }
