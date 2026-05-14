@@ -13,16 +13,24 @@
  * swatches) so the right-click affordance looks like a compact
  * version of the standalone Color picker — no per-menu retraining.
  *
- * The add tile opens a sub-popover with tag `'swatch-add'`; after
- * commit / cancel it dismisses ONLY itself (via tag-targeted dismiss)
- * so a pinned right-click menu survives the round-trip. `onAddDone`
- * fires after either path so the host can rebuild its content with
- * the new swatch present.
+ * Sub-popover placement: the swatch-add opens to the SIDE of the
+ * parent right-click menu (placement: 'right-of'), not on top of it.
+ * The popover module measures the parent menu element (found via
+ * `findPopoverByTag('tools')`) so the side-of math uses the menu's
+ * actual rendered bounds, not the mouse-click anchor. Mirrors to
+ * the left of the parent automatically when there's no room to the
+ * right (positionPopover overflow fallback).
+ *
+ * Custom swatch deletion: hovering a custom swatch reveals an "×"
+ * badge in its top-right corner. Clicking the badge removes the
+ * swatch via `removeCustomSwatch` and fires `onPaletteChanged` so
+ * the host menu rebuilds with the deleted swatch gone. Curated
+ * swatches don't get the badge (they're not deletable).
  */
 
 import { CURATED_COLORS } from './colorpicker'
 import { findPopoverByTag, showPopover } from './popover'
-import { getCustomSwatches } from './settings'
+import { getCustomSwatches, removeCustomSwatch } from './settings'
 import { createSwatchAdd } from './swatchadd'
 
 export interface SwatchPaletteOptions {
@@ -32,15 +40,17 @@ export interface SwatchPaletteOptions {
    *  for any post-pick side effects (writing the setting, emitting an
    *  edit-shape op, dismissing the menu). */
   onPick: (color: string) => void
-  /** Anchor for the swatch-add sub-popover. Same x/y the parent menu
-   *  was opened at — the sub-popover layers over the menu via the
-   *  popover module's multi-coexistence model (different tag). */
+  /** Fallback anchor for the swatch-add sub-popover. Used only when the
+   *  parent right-click menu can't be located (defensive — in normal
+   *  flow we use the parent's actual rect for side-of placement). */
   addAt: { x: number; y: number }
-  /** Optional. Called after the user finishes the add flow — whether
-   *  they committed a new swatch or canceled. Hosts use this to
-   *  rebuild their content so the new swatch (if any) appears
-   *  immediately in the parent menu. */
-  onAddDone?: () => void
+  /** Optional. Called after the user (a) commits or cancels the add-
+   *  color flow, or (b) deletes a custom swatch via the × badge.
+   *  Hosts use this to rebuild their content so the change reflects
+   *  immediately in the parent menu without the user needing to close
+   *  and re-open it. Named "PaletteChanged" rather than the earlier
+   *  "AddDone" since deletion now also triggers it. */
+  onPaletteChanged?: () => void
 }
 
 export function buildSwatchPalette(opts: SwatchPaletteOptions): HTMLDivElement {
@@ -48,21 +58,16 @@ export function buildSwatchPalette(opts: SwatchPaletteOptions): HTMLDivElement {
   palette.className = 'whiteboard-tools-palette'
 
   for (const c of CURATED_COLORS) {
-    palette.appendChild(makeSwatch(c, false, opts.active, () => opts.onPick(c)))
+    palette.appendChild(makeSwatch(c, false, opts))
   }
   for (const c of getCustomSwatches()) {
-    palette.appendChild(makeSwatch(c, true, opts.active, () => opts.onPick(c)))
+    palette.appendChild(makeSwatch(c, true, opts))
   }
   palette.appendChild(makeAddTile(() => openAddSubpopover(opts)))
   return palette
 }
 
-function makeSwatch(
-  color: string,
-  isCustom: boolean,
-  active: string,
-  onClick: () => void,
-): HTMLButtonElement {
+function makeSwatch(color: string, isCustom: boolean, opts: SwatchPaletteOptions): HTMLElement {
   const sw = document.createElement('button')
   sw.type = 'button'
   sw.className = 'whiteboard-color-swatch whiteboard-color-swatch-small'
@@ -72,9 +77,36 @@ function makeSwatch(
   sw.setAttribute('aria-label', sw.title)
   if (color === 'ink') sw.classList.add('whiteboard-color-swatch-ink')
   else sw.style.background = color
-  if (active === color) sw.classList.add('active')
-  sw.addEventListener('click', onClick)
-  return sw
+  if (opts.active === color) sw.classList.add('active')
+  sw.addEventListener('click', () => opts.onPick(color))
+  // Curated swatches return as-is; custom swatches get a wrapper that
+  // overlays a delete-on-hover × badge in the top-right corner.
+  if (!isCustom) return sw
+  const wrap = document.createElement('span')
+  wrap.className = 'whiteboard-color-swatch-wrap'
+  wrap.appendChild(sw)
+  wrap.appendChild(makeDeleteBadge(color, opts))
+  return wrap
+}
+
+/** Build the × delete badge that hovers over a custom swatch. Tiny,
+ *  high-contrast, only visible on hover (CSS-driven). Click removes
+ *  the swatch and triggers a palette rebuild. `stopPropagation` is
+ *  important — without it the click would also bubble to the swatch
+ *  underneath and trigger `onPick` for the now-removed color. */
+function makeDeleteBadge(color: string, opts: SwatchPaletteOptions): HTMLButtonElement {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'whiteboard-color-swatch-delete'
+  btn.title = `Remove custom color ${color}`
+  btn.setAttribute('aria-label', `Remove custom color ${color}`)
+  btn.textContent = '×'
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    removeCustomSwatch(color)
+    opts.onPaletteChanged?.()
+  })
+  return btn
 }
 
 function makeAddTile(onClick: () => void): HTMLButtonElement {
@@ -89,28 +121,41 @@ function makeAddTile(onClick: () => void): HTMLButtonElement {
   return tile
 }
 
-/** Open the swatch-add sub-popover. Coexists with the parent right-
- *  click menu (different tag), so dismissing the sub-popover doesn't
- *  kill the menu — the menu's `onAddDone` callback handles whatever
- *  rebuild semantics it needs.
+/** Open the swatch-add sub-popover to the SIDE of the parent right-
+ *  click menu (so the user can see the menu and the picker together).
+ *  Falls back to the `addAt` anchor (mouse click position) if the
+ *  parent menu can't be located — defensive, shouldn't happen in
+ *  normal flow.
  *
- *  Cancel path: we still call `onAddDone` because the user is back
- *  in the parent menu state and the menu might have been rebuilt
- *  pre-emptively (i.e. its current visible state is correct only if
- *  the parent was rebuilt). Safe to no-op there. */
+ *  After commit / cancel: dismiss only the sub-popover (tag-targeted)
+ *  so the parent menu survives. Fire `onPaletteChanged` so the menu
+ *  rebuilds with the new swatch present.
+ */
 function openAddSubpopover(opts: SwatchPaletteOptions): void {
+  const parent = findPopoverByTag('tools')
+  // Anchor at the parent menu's right edge (vertically a bit below
+  // top so the sub-popover doesn't crowd the menu's title bar).
+  // positionPopover('right-of') auto-mirrors to the left side when
+  // there's no room to the right.
+  const anchor = parent
+    ? (() => {
+        const rect = parent.el.getBoundingClientRect()
+        return { x: rect.right, y: rect.top + 8 }
+      })()
+    : opts.addAt
   const subRoot = createSwatchAdd({
     onAdded: () => {
       findPopoverByTag('swatch-add')?.dismiss()
-      opts.onAddDone?.()
+      opts.onPaletteChanged?.()
     },
     onCancel: () => {
       findPopoverByTag('swatch-add')?.dismiss()
-      opts.onAddDone?.()
+      opts.onPaletteChanged?.()
     },
   })
   showPopover({
-    anchor: opts.addAt,
+    anchor,
+    placement: parent ? 'right-of' : 'below',
     title: 'add color',
     content: subRoot,
     tag: 'swatch-add',

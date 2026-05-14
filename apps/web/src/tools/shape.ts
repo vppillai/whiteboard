@@ -298,7 +298,7 @@ export function createShapeTool(deps: ShapeToolDeps): ShapeTool {
             dismiss()
           },
           addAt: anchor ?? { x: 0, y: 0 },
-          onAddDone: () => rebuild?.(),
+          onPaletteChanged: () => rebuild?.(),
         }),
       )
 

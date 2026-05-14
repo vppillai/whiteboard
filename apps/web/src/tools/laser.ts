@@ -232,7 +232,7 @@ export function createLaserTool(deps: LaserToolDeps): Tool {
             dismiss()
           },
           addAt: anchor ?? { x: 0, y: 0 },
-          onAddDone: () => rebuild?.(),
+          onPaletteChanged: () => rebuild?.(),
         }),
       )
     },

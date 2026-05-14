@@ -559,6 +559,49 @@ body {
   border-radius: 6px;
 }
 
+/* Custom swatch wrapper — holds the swatch button + a hover-revealed
+ * "×" delete badge in the top-right corner. The wrapper is a grid
+ * cell itself; the swatch sizes via .whiteboard-color-swatch-small. */
+.whiteboard-color-swatch-wrap {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+  justify-self: center;
+  max-width: 32px;
+}
+
+.whiteboard-color-swatch-wrap .whiteboard-color-swatch-small {
+  max-width: 100%;
+}
+
+.whiteboard-color-swatch-delete {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--banner-bg, #fff);
+  border-radius: 50%;
+  background: var(--banner-fg, #111);
+  color: var(--banner-bg, #fff);
+  font: 700 11px / 1 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.12s, transform 0.12s;
+  z-index: 1;
+}
+
+.whiteboard-color-swatch-wrap:hover .whiteboard-color-swatch-delete,
+.whiteboard-color-swatch-delete:focus-visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
 .whiteboard-tools-row {
   display: flex;
   gap: 4px;

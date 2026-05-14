@@ -59,24 +59,33 @@ function makeSvg(...children: SVGElement[]): SVGElement {
 
 // ── Tool icons ────────────────────────────────────────────────────────────
 
-/** Draw — a marker / brush drawing a stroke. The body (rounded shaft +
- *  angled tip) sits in the upper-right, and the curved stroke trail at
- *  the lower-left reads as "ink being laid down" rather than the bare
- *  pen-nib silhouette of an idle tool. v1.4 redesign per user feedback. */
+/** Draw — pencil sketching a wavy stroke. The pencil is rendered as a
+ *  thin rotated rectangle with a clear tip-and-ferrule silhouette
+ *  (sharpened cone + collar + body). The wavy line under the tip
+ *  reads unmistakably as "this tool draws," distinct from the Shape
+ *  tool's static circle+square or the Eraser's tilted block.
+ *  v1.4 second redesign per user feedback ("draw icon needs improvement"). */
 export function iconPen(): SVGElement {
-  return makeSvg(
-    // Marker body — a rounded shaft pointing toward the lower-left tip.
-    svgEl('path', {
-      d: 'M 13 5 L 19 11 L 11 19 L 5 19 L 5 13 Z',
-      fill: 'currentColor',
-      'fill-opacity': 0.18,
-    }),
-    svgEl('path', { d: 'M 13 5 L 19 11 L 11 19 L 5 19 L 5 13 Z' }),
-    // Cap / ferrule line near the body's top so it reads as a marker.
-    svgEl('path', { d: 'M 14 6 L 18 10' }),
-    // Ink trail curving away from the tip — the "drawing" feel.
-    svgEl('path', { d: 'M 5 19 C 5 21, 8 21.5, 10 21' }),
-  )
+  // Pencil body — long diagonal rectangle running upper-right to
+  // lower-left, ending in a sharpened triangle tip near (4, 17).
+  // Built from a single closed path so the body reads as one piece.
+  const body = svgEl('path', {
+    d: 'M 17 4 L 20 7 L 9 18 L 6 18 L 6 15 Z',
+    fill: 'currentColor',
+    'fill-opacity': 0.18,
+  })
+  const bodyOutline = svgEl('path', {
+    d: 'M 17 4 L 20 7 L 9 18 L 6 18 L 6 15 Z',
+  })
+  // Collar / ferrule cross-band between the wood tip and the painted
+  // body — what distinguishes a pencil silhouette from a generic stick.
+  const collar = svgEl('path', { d: 'M 14 7 L 17 10' })
+  // Wavy stroke trail starting at the pencil tip — three small curves
+  // suggesting freshly drawn line work.
+  const trail = svgEl('path', {
+    d: 'M 5 19 Q 7 21, 9 19 T 13 19 T 17 19',
+  })
+  return makeSvg(body, bodyOutline, collar, trail)
 }
 
 /** Text — a capital T. */

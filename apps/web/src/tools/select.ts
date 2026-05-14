@@ -1455,7 +1455,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
           dismiss()
         },
         addAt: anchor ?? { x: 0, y: 0 },
-        onAddDone: () => rebuild?.(),
+        onPaletteChanged: () => rebuild?.(),
       }),
     )
 
@@ -2103,7 +2103,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
             dismiss()
           },
           addAt: anchor ?? { x: 0, y: 0 },
-          onAddDone: () => rebuild?.(),
+          onPaletteChanged: () => rebuild?.(),
         }),
       )
 

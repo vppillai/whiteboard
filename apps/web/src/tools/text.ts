@@ -558,7 +558,7 @@ export function createTextTool(deps: TextToolDeps): TextTool {
             dismiss()
           },
           addAt: anchor ?? { x: 0, y: 0 },
-          onAddDone: () => rebuild?.(),
+          onPaletteChanged: () => rebuild?.(),
         }),
       )
 
