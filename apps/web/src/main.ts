@@ -601,7 +601,14 @@ async function main(): Promise<void> {
   document.body.appendChild(toolPill.el)
   const setTool = (id: ToolId): void => {
     if (tool.current.id === id) return
-    if (id !== 'pen' && id !== 'eraser' && id !== 'select' && id !== 'laser' && id !== 'text')
+    if (
+      id !== 'pen' &&
+      id !== 'eraser' &&
+      id !== 'select' &&
+      id !== 'laser' &&
+      id !== 'text' &&
+      id !== 'shape'
+    )
       return
     // Capture the OUTGOING tool id as "previous" — but only when leaving
     // a non-text tool. The Text tool's Esc-handler uses this to return
