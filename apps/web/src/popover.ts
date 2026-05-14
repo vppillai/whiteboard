@@ -49,6 +49,11 @@ export interface PopoverOptions {
   tag?: string
   /** Called after the popover dismisses (manually or via outside / Esc). */
   onDismiss?: () => void
+  /** Called after the pinned state changes — either via the pin button
+   *  in the header or a programmatic `setPinned` call. Lets the caller
+   *  persist the state (e.g., toolmenu writes to sessionStorage so the
+   *  pin choice survives a menu close / reopen within the tab). v1.4. */
+  onPinnedChange?: (pinned: boolean) => void
 }
 
 export interface Popover {
@@ -159,7 +164,14 @@ export function showPopover(opts: PopoverOptions): Popover {
   }
 
   function onKey(e: KeyboardEvent): void {
-    if (e.key === 'Escape') {
+    // Esc closes only NON-pinned popovers. A pinned popover survives
+    // Esc the same way it survives outside-pointer clicks — the user
+    // explicitly opted into "stay open." Pinned dismissal requires the
+    // X button or an explicit programmatic dismiss(). v1.4 fix: prior
+    // behavior had Esc dismiss every popover on the document including
+    // pinned ones, which was inconsistent with the outside-pointer
+    // pinned-survival logic.
+    if (e.key === 'Escape' && !pinned) {
       e.preventDefault()
       dismiss()
     }
@@ -174,6 +186,7 @@ export function showPopover(opts: PopoverOptions): Popover {
   pinBtn.addEventListener('click', () => {
     pinned = !pinned
     syncPinUI()
+    opts.onPinnedChange?.(pinned)
   })
   closeBtn.addEventListener('click', dismiss)
 
@@ -240,8 +253,10 @@ export function showPopover(opts: PopoverOptions): Popover {
     el,
     isPinned: () => pinned,
     setPinned: (p) => {
+      if (pinned === p) return
       pinned = p
       syncPinUI()
+      opts.onPinnedChange?.(pinned)
     },
     dismiss,
     noteSelection: () => {

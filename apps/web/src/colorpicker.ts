@@ -14,6 +14,7 @@ import {
   getRecentColors,
   onChange,
   pushRecentColor,
+  removeCustomSwatch,
   setColor,
 } from './settings'
 import { createSwatchAdd } from './swatchadd'
@@ -57,7 +58,13 @@ export function openColorPicker(at: { x: number; y: number }): Popover {
       palette.appendChild(makeSwatch(c, false, () => onPick(c)))
     }
     for (const c of getCustomSwatches()) {
-      palette.appendChild(makeSwatch(c, true, () => onPick(c)))
+      // Custom swatches get a hover-revealed × delete badge (v1.4).
+      // The badge is appended INSIDE the swatch button (as a span with
+      // role="button") so neither sibling intercepts the other's
+      // clicks. See swatchpalette.ts for rationale.
+      const sw = makeSwatch(c, true, () => onPick(c))
+      sw.appendChild(makeDeleteBadge(c))
+      palette.appendChild(sw)
     }
     palette.appendChild(makeAddTile(() => openSwatchAddSubpopover()))
     syncActive()
@@ -155,6 +162,33 @@ function makeSwatch(
 
   sw.addEventListener('click', onClick)
   return sw
+}
+
+/** Build the × delete badge that overlays a custom swatch in the
+ *  standalone Color picker. Mirrors the right-click menu's badge in
+ *  `swatchpalette.ts` — same DOM shape (span role="button"), same
+ *  event semantics. After delete, the standalone picker's `onChange`
+ *  subscription auto-rebuilds the palette so we don't need an
+ *  explicit callback here. */
+function makeDeleteBadge(color: string): HTMLElement {
+  const el = document.createElement('span')
+  el.className = 'whiteboard-color-swatch-delete'
+  el.setAttribute('role', 'button')
+  el.setAttribute('aria-label', `Remove custom color ${color}`)
+  el.title = `Remove custom color ${color}`
+  el.tabIndex = 0
+  el.textContent = '×'
+  const handler = (e: Event): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    removeCustomSwatch(color)
+  }
+  el.addEventListener('pointerdown', handler)
+  el.addEventListener('click', handler)
+  el.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') handler(e)
+  })
+  return el
 }
 
 function makeAddTile(onClick: () => void): HTMLButtonElement {

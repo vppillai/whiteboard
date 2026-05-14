@@ -103,25 +103,32 @@ export function iconShape(): SVGElement {
   )
 }
 
-/** Eraser — a rubber block at an angle with a dashed underline
- *  suggesting the cleared area. The body has two distinct sections
- *  (rubber tip + holder) so it reads as an eraser, not just a square. */
+/** Eraser — a pink-pencil-eraser silhouette tilted to the right with a
+ *  metal ferrule band near the top, plus an "erased" curl below
+ *  suggesting eraser shavings / cleared marks. The two-section body
+ *  (rubber + ferrule) is the universal eraser cue; the curl at the
+ *  bottom-left disambiguates this from any other tilted-block shape.
+ *  v1.4 second redesign per user feedback. */
 export function iconEraser(): SVGElement {
-  return makeSvg(
-    // Body — angled rectangle that runs from upper-right to lower-left.
-    svgEl('path', {
-      d: 'M 17 4 L 21 8 L 9 20 L 5 16 Z',
-      fill: 'currentColor',
-      'fill-opacity': 0.18,
-    }),
-    svgEl('path', { d: 'M 17 4 L 21 8 L 9 20 L 5 16 Z' }),
-    // Divider between the rubber tip and the holder — gives the eraser
-    // its characteristic two-tone band.
-    svgEl('path', { d: 'M 13 8 L 17 12' }),
-    // Cleared-area underline — short dashes below the eraser tip suggest
-    // what was just erased.
-    svgEl('path', { d: 'M 3 21 L 14 21', 'stroke-dasharray': '2 2' }),
-  )
+  // Body — a thicker, more visible angled rectangle running from
+  // upper-right (rubber top) to lower-left (eraser tip).
+  const body = svgEl('path', {
+    d: 'M 18 3 L 21 6 L 8 19 L 5 19 L 5 16 Z',
+    fill: 'currentColor',
+    'fill-opacity': 0.2,
+  })
+  const bodyOutline = svgEl('path', {
+    d: 'M 18 3 L 21 6 L 8 19 L 5 19 L 5 16 Z',
+  })
+  // Two parallel cross-lines simulate the metal ferrule banding —
+  // the distinctive visual that says "pencil eraser" rather than
+  // "generic rubber block."
+  const ferrule1 = svgEl('path', { d: 'M 14 7 L 17 10' })
+  const ferrule2 = svgEl('path', { d: 'M 16 5 L 19 8' })
+  // Eraser-shaving curl at the lower-left — a small comma below the
+  // eraser tip, suggesting bits of just-removed pencil.
+  const shaving = svgEl('path', { d: 'M 4 21 Q 2 21, 3 19' })
+  return makeSvg(body, bodyOutline, ferrule1, ferrule2, shaving)
 }
 
 /** Select — arrow cursor. */

@@ -39,6 +39,7 @@ import {
 import { fullItem, pill, pillRow, sectionLabel, separator } from './menu-ui'
 import { openOptionsMenu } from './optionsmenu'
 import { type Popover, showPopover } from './popover'
+import { onChange } from './settings'
 import type { Tool, ToolId } from './tools'
 
 interface ToolDef {
@@ -258,11 +259,47 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
 
   buildContent()
 
+  // Live refresh: any settings change (custom-swatch add / delete,
+  // brush color cycle, theme, grid options the menu shows) rebuilds
+  // the menu so the user sees the change without dismissing /
+  // reopening. v1.4 fix: pre-v1.4 the menu's content was a static
+  // snapshot taken at open time, so adding a custom color while the
+  // menu was pinned didn't show the new swatch until another menu
+  // action triggered a rebuild. The subscription is torn down via
+  // the popover's onDismiss callback so leaks are bounded.
+  const settingsUnsub = onChange(rebuildContent)
+
+  // Pin state persistence (v1.4): restore the user's last pin choice
+  // from sessionStorage so right-click → pin stays sticky across menu
+  // closes within the same tab session. sessionStorage scopes the
+  // preference to this tab; closing the tab resets to unpinned.
   popoverRef.current = showPopover({
     anchor: opts.at,
     title: 'tools',
     content: root,
     tag: 'tools',
+    pinned: readPersistedPinned(),
+    onPinnedChange: writePersistedPinned,
+    onDismiss: settingsUnsub,
   })
   return popoverRef.current
+}
+
+const PINNED_STORAGE_KEY = 'whiteboard:toolmenu-pinned'
+
+function readPersistedPinned(): boolean {
+  try {
+    return sessionStorage.getItem(PINNED_STORAGE_KEY) === 'true'
+  } catch {
+    // SecurityError in private-mode etc. — treat as unpinned.
+    return false
+  }
+}
+
+function writePersistedPinned(pinned: boolean): void {
+  try {
+    sessionStorage.setItem(PINNED_STORAGE_KEY, pinned ? 'true' : 'false')
+  } catch {
+    // ignore storage failures (private mode / quota)
+  }
 }

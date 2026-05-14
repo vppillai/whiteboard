@@ -79,34 +79,50 @@ function makeSwatch(color: string, isCustom: boolean, opts: SwatchPaletteOptions
   else sw.style.background = color
   if (opts.active === color) sw.classList.add('active')
   sw.addEventListener('click', () => opts.onPick(color))
-  // Curated swatches return as-is; custom swatches get a wrapper that
-  // overlays a delete-on-hover × badge in the top-right corner.
-  if (!isCustom) return sw
-  const wrap = document.createElement('span')
-  wrap.className = 'whiteboard-color-swatch-wrap'
-  wrap.appendChild(sw)
-  wrap.appendChild(makeDeleteBadge(color, opts))
-  return wrap
+  // Custom swatches get a hover-revealed × delete badge in the corner.
+  // The badge is a <span role="button"> (not a <button>) so it can live
+  // inside the swatch button — HTML doesn't allow nested interactive
+  // elements, but a span with role="button" + Enter/Space handler is
+  // accessible and DOM-legal. position: absolute on the badge anchors
+  // it to the swatch's top-right corner via position: relative on
+  // .whiteboard-color-swatch.
+  if (isCustom) sw.appendChild(makeDeleteBadge(color, opts))
+  return sw
 }
 
-/** Build the × delete badge that hovers over a custom swatch. Tiny,
- *  high-contrast, only visible on hover (CSS-driven). Click removes
- *  the swatch and triggers a palette rebuild. `stopPropagation` is
- *  important — without it the click would also bubble to the swatch
- *  underneath and trigger `onPick` for the now-removed color. */
-function makeDeleteBadge(color: string, opts: SwatchPaletteOptions): HTMLButtonElement {
-  const btn = document.createElement('button')
-  btn.type = 'button'
-  btn.className = 'whiteboard-color-swatch-delete'
-  btn.title = `Remove custom color ${color}`
-  btn.setAttribute('aria-label', `Remove custom color ${color}`)
-  btn.textContent = '×'
-  btn.addEventListener('click', (e) => {
+/** Build the × delete badge that overlays a custom swatch's top-right
+ *  corner. Visible on hover (CSS-driven). Click removes the swatch and
+ *  fires `onPaletteChanged` so the host menu rebuilds.
+ *
+ *  Implemented as a <span role="button"> (not a <button>) so it can
+ *  sit INSIDE the swatch button element — HTML5 disallows interactive
+ *  elements nested in <button>, but a span isn't interactive content
+ *  per spec. role="button" + Enter/Space keyboard handler gives the
+ *  same affordance to AT users.
+ *
+ *  `stopPropagation` on pointerdown is critical — without it, the
+ *  click also reaches the parent swatch button and fires onPick on
+ *  the now-deleted color, picking it back into the active state. */
+function makeDeleteBadge(color: string, opts: SwatchPaletteOptions): HTMLElement {
+  const el = document.createElement('span')
+  el.className = 'whiteboard-color-swatch-delete'
+  el.setAttribute('role', 'button')
+  el.setAttribute('aria-label', `Remove custom color ${color}`)
+  el.title = `Remove custom color ${color}`
+  el.tabIndex = 0
+  el.textContent = '×'
+  const handler = (e: Event): void => {
+    e.preventDefault()
     e.stopPropagation()
     removeCustomSwatch(color)
     opts.onPaletteChanged?.()
+  }
+  el.addEventListener('pointerdown', handler)
+  el.addEventListener('click', handler)
+  el.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') handler(e)
   })
-  return btn
+  return el
 }
 
 function makeAddTile(onClick: () => void): HTMLButtonElement {
