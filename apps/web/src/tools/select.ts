@@ -168,19 +168,26 @@ const ROTATE_CURSOR =
   'url(\'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M 12 4 A 8 8 0 1 1 4 12" fill="none" stroke="white" stroke-width="4" stroke-linecap="round"/><path d="M 12 4 A 8 8 0 1 1 4 12" fill="none" stroke="black" stroke-width="2" stroke-linecap="round"/><polygon points="12,0 18,6 12,10" fill="black" stroke="white" stroke-width="1"/></svg>\') 12 12, grab'
 
 export interface SelectTool extends Tool {
-  /** Live reference to the currently-selected IMAGE, or null when the
-   *  selection is a text / nothing. Kept narrow so existing main.ts
-   *  Cmd+C / Cmd+X paths (which only handle images for now) stay
-   *  unchanged. Use `getSelected()` for the generalized accessor. */
+  /** Live reference to the currently-selected IMAGE when EXACTLY ONE
+   *  image is selected. Null otherwise (nothing selected, multi-
+   *  selection, or a non-image is selected). Kept narrow so existing
+   *  main.ts Cmd+C / Cmd+X paths (which only handle a single image)
+   *  stay unchanged. */
   getSelectedImage(): ImageObject | null
-  /** Discriminated-union accessor for the current selection. Null when
-   *  nothing is selected. */
+  /** Single-selection accessor. Returns the lone selection if exactly
+   *  one object is selected; null otherwise (nothing OR multi). Use
+   *  `getSelections()` for the multi-aware accessor. */
   getSelected(): Selection | null
-  /** Force-select an image by id (e.g. after paste so the user can
-   *  immediately position it). Caller is responsible for marking the
-   *  canvas dirty and switching the active tool to Select first;
-   *  this method only updates internal selection state. Silently does
-   *  nothing if no image with `id` exists or it is soft-deleted. */
+  /** Multi-aware accessor — returns the full selection array (empty,
+   *  one, or many). Order is insertion order; for marquee selection
+   *  it's "topmost first." */
+  getSelections(): readonly Selection[]
+  /** Replace the selection with a single image by id (e.g. after paste
+   *  so the user can immediately position it). Caller is responsible
+   *  for marking the canvas dirty and switching the active tool to
+   *  Select first; this method only updates internal selection state.
+   *  Silently does nothing if no image with `id` exists or it is
+   *  soft-deleted. */
   selectImageById(id: string): void
   /** Symmetric to selectImageById for text objects. Used by the
    *  Cmd+V text-paste path so the freshly-created TextObject is
@@ -192,15 +199,39 @@ export interface SelectTool extends Tool {
    *  (e.g. "jump to stroke from history panel") don't need a backdoor
    *  into module state. */
   selectStrokeById(id: string): void
-  /** Soft-delete the currently-selected object (image OR text OR stroke)
-   *  and emit the matching delete-image / delete-text / delete op.
-   *  Returns true if anything was deleted. */
+  /** Replace the selection with EVERY non-deleted object across all
+   *  kinds (strokes + images + texts). Used by Cmd+A. Caller is
+   *  responsible for switching the active tool to Select first. */
+  selectAll(): void
+  /** Drop any current selection. Used by Esc when a selection is
+   *  active. Distinct from cleanup() — clearSelection doesn't switch
+   *  tools or interact with the in-flight drag (use cleanup for that). */
+  clearSelection(): void
+  /** Soft-delete every selected object and emit the matching per-kind
+   *  delete op for each. Returns true if anything was deleted. Single
+   *  and multi cases share the same path. */
   deleteSelected(): boolean
 }
 
 export function createSelectTool(deps: SelectToolDeps): SelectTool {
-  let selected: Selection | null = null
+  // Multi-aware selection: empty array = nothing selected; one element =
+  // single-object mode (handles + rotate + transform UI); >1 elements =
+  // multi-object mode (only move + delete; no per-object handles). The
+  // single-object code paths read this via `singleSelection()` which
+  // returns the lone item or null. Phase B1 of the lasso-into-select
+  // absorption (ADR 0014 migration trigger met: 3rd object kind + new
+  // multi-select use case from Cmd+A).
+  let selected: Selection[] = []
   let drag: DragState | null = null
+
+  /** Returns the single-selected item when exactly one object is
+   *  selected; null when empty or multi. Used by all paths that need
+   *  single-object semantics (handles, contextual menu, image-clipboard
+   *  copy). Cached at the top of any function that uses it so the
+   *  closure-captured value survives nested callbacks. */
+  function singleSelection(): Selection | null {
+    return selected.length === 1 ? (selected[0] ?? null) : null
+  }
   // Double-click-text-body tracking: most recent pointerdown timestamp +
   // text id, used to dispatch the Text tool handoff when the user clicks
   // the same text twice within the threshold. Strict same-id matching
@@ -218,15 +249,15 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
   let lastRotateHandleDownAt = Number.NEGATIVE_INFINITY
   const ROTATE_DBLCLICK_MS = 350
 
-  /** Resolve the current `selected` to a live view of the underlying
-   *  object, or null if the selection no longer exists (deleted, gone).
-   *  Used everywhere the prior code consulted `selectedImageId` + a
-   *  `getImages().find` lookup. */
+  /** Resolve the SINGLE-selected object to a live ObjectView, or null
+   *  if nothing is selected, multiple objects are selected, or the
+   *  selected object has been deleted out from under the selection.
+   *  Multi-selection deliberately returns null here so single-object
+   *  code paths (handles, rotate UI, contextual menu) don't accidentally
+   *  fire on the first of a multi-selection — the multi case is
+   *  handled by dedicated render + drag paths. */
   function getView(): ObjectView | null {
-    // Local snapshot so TypeScript's narrowing survives the closures
-    // below (arrow callbacks inside `.find(...)` lose narrowing of a
-    // mutable module-scope variable across the call boundary).
-    const sel = selected
+    const sel = singleSelection()
     if (!sel) return null
     if (sel.kind === 'image') {
       const img = deps.getImages().find((i) => i.id === sel.id)
@@ -1010,7 +1041,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
           lastTextDownAt = Number.NEGATIVE_INFINITY
           lastTextDownId = null
         }
-        selected = hit
+        selected = [hit]
         const fresh = getView()
         if (fresh) {
           drag = {
@@ -1039,8 +1070,8 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       // click is a genuine reset of intent).
       lastTextDownAt = Number.NEGATIVE_INFINITY
       lastTextDownId = null
-      if (selected) {
-        selected = null
+      if (selected.length > 0) {
+        selected = []
         ctx.markCommittedDirty()
       }
     },
@@ -1216,7 +1247,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       // B / I / U). Image-selection / no-selection both fall through
       // to the static TOOL / VIEW / EXPORT rows that toolmenu.ts adds
       // outside this hook.
-      const sel = selected
+      const sel = singleSelection()
       if (!sel || sel.kind !== 'text') return
       const t = deps.getTexts().find((x) => x.id === sel.id)
       if (!t || t.deleted) return
@@ -1365,15 +1396,17 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       // the user saw the change but couldn't undo it. commitDrag is a
       // no-op when `drag` is null, so this is safe on every cleanup call.
       commitDrag(null)
-      selected = null
+      selected = []
       drag = null
     },
 
     getSelectedImage(): ImageObject | null {
       // Backward-compat narrow accessor: returns the selected image only
-      // when an IMAGE is currently selected. main.ts uses this for the
-      // image-clipboard copy/cut paths (which don't apply to texts).
-      const sel = selected
+      // when EXACTLY ONE image is selected. main.ts uses this for the
+      // image-clipboard copy/cut paths (which only handle a single image
+      // at v1.2). Multi-selection clipboard will route through the
+      // multi-aware path added in Phase B5.
+      const sel = singleSelection()
       if (!sel || sel.kind !== 'image') return null
       const img = deps.getImages().find((i) => i.id === sel.id)
       if (!img || img.deleted) return null
@@ -1381,13 +1414,17 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     },
 
     getSelected(): Selection | null {
+      return singleSelection()
+    },
+
+    getSelections(): readonly Selection[] {
       return selected
     },
 
     selectImageById(id: string): void {
       const img = deps.getImages().find((i) => i.id === id)
       if (!img || img.deleted) return
-      selected = { kind: 'image', id }
+      selected = [{ kind: 'image', id }]
       // Any in-flight drag from a prior pointer interaction is stale
       // when the selection is force-changed externally; drop it so the
       // next pointerdown starts cleanly.
@@ -1398,7 +1435,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     selectTextById(id: string): void {
       const t = deps.getTexts().find((x) => x.id === id)
       if (!t || t.deleted) return
-      selected = { kind: 'text', id }
+      selected = [{ kind: 'text', id }]
       drag = null
       deps.markCommittedDirty()
     },
@@ -1406,55 +1443,78 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     selectStrokeById(id: string): void {
       const s = deps.getStrokes().find((x) => x.id === id)
       if (!s || s.deleted) return
-      selected = { kind: 'stroke', id }
+      selected = [{ kind: 'stroke', id }]
+      drag = null
+      deps.markCommittedDirty()
+    },
+
+    selectAll(): void {
+      // Commit any pending drag before replacing selection wholesale.
+      commitDrag(null)
+      const next: Selection[] = []
+      // Order: strokes → images → texts (matches the render z-order
+      // composite, gives a stable order callers can rely on).
+      for (const s of deps.getStrokes()) {
+        if (!s.deleted) next.push({ kind: 'stroke', id: s.id })
+      }
+      for (const img of deps.getImages()) {
+        if (!img.deleted) next.push({ kind: 'image', id: img.id })
+      }
+      for (const t of deps.getTexts()) {
+        if (!t.deleted) next.push({ kind: 'text', id: t.id })
+      }
+      selected = next
+      drag = null
+      deps.markCommittedDirty()
+    },
+
+    clearSelection(): void {
+      if (selected.length === 0) return
+      commitDrag(null)
+      selected = []
       drag = null
       deps.markCommittedDirty()
     },
 
     deleteSelected(): boolean {
-      if (!selected) return false
-      // Guard against double-delete: if the object was already removed
-      // (e.g. by a Cmd+A batch path racing the Delete key, or future
-      // remote / sync state), don't fire a redundant op that would
+      if (selected.length === 0) return false
+      // Multi-aware: drain every selected item, emitting the matching
+      // per-kind delete op for each. Single-selection takes the same
+      // path with N=1 — the loop replaces the earlier three-way switch
+      // without changing single-object semantics.
+      //
+      // Guard against double-delete: if an object was already removed
+      // (e.g. a delete-key racing some external state change, or future
+      // sync state), skip it without firing a redundant op that would
       // corrupt the undo sequence.
-      if (selected.kind === 'image') {
-        const id = selected.id
-        const img = deps.getImages().find((i) => i.id === id)
-        if (!img || img.deleted) {
-          selected = null
-          return false
+      let didDelete = false
+      for (const sel of selected) {
+        if (sel.kind === 'image') {
+          const img = deps.getImages().find((i) => i.id === sel.id)
+          if (!img || img.deleted) continue
+          img.deleted = true
+          deps.saveImageMeta(img)
+          deps.pushOp({ kind: 'delete-image', imageId: sel.id })
+          didDelete = true
+        } else if (sel.kind === 'text') {
+          const t = deps.getTexts().find((x) => x.id === sel.id)
+          if (!t || t.deleted) continue
+          t.deleted = true
+          deps.saveText(t)
+          deps.pushOp({ kind: 'delete-text', textId: sel.id })
+          didDelete = true
+        } else {
+          const s = deps.getStrokes().find((x) => x.id === sel.id)
+          if (!s || s.deleted) continue
+          s.deleted = true
+          deps.saveStroke(s)
+          deps.pushOp({ kind: 'delete', strokeIds: [sel.id] })
+          didDelete = true
         }
-        img.deleted = true
-        deps.saveImageMeta(img)
-        deps.pushOp({ kind: 'delete-image', imageId: id })
-      } else if (selected.kind === 'text') {
-        const id = selected.id
-        const t = deps.getTexts().find((x) => x.id === id)
-        if (!t || t.deleted) {
-          selected = null
-          return false
-        }
-        t.deleted = true
-        deps.saveText(t)
-        deps.pushOp({ kind: 'delete-text', textId: id })
-      } else {
-        // Stroke branch — uses the existing stroke 'delete' op kind
-        // (M1; ADRs 0006 + 0009). Mutates stroke.deleted directly +
-        // pushes the op as undo record (apply/unapply flip deleted
-        // symmetrically, so no double-apply concern).
-        const id = selected.id
-        const s = deps.getStrokes().find((x) => x.id === id)
-        if (!s || s.deleted) {
-          selected = null
-          return false
-        }
-        s.deleted = true
-        deps.saveStroke(s)
-        deps.pushOp({ kind: 'delete', strokeIds: [id] })
       }
-      selected = null
+      selected = []
       deps.markCommittedDirty()
-      return true
+      return didDelete
     },
   }
 }

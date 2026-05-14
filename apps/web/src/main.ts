@@ -35,7 +35,6 @@
 
 import './style.css'
 import type { BrushConfig, ImageObject, Sample, Stroke, TextObject } from '@whiteboard/shared'
-import { createBatchSelection } from './batchselection'
 import { BRUSH_IDS, BRUSH_PRESETS } from './brushes'
 import { makeCamera, panByScreen, resetZoom, screenToBoard, zoomAt } from './camera'
 import { createClearFlow } from './clearflow'
@@ -257,24 +256,6 @@ async function main(): Promise<void> {
   }
   const nextImageZ = nextObjectZ
   const nextTextZ = nextObjectZ
-
-  // Cmd+A → Delete batch state for images + texts. Distinct from the
-  // Select tool's single-object selection (which carries handles +
-  // transform UX); this is just a "next Delete press also removes
-  // these" flag, visualized as a thin outline in the per-frame image
-  // / text render passes below.
-  const batchSelection = createBatchSelection({
-    saveImage: (img) => {
-      void imageStore.updateMeta(img).catch((err) => {
-        console.warn('whiteboard/web: failed to persist image delete:', err)
-      })
-    },
-    saveText: (t) => persistText(t),
-    pushOp: (op) => pushUndoOp(op),
-    markCommittedDirty: () => {
-      committedDirty = true
-    },
-  })
 
   try {
     const { images: persistedImages, compactedBlobRefs } = await imageStore.load()
@@ -596,11 +577,10 @@ async function main(): Promise<void> {
     tool.current = allTools[id]
     root.style.cursor = tool.current.cursor ?? ''
     toolPill.setActiveTool(id)
-    // Tool change drops Cmd+A image-batch marks. (Pen/Eraser etc. won't
-    // surface a "Delete deletes the marked images" affordance, so leaving
-    // them marked is misleading.)
-    batchSelection.clear()
-    committedDirty = true // active tool changed; selection halos may toggle
+    // Select tool's own cleanup() already clears its multi-selection on
+    // tool change (the cleanup hook fires via the line above). Just mark
+    // dirty so the next frame paints without the removed selection halos.
+    committedDirty = true
   }
 
   // Last-pointer (for popover anchoring on keyboard shortcuts AND for
@@ -699,18 +679,6 @@ async function main(): Promise<void> {
   }
   document.addEventListener('contextmenu', onDocContextMenu)
   registerCleanup(() => document.removeEventListener('contextmenu', onDocContextMenu))
-
-  // Any pointer-down on the canvas drops a pending Cmd+A image-batch
-  // selection. The marks are a transient "press Delete next" affordance;
-  // continuing into any other gesture (drawing, lasso, select) means the
-  // user moved on.
-  root.addEventListener(
-    'pointerdown',
-    () => {
-      batchSelection.clear()
-    },
-    { capture: true },
-  )
 
   // ---------------------------------------------------------------------
   //  Text-paste helpers — Cmd/Ctrl+V with non-image text on the
@@ -1050,7 +1018,7 @@ async function main(): Promise<void> {
       strokes.length = 0
       images.length = 0
       texts.length = 0
-      batchSelection.clear()
+      selectTool.clearSelection()
       undoStack.length = 0
       redoStack.length = 0
       camera.x = 0
@@ -1208,29 +1176,27 @@ async function main(): Promise<void> {
       toggleTextItalic: () => toggleTextFormat('italic'),
       toggleTextUnderline: () => toggleTextFormat('underline'),
       deleteSelection: () => {
-        // Cmd+A also marks images and texts for batch delete. Drain
-        // those sets first (independent of which tool is active) so the
-        // user can hit Cmd+A → Delete from any tool to remove all
-        // objects.
-        let didDelete = batchSelection.deleteAll(images, texts)
-        if (tool.current === selectTool && selectTool.deleteSelected()) didDelete = true
-        if (tool.current === lassoTool && lassoTool.deleteSelection()) didDelete = true
-        return didDelete
+        // Multi-aware Select tool owns the single-and-multi delete path.
+        // Lasso retains its own bulk-stroke delete for now (until it's
+        // removed in Phase B6).
+        if (tool.current === selectTool && selectTool.deleteSelected()) return true
+        if (tool.current === lassoTool && lassoTool.deleteSelection()) return true
+        return false
       },
       selectAll: () => {
         // Guard: if a text editor is open, defer to its native Cmd+A
         // (the editor's keydown handler stops propagation; this guard
         // catches the edge case where focus drifted off the editor
         // momentarily and the global keymap saw the event). Switching
-        // to lasso here would clean-up the text tool and destroy the
+        // tools here would clean-up the text tool and destroy the
         // in-progress edit — exactly the wrong outcome for Cmd+A.
         if (textTool.isEditing()) return
-        // Strokes via the existing lasso path; images + texts via the
-        // batch-selection module (next Delete removes them; outline
-        // appears in the per-frame image / text render passes).
-        setTool('lasso')
-        lassoTool.selectAll()
-        batchSelection.markAll(images, texts)
+        // Switch to the Select tool and populate its multi-selection
+        // with every non-deleted object. Replaces the previous lasso-
+        // plus-batchSelection split (Phase B3 of the lasso → select
+        // absorption; ADR 0014 multi-select migration).
+        setTool('select')
+        selectTool.selectAll()
       },
       togglePanel,
       cancel: () => {
@@ -1244,10 +1210,12 @@ async function main(): Promise<void> {
         }
         if (clearFlow.cancel()) handled = true
         if (dismissAllPopovers()) handled = true
-        // Esc also drops any Cmd+A batch marks (images OR texts) before
-        // falling back to a tool switch — same semantic as Esc in lasso
-        // (clear the pending selection).
-        if (batchSelection.clear()) handled = true
+        // Esc clears any Select-tool selection (single or multi). Mirrors
+        // Esc in Lasso (clear in-progress / pending selection).
+        if (tool.current === selectTool && selectTool.getSelections().length > 0) {
+          selectTool.clearSelection()
+          handled = true
+        }
         // Esc in lasso mode falls back to the pen tool. The lasso's `cleanup`
         // hook (called from `setTool`) clears any in-progress polygon and
         // selection state, so switching is a clean reset.
@@ -1373,12 +1341,24 @@ async function main(): Promise<void> {
       // of the "paste an image and draw on top" feature. See renderimages.ts
       // for the per-image draw loop (viewport cull, rotation, batch-delete
       // outline).
+      // Multi-selection outline predicate: true when the object is part
+      // of a Select-tool selection with MORE than one item (the
+      // single-selection case is painted by the Select tool's own
+      // redraw — handles + outline). Cmd+A populates Select with
+      // every non-deleted object, which is the primary user-facing path
+      // for the multi-selection visual.
+      const sels = selectTool.getSelections()
+      const isMultiSelected =
+        sels.length > 1
+          ? (kind: 'image' | 'text', id: string): boolean =>
+              sels.some((s) => s.kind === kind && s.id === id)
+          : (): boolean => false
       renderImages({
         images,
         layer: target.committed,
         camera,
         viewBBox,
-        isMarkedForBatchDelete: (id) => batchSelection.hasImage(id),
+        isMarkedForBatchDelete: (id) => isMultiSelected('image', id),
       })
 
       // Texts render above images and below the strokes composite. The
@@ -1391,7 +1371,7 @@ async function main(): Promise<void> {
         viewBBox,
         resolveColor: resolveInkColor,
         editingId: textTool.getEditingId(),
-        isMarkedForBatchDelete: (id) => batchSelection.hasText(id),
+        isMarkedForBatchDelete: (id) => isMultiSelected('text', id),
       })
 
       // Composite the strokes offscreen onto committed in pixel space
