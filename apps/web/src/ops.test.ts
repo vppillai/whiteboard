@@ -199,6 +199,160 @@ describe('ops: edit-text', () => {
   })
 })
 
+describe('ops: transform-many composite op', () => {
+  function mkImg(id: string, overrides: Partial<ImageObject> = {}): ImageObject {
+    return {
+      id,
+      blobRef: id,
+      format: 'png',
+      natural: { w: 100, h: 100 },
+      transform: { x: 0, y: 0, w: 100, h: 100 },
+      z: 1,
+      createdAt: 0,
+      ...overrides,
+    }
+  }
+
+  function mkHarnessMulti(opts: {
+    images?: ImageObject[]
+    texts?: TextObject[]
+    strokes?: Stroke[]
+  }): { ctx: OpContext } {
+    const strokes = (opts.strokes ?? []).map((s) => ({
+      ...s,
+      samples: s.samples.map((p) => ({ ...p })),
+    }))
+    const images = (opts.images ?? []).map((i) => ({ ...i, transform: { ...i.transform } }))
+    const texts = (opts.texts ?? []).map((t) => ({ ...t, transform: { ...t.transform } }))
+    const ctx: OpContext = {
+      strokes,
+      saveStroke: () => {},
+      images,
+      saveImageMeta: () => {},
+      texts,
+      saveText: () => {},
+      markDirty: () => {},
+    }
+    return { ctx }
+  }
+
+  test('apply translates each item independently per kind', () => {
+    const img = mkImg('i1')
+    const txt = mkText('t1')
+    const stroke: Stroke = {
+      id: 's1',
+      brush: {
+        color: 'ink',
+        size: 2,
+        thinning: 0,
+        smoothing: 0.5,
+        streamline: 0.5,
+        taperStart: 0,
+        taperEnd: 0,
+        capStart: true,
+        capEnd: true,
+        pressureGamma: 1,
+      },
+      samples: [{ x: 0, y: 0, p: 0.5, t: 0 }],
+      startedAt: 0,
+    }
+    const h = mkHarnessMulti({ images: [img], texts: [txt], strokes: [stroke] })
+    const op: Op = {
+      kind: 'transform-many',
+      items: [
+        {
+          kind: 'image',
+          imageId: 'i1',
+          before: { x: 0, y: 0, w: 100, h: 100 },
+          after: { x: 50, y: 50, w: 100, h: 100 },
+        },
+        {
+          kind: 'text',
+          textId: 't1',
+          before: { x: 10, y: 20, w: 40, h: 16 },
+          after: { x: 100, y: 200, w: 40, h: 16 },
+        },
+        { kind: 'stroke', strokeId: 's1', dx: 30, dy: 40 },
+      ],
+    }
+    applyOp(op, h.ctx)
+    expect(h.ctx.images[0]?.transform.x).toBe(50)
+    expect(h.ctx.images[0]?.transform.y).toBe(50)
+    expect(h.ctx.texts[0]?.transform.x).toBe(100)
+    expect(h.ctx.texts[0]?.transform.y).toBe(200)
+    expect(h.ctx.strokes[0]?.samples[0]?.x).toBe(30)
+    expect(h.ctx.strokes[0]?.samples[0]?.y).toBe(40)
+  })
+
+  test('unapply reverses every item symmetrically', () => {
+    const img = mkImg('i1', { transform: { x: 50, y: 50, w: 100, h: 100 } })
+    const txt = mkText('t1', { transform: { x: 100, y: 200, w: 40, h: 16 } })
+    const stroke: Stroke = {
+      id: 's1',
+      brush: {
+        color: 'ink',
+        size: 2,
+        thinning: 0,
+        smoothing: 0.5,
+        streamline: 0.5,
+        taperStart: 0,
+        taperEnd: 0,
+        capStart: true,
+        capEnd: true,
+        pressureGamma: 1,
+      },
+      samples: [{ x: 30, y: 40, p: 0.5, t: 0 }],
+      startedAt: 0,
+    }
+    const h = mkHarnessMulti({ images: [img], texts: [txt], strokes: [stroke] })
+    const op: Op = {
+      kind: 'transform-many',
+      items: [
+        {
+          kind: 'image',
+          imageId: 'i1',
+          before: { x: 0, y: 0, w: 100, h: 100 },
+          after: { x: 50, y: 50, w: 100, h: 100 },
+        },
+        {
+          kind: 'text',
+          textId: 't1',
+          before: { x: 10, y: 20, w: 40, h: 16 },
+          after: { x: 100, y: 200, w: 40, h: 16 },
+        },
+        { kind: 'stroke', strokeId: 's1', dx: 30, dy: 40 },
+      ],
+    }
+    unapplyOp(op, h.ctx)
+    expect(h.ctx.images[0]?.transform.x).toBe(0)
+    expect(h.ctx.texts[0]?.transform.x).toBe(10)
+    expect(h.ctx.strokes[0]?.samples[0]?.x).toBe(0)
+    expect(h.ctx.strokes[0]?.samples[0]?.y).toBe(0)
+  })
+
+  test('apply→unapply→apply round-trips back to applied state', () => {
+    const img = mkImg('i1')
+    const h = mkHarnessMulti({ images: [img] })
+    const op: Op = {
+      kind: 'transform-many',
+      items: [
+        {
+          kind: 'image',
+          imageId: 'i1',
+          before: { x: 0, y: 0, w: 100, h: 100 },
+          after: { x: 50, y: 50, w: 100, h: 100 },
+        },
+      ],
+    }
+    applyOp(op, h.ctx)
+    expect(h.ctx.images[0]?.transform.x).toBe(50)
+    unapplyOp(op, h.ctx)
+    expect(h.ctx.images[0]?.transform.x).toBe(0)
+    applyOp(op, h.ctx)
+    expect(h.ctx.images[0]?.transform.x).toBe(50)
+  })
+})
+
 describe('ops dispatch: markDirty fires once per apply / unapply', () => {
   test('all four text op kinds bump the dirty counter exactly once', () => {
     const t = mkText('a')

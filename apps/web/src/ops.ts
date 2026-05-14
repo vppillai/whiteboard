@@ -132,6 +132,58 @@ export type Op =
       before: number
       after: number
     }
+  /**
+   * Composite multi-object move: a single op carrying transforms for
+   * every item displaced by one multi-drag gesture. Each item is one of
+   * the three existing per-kind move shapes (transform-image,
+   * transform-text, or per-stroke samples translation). The op exists
+   * to coalesce what would otherwise be N separate per-item ops into a
+   * single undo step and — critically for M3 sync — a single transaction
+   * + a single wire message on N peers. Without this, a 30-object
+   * multi-drag on a 16-peer board produces 480 update messages.
+   *
+   * Local-only behavior is also better: one Cmd+Z reverses the whole
+   * group move instead of unwinding 30 separate per-item ops.
+   *
+   * Items are stored as a discriminated union so apply / unapply can
+   * dispatch per kind without re-resolving the object kind from a
+   * separate lookup.
+   *
+   * Resize / rotation are intentionally NOT batched into this op —
+   * they're single-object operations even in multi-selection mode (see
+   * Phase B4 of the Lasso → Select absorption, ADR 0016). When / if
+   * multi-rotate lands, a parallel `rotate-many` op kind is the natural
+   * shape; the same pattern from this op extends cleanly.
+   */
+  | {
+      kind: 'transform-many'
+      items: TransformManyItem[]
+    }
+
+/** One entry in a `transform-many` op's `items` array. Per-kind
+ *  before/after payload mirrors the existing per-item op shapes:
+ *    - image / text: rect transform
+ *    - stroke: dx/dy delta (matches `move` op's semantics — symmetric
+ *      apply/unapply translate samples by ±(dx,dy)). */
+export type TransformManyItem =
+  | {
+      kind: 'image'
+      imageId: string
+      before: ImageObject['transform']
+      after: ImageObject['transform']
+    }
+  | {
+      kind: 'text'
+      textId: string
+      before: TextObject['transform']
+      after: TextObject['transform']
+    }
+  | {
+      kind: 'stroke'
+      strokeId: string
+      dx: number
+      dy: number
+    }
 
 export interface OpContext {
   /** All strokes (including soft-deleted ones). Mutated in place by ops. */
@@ -194,6 +246,9 @@ export function applyOp(op: Op, ctx: OpContext): void {
     case 'rotate-text':
       setTextRotation(ctx, op.textId, op.after)
       break
+    case 'transform-many':
+      applyTransformMany(ctx, op.items, false)
+      break
   }
   ctx.markDirty()
 }
@@ -240,8 +295,33 @@ export function unapplyOp(op: Op, ctx: OpContext): void {
     case 'rotate-text':
       setTextRotation(ctx, op.textId, op.before)
       break
+    case 'transform-many':
+      applyTransformMany(ctx, op.items, true)
+      break
   }
   ctx.markDirty()
+}
+
+/** Apply or unapply a `transform-many` op. `unapply=true` swaps the
+ *  before/after roles per item, mirroring the convention every other
+ *  symmetric op (transform-image / transform-text / move / rotate-*)
+ *  uses. */
+function applyTransformMany(
+  ctx: OpContext,
+  items: readonly TransformManyItem[],
+  unapply: boolean,
+): void {
+  for (const item of items) {
+    if (item.kind === 'image') {
+      setImageTransform(ctx, item.imageId, unapply ? item.before : item.after)
+    } else if (item.kind === 'text') {
+      setTextTransform(ctx, item.textId, unapply ? item.before : item.after)
+    } else {
+      const dx = unapply ? -item.dx : item.dx
+      const dy = unapply ? -item.dy : item.dy
+      translateStrokes(ctx, [item.strokeId], dx, dy)
+    }
+  }
 }
 
 /**

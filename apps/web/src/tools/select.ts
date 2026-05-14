@@ -48,7 +48,7 @@ import type { ImageObject, Stroke, TextFontFamily, TextObject } from '@whiteboar
 import { CURATED_COLORS as PALETTE } from '../colorpicker'
 import { imageAABB, imageCenter, pointInImage, rotateAroundPoint } from '../imagegeom'
 import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
-import type { Op } from '../ops'
+import type { Op, TransformManyItem } from '../ops'
 import { applyCamera, clearLayer } from '../render'
 import { getStrokeBBox, getStrokePath, invalidateStrokeBBox } from '../stroke'
 import { TEXT_PADDING_X, pointInText, resizeToFit, textAABB } from '../textgeom'
@@ -925,47 +925,47 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     }
   }
 
-  /** Commit a multi-move drag: emit one op per moved item. Items whose
-   *  net translation is zero (e.g. the user clicked an object without
-   *  moving past noop threshold) are skipped to avoid undo-stack
-   *  pollution. Each op is independent — undo unwinds one item at a
-   *  time, mirroring the existing image-batch-delete semantics from
-   *  v1.1. A compound "move-many" op kind is a future optimization
-   *  if the per-item churn becomes a problem. */
+  /** Commit a multi-move drag: emit ONE composite `transform-many` op
+   *  carrying every displaced item, rather than N per-item ops.
+   *  Items with zero net translation are skipped — clicking through
+   *  a multi-selection without actually moving doesn't pollute undo.
+   *
+   *  The composite-op shape:
+   *   - One Cmd+Z reverses the whole group move (rather than N
+   *     undos to unwind a 30-item drag).
+   *   - Under M3 sync, one Y.Doc transaction → one wire update per
+   *     peer (rather than N transactions × N peers = N² messages).
+   *
+   *  When zero items qualify (e.g. all selected objects were deleted
+   *  between drag-start and drag-end, or the drag-step was below
+   *  noop), no op is pushed at all. */
   function commitMultiDrag(d: MultiDragState): void {
+    const items: TransformManyItem[] = []
     for (const item of d.items) {
       if (item.kind === 'image') {
         const img = deps.getImages().find((i) => i.id === item.id)
         if (!img || img.deleted) continue
         const after = { ...img.transform }
         if (!transformChanged(item.before, after)) continue
-        deps.pushOp({
-          kind: 'transform-image',
-          imageId: item.id,
-          before: item.before,
-          after,
-        })
+        items.push({ kind: 'image', imageId: item.id, before: item.before, after })
       } else if (item.kind === 'text') {
         const t = deps.getTexts().find((x) => x.id === item.id)
         if (!t || t.deleted) continue
         const after = { ...t.transform }
         if (!transformChanged(item.before, after)) continue
-        deps.pushOp({
-          kind: 'transform-text',
-          textId: item.id,
-          before: item.before,
-          after,
-        })
+        items.push({ kind: 'text', textId: item.id, before: item.before, after })
       } else {
         if (item.applied.dx === 0 && item.applied.dy === 0) continue
-        deps.pushOp({
-          kind: 'move',
-          strokeIds: [item.id],
+        items.push({
+          kind: 'stroke',
+          strokeId: item.id,
           dx: item.applied.dx,
           dy: item.applied.dy,
         })
       }
     }
+    if (items.length === 0) return
+    deps.pushOp({ kind: 'transform-many', items })
   }
 
   /**
