@@ -707,29 +707,43 @@ async function main(): Promise<void> {
       ? crypto.randomUUID()
       : `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
 
-  /** Paste a whiteboard-native stroke bundle at the given board point.
-   *  Each pasted stroke gets a fresh id (so it doesn't collide with the
-   *  source stroke if both are on the canvas) and its samples are
-   *  translated by `(cursor - bundle.origin)` so the bbox top-left
-   *  lands at the cursor while relative layout among the pasted strokes
-   *  is preserved.
+  /** Generate a fresh text id. Same shape as `text.ts`'s internal
+   *  makeId (`t_` prefix + UUID) so persisted records have a
+   *  consistent id form regardless of which path created them. */
+  const makePastedTextId = (): string =>
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? `t_${crypto.randomUUID()}`
+      : `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+
+  /** Paste a whiteboard-native bundle (strokes + texts) at the given
+   *  board point. Each pasted object gets a fresh id (so it doesn't
+   *  collide with the source if both are on the canvas) and its
+   *  position is translated by `(cursor - bundle.origin)` so the
+   *  union bbox top-left lands at the cursor while relative layout
+   *  among the pasted items is preserved.
    *
-   *  startedAt gets bumped to a monotone-sequenced `now + i` so the
-   *  render-order sort key stays stable AND the pasted strokes
-   *  consistently render above the originals (later startedAt wins).
+   *  Strokes: samples and erasedStamps translated; startedAt bumped to
+   *  a monotone `now + i` so render-order sort stays stable and pasted
+   *  strokes consistently render above the originals (later startedAt
+   *  wins).
    *
-   *  One `create` op pushed per stroke — same shape as the live-draw
-   *  path. N undo steps for N pasted strokes, matching the per-item
-   *  convention used by v1.1 image batch and the Cmd+A multi-delete. */
-  const pasteStrokeBundle = (
+   *  Texts: transform.x/y translated; z reassigned via nextTextZ() so
+   *  stack order is stable and pasted texts render above originals.
+   *
+   *  One op pushed per item (create / create-text) — N undo steps for
+   *  N pasted items, matching the per-item convention used by v1.1
+   *  image batch and the Cmd+A multi-delete. */
+  const pasteSelectionBundle = (
     bundle: ClipboardStrokeBundle,
     board: { x: number; y: number },
   ): void => {
-    if (bundle.strokes.length === 0) return
+    const bundleTexts = bundle.texts ?? []
+    if (bundle.strokes.length === 0 && bundleTexts.length === 0) return
     const dx = board.x - bundle.origin.x
     const dy = board.y - bundle.origin.y
     const now = Date.now()
-    const newSelection: { kind: 'stroke'; id: string }[] = []
+    const newSelection: Array<{ kind: 'stroke' | 'text'; id: string }> = []
+
     for (let i = 0; i < bundle.strokes.length; i++) {
       const src = bundle.strokes[i]
       if (!src) continue
@@ -751,15 +765,38 @@ async function main(): Promise<void> {
       pushUndoOp({ kind: 'create', strokeId: id })
       newSelection.push({ kind: 'stroke', id })
     }
+
+    for (const src of bundleTexts) {
+      if (!src) continue
+      const id = makePastedTextId()
+      const pasted: TextObject = {
+        ...src,
+        id,
+        transform: {
+          ...src.transform,
+          x: src.transform.x + dx,
+          y: src.transform.y + dy,
+        },
+        // Deep-copy the nested font object so future edits don't mutate
+        // the bundle's source record (which the user might paste again).
+        font: { ...src.font },
+        z: nextTextZ(),
+        createdAt: now,
+        deleted: undefined,
+      }
+      texts.push(pasted)
+      persistText(pasted)
+      pushUndoOp({ kind: 'create-text', textId: id })
+      newSelection.push({ kind: 'text', id })
+    }
+
     committedDirty = true
-    // Auto-switch to Select and pre-select the pasted strokes — same
+    // Auto-switch to Select and pre-select the pasted items — same
     // affordance as image / text paste so the user can immediately
     // adjust position with another drag.
     setTool('select')
     selectTool.selectByIds(newSelection)
-    showInfoToast(
-      bundle.strokes.length === 1 ? 'Stroke pasted' : `${bundle.strokes.length} strokes pasted`,
-    )
+    showInfoToast(`Pasted ${bundleSummary(bundle)}`)
   }
 
   // ---------------------------------------------------------------------
@@ -797,7 +834,7 @@ async function main(): Promise<void> {
         const bundle = extractStrokesFromHtml(html)
         if (bundle) {
           e.preventDefault()
-          pasteStrokeBundle(bundle, pasteAt())
+          pasteSelectionBundle(bundle, pasteAt())
           return
         }
       }
@@ -877,13 +914,14 @@ async function main(): Promise<void> {
     onToast: showInfoToast,
   }
 
-  /** Compute the unrotated, unpadded bbox top-left of the strokes'
-   *  combined sample cloud — used as the `origin` field of the
-   *  whiteboard-native clipboard bundle so paste-back can translate to
-   *  the cursor while preserving relative layout. Differs from
-   *  `computeBoardBounds`'s output, which carries EXPORT_MARGIN for
-   *  PNG breathing room. */
-  const strokesOrigin = (ss: Stroke[]): { x: number; y: number } | null => {
+  /** Compute the unrotated, unpadded union bbox top-left across the
+   *  given strokes' samples + texts' rects. Used as the `origin` field
+   *  of the whiteboard-native clipboard bundle so paste-back can
+   *  translate to the cursor while preserving relative layout among
+   *  all items in the bundle (strokes and texts retain their relative
+   *  positions). Differs from `computeBoardBounds`'s output, which
+   *  carries EXPORT_MARGIN for PNG breathing room. */
+  const selectionOrigin = (ss: Stroke[], ts: TextObject[]): { x: number; y: number } | null => {
     let minX = Number.POSITIVE_INFINITY
     let minY = Number.POSITIVE_INFINITY
     for (const s of ss) {
@@ -891,6 +929,10 @@ async function main(): Promise<void> {
         if (p.x < minX) minX = p.x
         if (p.y < minY) minY = p.y
       }
+    }
+    for (const t of ts) {
+      if (t.transform.x < minX) minX = t.transform.x
+      if (t.transform.y < minY) minY = t.transform.y
     }
     if (!Number.isFinite(minX)) return null
     return { x: minX, y: minY }
@@ -937,12 +979,22 @@ async function main(): Promise<void> {
     })
   }
 
-  /** Write the strokes-only "whiteboard-native" clipboard payload:
-   *  ClipboardItem with both `image/png` (for external paste targets)
-   *  and `text/html` carrying a `data-whiteboard-v1` attribute (for
-   *  paste back into the whiteboard as vector strokes). Returns true
-   *  on success — callers gate cut-then-delete on this. */
-  const writeStrokesBundleToClipboard = async (
+  /** Build a short user-facing message describing the bundle contents.
+   *  Used in copy / paste toasts so the user knows what landed. */
+  const bundleSummary = (bundle: ClipboardStrokeBundle): string => {
+    const nS = bundle.strokes.length
+    const nT = bundle.texts?.length ?? 0
+    if (nT === 0) return nS === 1 ? '1 stroke' : `${nS} strokes`
+    if (nS === 0) return nT === 1 ? '1 text' : `${nT} texts`
+    return `${nS} stroke${nS === 1 ? '' : 's'} + ${nT} text${nT === 1 ? '' : 's'}`
+  }
+
+  /** Write the "whiteboard-native" clipboard payload: ClipboardItem
+   *  with both `image/png` (for external paste targets) and `text/html`
+   *  carrying a `data-whiteboard-v1` attribute (for paste back into
+   *  the whiteboard as vector strokes + texts). Returns true on
+   *  success — callers gate cut-then-delete on this. */
+  const writeSelectionBundleToClipboard = async (
     pngBlob: Blob,
     bundle: ClipboardStrokeBundle,
     onToast: (msg: string) => void,
@@ -956,26 +1008,25 @@ async function main(): Promise<void> {
           'text/html': new Blob([html], { type: 'text/html' }),
         }),
       ])
-      onToast(
-        bundle.strokes.length === 1 ? 'Stroke copied' : `${bundle.strokes.length} strokes copied`,
-      )
+      onToast(`Copied ${bundleSummary(bundle)}`)
       return true
     } catch (err) {
-      console.warn('whiteboard/web: stroke-bundle clipboard write failed:', err)
+      console.warn('whiteboard/web: selection-bundle clipboard write failed:', err)
       // Fall back to PNG-only — at least the external paste path works.
       return writePngBlobToClipboard(pngBlob, onToast)
     }
   }
 
   /** Unified copy/cut for the Select tool. Path selection:
-   *    - Single image      → raw bytes (best fidelity round-trip)
-   *    - Strokes-only      → whiteboard-native bundle + PNG (vector
-   *                          round-trip inside the whiteboard; PNG for
-   *                          external apps)
-   *    - Anything else     → PNG-only (mixed kinds or pure image/text
-   *                          multi — image bytes can't be round-tripped
-   *                          via the bundle without a separate blob
-   *                          slot, deferred)
+   *    - Single image                 → raw bytes (best fidelity)
+   *    - Selection with NO images     → whiteboard-native bundle
+   *                                     (strokes + texts) + PNG. Vector
+   *                                     round-trip inside the whiteboard;
+   *                                     PNG for external apps.
+   *    - Selection includes an image  → PNG-only. Image bytes can't be
+   *                                     round-tripped via the bundle
+   *                                     without a separate blob slot;
+   *                                     deferred.
    *
    *  Returns true on success so cut callers can gate the delete. */
   const performSelectCopy = async (): Promise<boolean> => {
@@ -991,16 +1042,22 @@ async function main(): Promise<void> {
     const pngBlob = await renderSelectionAsPng(snap)
     if (!pngBlob) return false
 
-    // Strokes-only → write native bundle + PNG.
-    if (snap.strokes.length > 0 && snap.images.length === 0 && snap.texts.length === 0) {
-      const origin = strokesOrigin(snap.strokes)
+    // No images → write native bundle + PNG. Strokes and/or texts
+    // round-trip as vectors on paste-back inside the whiteboard.
+    if (snap.images.length === 0 && (snap.strokes.length > 0 || snap.texts.length > 0)) {
+      const origin = selectionOrigin(snap.strokes, snap.texts)
       if (origin) {
-        const bundle: ClipboardStrokeBundle = { v: 1, strokes: snap.strokes, origin }
-        return writeStrokesBundleToClipboard(pngBlob, bundle, showInfoToast)
+        const bundle: ClipboardStrokeBundle = {
+          v: 1,
+          strokes: snap.strokes,
+          texts: snap.texts.length > 0 ? snap.texts : undefined,
+          origin,
+        }
+        return writeSelectionBundleToClipboard(pngBlob, bundle, showInfoToast)
       }
     }
 
-    // Mixed / non-stroke → PNG only.
+    // Selection contains image(s) → PNG only.
     return writePngBlobToClipboard(pngBlob, showInfoToast)
   }
 

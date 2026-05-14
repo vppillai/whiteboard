@@ -1,5 +1,5 @@
 /**
- * Whiteboard-native clipboard format for strokes. Round-trips
+ * Whiteboard-native clipboard format for strokes + texts. Round-trips
  * vector data when the user copies inside the whiteboard and pastes
  * back inside the whiteboard, while still being friendly to external
  * paste targets (Google Docs / Slack / Confluence) that consume the
@@ -11,35 +11,43 @@
  *     <img src="data:image/png;base64,..." alt="Whiteboard selection" />
  *   </div>
  *
- * The data attribute carries the structured stroke bundle; the inline
- * <img> makes the HTML self-contained so rich-text targets that prefer
- * text/html over image/png still render the picture. The image/png
- * blob is written to the clipboard as a separate slot for targets that
- * read it directly.
+ * The data attribute carries the structured bundle (strokes + texts);
+ * the inline <img> makes the HTML self-contained so rich-text targets
+ * that prefer text/html over image/png still render the picture. The
+ * image/png blob is written to the clipboard as a separate slot for
+ * targets that read it directly.
  *
  * On paste back into the whiteboard, we detect the marker via
- * `extractStrokesFromHtml`, freshly id'd-and-translated strokes are
+ * `extractStrokesFromHtml`, freshly id'd-and-translated objects are
  * added to the canvas at the cursor position (preserving relative
- * layout via the `origin` field). Selections that aren't pure strokes
- * (include images or texts) skip this format and fall back to PNG-
- * only — image-bytes round-trip requires a separate blob slot that's
- * a future addition.
+ * layout via the `origin` field). Selections that include IMAGES
+ * skip this format and fall back to PNG-only — image-bytes round-trip
+ * requires a separate blob slot that's a future addition.
  *
- * Version: bump v if the schema changes incompatibly. Older versions
- * are silently ignored on paste — the user pastes as PNG instead.
+ * `texts` is optional in the schema for forward-compat: a future
+ * version that adds images could keep v=1 and append an optional
+ * `images` field; readers ignore unknown fields. Bump `v` only on
+ * truly incompatible changes (e.g. removing strokes or restructuring
+ * origin); then older versions silently fall through to PNG paste.
  */
 
-import type { Stroke } from '@whiteboard/shared'
+import type { Stroke, TextObject } from '@whiteboard/shared'
 
 const MARKER_VERSION = 1
 
 export interface ClipboardStrokeBundle {
   v: typeof MARKER_VERSION
   strokes: Stroke[]
+  /** Texts in the bundle. Optional — empty / absent on stroke-only
+   *  selections (the field is also called out as optional so existing
+   *  pre-text-support callers and persisted snapshots still type-check). */
+  texts?: TextObject[]
   /** Bounding-box top-left of the selection at copy time. On paste, the
    *  whole selection translates by `(cursor - origin)` so relative
    *  layout is preserved and the user's pasted group lands under the
-   *  pointer. */
+   *  pointer. Computed across ALL items in the bundle (strokes' samples
+   *  plus texts' rects) so the union bbox top-left is what lands at
+   *  the cursor — strokes and texts retain their relative positions. */
   origin: { x: number; y: number }
 }
 
@@ -88,6 +96,10 @@ export function extractStrokesFromHtml(html: string): ClipboardStrokeBundle | nu
     const parsed = JSON.parse(json) as ClipboardStrokeBundle
     if (parsed.v !== MARKER_VERSION) return null
     if (!Array.isArray(parsed.strokes)) return null
+    // `texts` is optional. If present, must be an array. Anything else
+    // (string / object / null) is treated as malformed → drop the
+    // whole bundle so we don't half-paste.
+    if (parsed.texts !== undefined && !Array.isArray(parsed.texts)) return null
     if (
       !parsed.origin ||
       typeof parsed.origin.x !== 'number' ||
