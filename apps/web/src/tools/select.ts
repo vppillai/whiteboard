@@ -85,6 +85,36 @@ type DragKind =
   | { resize: HandleId; anchorBoard: { x: number; y: number } }
   | { rotate: true; startRotation: number; startAngleFromCenter: number }
 
+/**
+ * State for a multi-object move drag. Active when the user pointer-downs
+ * on an object that's part of a multi-selection (length > 1); all
+ * selected objects translate together.
+ *
+ * Per-item before-state varies by kind:
+ *   - image / text: snapshot the transform rect — each tick recomputes
+ *     `transform.x/y` from before + total delta (matches the single-
+ *     object move path).
+ *   - stroke: track cumulative applied delta — each tick mutates
+ *     samples + erasedStamps by the step delta (matches the single-
+ *     stroke move path, which mutates in place rather than carrying a
+ *     before-snapshot).
+ *
+ * Resize / rotation are intentionally not part of multi-drag: combined
+ * resize across kinds (image rect resize vs text font-size scale)
+ * doesn't have a single coherent UX, and multi-rotation around a shared
+ * center is a power-user feature better deferred to a dedicated
+ * marquee handle if/when needed.
+ */
+type MultiDragItem =
+  | { kind: 'image'; id: string; before: ImageObject['transform'] }
+  | { kind: 'text'; id: string; before: ImageObject['transform'] }
+  | { kind: 'stroke'; id: string; applied: { dx: number; dy: number } }
+
+interface MultiDragState {
+  startBoard: { x: number; y: number }
+  items: MultiDragItem[]
+}
+
 interface DragState {
   selection: Selection
   kind: DragKind
@@ -223,6 +253,11 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
   // multi-select use case from Cmd+A).
   let selected: Selection[] = []
   let drag: DragState | null = null
+  // Multi-object move drag — mutually exclusive with `drag` (only one is
+  // active at a time). Separate variable keeps the existing single-
+  // object code paths unchanged; multi-drag is a parallel branch that
+  // bypasses the handle / rotate / resize machinery.
+  let multiDrag: MultiDragState | null = null
 
   /** Returns the single-selected item when exactly one object is
    *  selected; null when empty or multi. Used by all paths that need
@@ -641,6 +676,114 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     }
   }
 
+  /** Build the per-item before-state for a multi-move drag, snapshotting
+   *  transforms (images/texts) or initializing the applied-delta tracker
+   *  (strokes) so each move tick can compute deltas correctly. */
+  function startMultiDrag(startBoard: { x: number; y: number }): MultiDragState {
+    const items: MultiDragItem[] = []
+    for (const sel of selected) {
+      if (sel.kind === 'image') {
+        const img = deps.getImages().find((i) => i.id === sel.id)
+        if (!img || img.deleted) continue
+        items.push({ kind: 'image', id: sel.id, before: { ...img.transform } })
+      } else if (sel.kind === 'text') {
+        const t = deps.getTexts().find((x) => x.id === sel.id)
+        if (!t || t.deleted) continue
+        items.push({ kind: 'text', id: sel.id, before: { ...t.transform } })
+      } else {
+        const s = deps.getStrokes().find((x) => x.id === sel.id)
+        if (!s || s.deleted) continue
+        items.push({ kind: 'stroke', id: sel.id, applied: { dx: 0, dy: 0 } })
+      }
+    }
+    return { startBoard, items }
+  }
+
+  /** Per-tick multi-move translation. Image / text items overwrite
+   *  transform.x/y from before + delta; stroke items mutate samples (+
+   *  erasedStamps) by the step delta vs the applied tracker so the
+   *  per-tick work is incremental. */
+  function tickMultiDrag(d: MultiDragState, bx: number, by: number): void {
+    const dx = bx - d.startBoard.x
+    const dy = by - d.startBoard.y
+    for (const item of d.items) {
+      if (item.kind === 'image') {
+        const img = deps.getImages().find((i) => i.id === item.id)
+        if (!img || img.deleted) continue
+        img.transform = { ...item.before, x: item.before.x + dx, y: item.before.y + dy }
+        deps.saveImageMeta(img)
+      } else if (item.kind === 'text') {
+        const t = deps.getTexts().find((x) => x.id === item.id)
+        if (!t || t.deleted) continue
+        t.transform = { ...item.before, x: item.before.x + dx, y: item.before.y + dy }
+        deps.saveText(t)
+      } else {
+        const stroke = deps.getStrokes().find((x) => x.id === item.id)
+        if (!stroke || stroke.deleted) continue
+        const stepDx = dx - item.applied.dx
+        const stepDy = dy - item.applied.dy
+        if (stepDx === 0 && stepDy === 0) continue
+        for (const s of stroke.samples) {
+          s.x += stepDx
+          s.y += stepDy
+        }
+        if (stroke.erasedStamps) {
+          for (const stamp of stroke.erasedStamps) {
+            stamp.x += stepDx
+            stamp.y += stepDy
+          }
+        }
+        invalidateStrokeBBox(stroke)
+        deps.saveStroke(stroke)
+        item.applied.dx = dx
+        item.applied.dy = dy
+      }
+    }
+  }
+
+  /** Commit a multi-move drag: emit one op per moved item. Items whose
+   *  net translation is zero (e.g. the user clicked an object without
+   *  moving past noop threshold) are skipped to avoid undo-stack
+   *  pollution. Each op is independent — undo unwinds one item at a
+   *  time, mirroring the existing image-batch-delete semantics from
+   *  v1.1. A compound "move-many" op kind is a future optimization
+   *  if the per-item churn becomes a problem. */
+  function commitMultiDrag(d: MultiDragState): void {
+    for (const item of d.items) {
+      if (item.kind === 'image') {
+        const img = deps.getImages().find((i) => i.id === item.id)
+        if (!img || img.deleted) continue
+        const after = { ...img.transform }
+        if (!transformChanged(item.before, after)) continue
+        deps.pushOp({
+          kind: 'transform-image',
+          imageId: item.id,
+          before: item.before,
+          after,
+        })
+      } else if (item.kind === 'text') {
+        const t = deps.getTexts().find((x) => x.id === item.id)
+        if (!t || t.deleted) continue
+        const after = { ...t.transform }
+        if (!transformChanged(item.before, after)) continue
+        deps.pushOp({
+          kind: 'transform-text',
+          textId: item.id,
+          before: item.before,
+          after,
+        })
+      } else {
+        if (item.applied.dx === 0 && item.applied.dy === 0) continue
+        deps.pushOp({
+          kind: 'move',
+          strokeIds: [item.id],
+          dx: item.applied.dx,
+          dy: item.applied.dy,
+        })
+      }
+    }
+  }
+
   /**
    * Finalize the current drag — dispatch to the per-kind commit helper
    * and clear `drag`. Called from both onPointerUp (normal release) and
@@ -654,6 +797,16 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
    * than another ~30-line branch in a 130-line function.
    */
   function commitDrag(e: PointerEvent | null): void {
+    // Multi-move commit path — mutually exclusive with single-drag.
+    if (multiDrag) {
+      const md = multiDrag
+      multiDrag = null
+      if (e) {
+        ;(e.target as Element | null)?.releasePointerCapture?.(e.pointerId)
+      }
+      commitMultiDrag(md)
+      return
+    }
     if (!drag) return
     const d = drag
     drag = null
@@ -1041,6 +1194,21 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
           lastTextDownAt = Number.NEGATIVE_INFINITY
           lastTextDownId = null
         }
+        // Is the hit object already part of a MULTI-selection? If so,
+        // start a multi-move drag — every selected object translates
+        // together. The selection itself isn't replaced, so the user
+        // keeps their N-object set.
+        const isHitInMulti =
+          selected.length > 1 && selected.some((s) => s.kind === hit.kind && s.id === hit.id)
+        if (isHitInMulti) {
+          multiDrag = startMultiDrag({ x: bx, y: by })
+          ;(e.target as Element).setPointerCapture?.(e.pointerId)
+          ctx.markCommittedDirty()
+          return
+        }
+
+        // Hit a single (or different) object: replace selection with
+        // just that one and start the regular single-object drag.
         selected = [hit]
         const fresh = getView()
         if (fresh) {
@@ -1078,6 +1246,14 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
 
     onPointerMove(e, ctx): void {
       const { x: bx, y: by } = ctx.toBoard(e.clientX, e.clientY)
+
+      // Multi-object move tick — translate every selected object by the
+      // running delta from drag start.
+      if (multiDrag) {
+        tickMultiDrag(multiDrag, bx, by)
+        ctx.markCommittedDirty()
+        return
+      }
 
       if (!drag) {
         updateHoverCursor(ctx, bx, by)
@@ -1231,14 +1407,43 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
 
     redraw(ctx): void {
       clearLayer(ctx.liveLayer)
-      const view = getView()
-      if (!view) return
+      if (selected.length === 0) return
 
-      if (view.selection.kind === 'stroke') {
-        drawStrokeSelection(view, ctx)
-      } else {
-        drawFloatingObjectSelection(view, ctx)
+      // Single-selection (the common case): full transform UI on the
+      // one selected object — handles, rotation, outline.
+      const view = getView()
+      if (view) {
+        if (view.selection.kind === 'stroke') {
+          drawStrokeSelection(view, ctx)
+        } else {
+          drawFloatingObjectSelection(view, ctx)
+        }
+        return
       }
+
+      // Multi-selection (Cmd+A, future marquee). Paint a halo per
+      // selected stroke here on the live layer. Images / texts get
+      // their multi-selection outline via the renderer predicate in
+      // main.ts (renderImages / renderTexts), which avoids re-walking
+      // the image bytes here. No per-object handles in multi —
+      // transform UI is single-only.
+      const accent = resolveAccent(ctx.liveLayer.ctx)
+      applyCamera(ctx.liveLayer, ctx.camera, ctx.dpr)
+      const c = ctx.liveLayer.ctx
+      const scale = ctx.camera.scale
+      c.save()
+      c.strokeStyle = accent
+      c.lineWidth = 3 / scale
+      c.lineJoin = 'round'
+      c.lineCap = 'round'
+      for (const sel of selected) {
+        if (sel.kind !== 'stroke') continue
+        const stroke = deps.getStrokes().find((x) => x.id === sel.id)
+        if (!stroke || stroke.deleted) continue
+        const path = getStrokePath(stroke, [], true)
+        if (path) c.stroke(path)
+      }
+      c.restore()
     },
 
     renderContextualMenu(host, dismiss): void {
@@ -1389,15 +1594,17 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     },
 
     cleanup(): void {
-      // Commit any in-flight drag BEFORE clearing state so the op lands in
-      // the undo stack. Without this, a tool-switch (or OS gesture-steal)
-      // mid-drag silently dropped the move/transform/rotate op — the
-      // object was already mutated in memory and persisted per-tick, so
-      // the user saw the change but couldn't undo it. commitDrag is a
-      // no-op when `drag` is null, so this is safe on every cleanup call.
+      // Commit any in-flight drag (single or multi) BEFORE clearing
+      // state so the op(s) land in the undo stack. Without this, a
+      // tool-switch (or OS gesture-steal) mid-drag silently dropped the
+      // move/transform/rotate ops — the objects were mutated and
+      // persisted per-tick but never recorded in undo. commitDrag is a
+      // no-op when both `drag` and `multiDrag` are null, so this is
+      // safe on every cleanup call.
       commitDrag(null)
       selected = []
       drag = null
+      multiDrag = null
     },
 
     getSelectedImage(): ImageObject | null {
@@ -1473,6 +1680,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       commitDrag(null)
       selected = []
       drag = null
+      multiDrag = null
       deps.markCommittedDirty()
     },
 
