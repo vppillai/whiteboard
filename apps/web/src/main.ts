@@ -1176,6 +1176,13 @@ async function main(): Promise<void> {
         }
         if (clearFlow.cancel()) handled = true
         if (dismissAllPopovers()) handled = true
+        // Esc closes the help overlay if open. Goes after popovers so a
+        // user with both help AND a popover open dismisses one at a
+        // time — same pattern as distraction-free above.
+        if (help.isOpen()) {
+          help.close()
+          handled = true
+        }
         // Esc cancels any Select-tool selection state — either a
         // committed multi-selection OR a marquee drag still in
         // progress. The marquee check matters because a user mid-

@@ -257,6 +257,9 @@ body {
   bottom: 12px;
   right: 12px;
   padding: 10px 14px;
+  /* Extra right padding so the shortcut text doesn't run under the
+     absolute-positioned close button in the top-right corner. */
+  padding-right: 30px;
   background: var(--hud-bg);
   color: var(--hud-fg);
   border: 1px solid var(--hud-border);
@@ -267,6 +270,31 @@ body {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   opacity: 0.92;
+}
+
+#whiteboard-help .whiteboard-help-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--hud-fg);
+  font: 12px / 1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  cursor: pointer;
+  opacity: 0.6;
+  /* Pin pointer-events back on so the button is clickable through the
+     panel wrapper's pointer-events:none. */
+  pointer-events: auto;
+  transition: opacity 0.12s, background-color 0.12s;
+}
+
+#whiteboard-help .whiteboard-help-close:hover {
+  opacity: 1;
+  background: var(--hud-border);
 }
 
 #whiteboard-help .whiteboard-help-shortcuts {
