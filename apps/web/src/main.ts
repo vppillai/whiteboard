@@ -474,6 +474,9 @@ async function main(): Promise<void> {
   const eraserTool: EraserTool = createEraserTool({
     callbacks: {
       getStrokes: () => strokes,
+      getShapes: () => shapes,
+      getTexts: () => texts,
+      getImages: () => images,
       onObjectErase: (id) => {
         const op: Op = { kind: 'delete', strokeIds: [id] }
         applyOp(op, opCtx)
@@ -487,6 +490,28 @@ async function main(): Promise<void> {
         const op: Op = { kind: 'eraseStamps', edits }
         applyOp(op, opCtx)
         pushUndoOp(op)
+      },
+      onWholeObjectErase: ({ shapes: shapeIds, texts: textIds, images: imageIds }) => {
+        // Non-stroke whole-object deletes from the eraser pass. Emit
+        // one delete op per object (same per-kind ops the Select tool
+        // uses for Cmd+Delete). All applied + pushed in sequence so a
+        // single Cmd+Z reverses the whole eraser gesture in one step
+        // for the user, even though it's N undo entries internally.
+        for (const id of shapeIds) {
+          const op: Op = { kind: 'delete-shape', shapeId: id }
+          applyOp(op, opCtx)
+          pushUndoOp(op)
+        }
+        for (const id of textIds) {
+          const op: Op = { kind: 'delete-text', textId: id }
+          applyOp(op, opCtx)
+          pushUndoOp(op)
+        }
+        for (const id of imageIds) {
+          const op: Op = { kind: 'delete-image', imageId: id }
+          applyOp(op, opCtx)
+          pushUndoOp(op)
+        }
       },
     },
   })
