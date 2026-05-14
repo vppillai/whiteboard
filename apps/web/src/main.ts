@@ -1506,24 +1506,31 @@ async function main(): Promise<void> {
       // of the "paste an image and draw on top" feature. See renderimages.ts
       // for the per-image draw loop (viewport cull, rotation, batch-delete
       // outline).
-      // Multi-selection outline predicate: true when the object is part
-      // of a Select-tool selection with MORE than one item (the
+      // Multi-selection outline predicate: true when the object is
+      // part of a Select-tool selection with MORE than one item (the
       // single-selection case is painted by the Select tool's own
       // redraw — handles + outline). Cmd+A populates Select with
-      // every non-deleted object, which is the primary user-facing path
-      // for the multi-selection visual.
+      // every non-deleted object, which is the primary user-facing
+      // path for this visual.
+      //
+      // Set-cached per frame: a single .filter().map() walks the
+      // selection once and the renderer's per-image / per-text lookup
+      // is O(1). Without the cache, the prior `sels.some(...)` predicate
+      // ran O(M) for every image and every text, producing O(N×M)
+      // comparisons per frame on a Cmd+A of a large board.
       const sels = selectTool.getSelections()
-      const isMultiSelected =
-        sels.length > 1
-          ? (kind: 'image' | 'text', id: string): boolean =>
-              sels.some((s) => s.kind === kind && s.id === id)
-          : (): boolean => false
+      const multiSelectedImageIds =
+        sels.length > 1 ? new Set(sels.filter((s) => s.kind === 'image').map((s) => s.id)) : null
+      const multiSelectedTextIds =
+        sels.length > 1 ? new Set(sels.filter((s) => s.kind === 'text').map((s) => s.id)) : null
       renderImages({
         images,
         layer: target.committed,
         camera,
         viewBBox,
-        isMarkedForBatchDelete: (id) => isMultiSelected('image', id),
+        isMultiSelected: multiSelectedImageIds
+          ? (id) => multiSelectedImageIds.has(id)
+          : () => false,
       })
 
       // Texts render above images and below the strokes composite. The
@@ -1536,7 +1543,7 @@ async function main(): Promise<void> {
         viewBBox,
         resolveColor: resolveInkColor,
         editingId: textTool.getEditingId(),
-        isMarkedForBatchDelete: (id) => isMultiSelected('text', id),
+        isMultiSelected: multiSelectedTextIds ? (id) => multiSelectedTextIds.has(id) : () => false,
       })
 
       // Composite the strokes offscreen onto committed in pixel space

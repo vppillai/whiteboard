@@ -16,8 +16,10 @@
  * as a horizontal line stroked at the baseline + ~2 px — `textBaseline =
  * 'top'` makes per-line positioning straightforward.
  *
- * The `marked` predicate hooks the Cmd+A batch-delete affordance the
- * same way it does for images: marked texts get a dashed accent outline.
+ * The `isMultiSelected` predicate hooks the Select-tool multi-selection
+ * outline the same way it does for images: each text that's part of a
+ * multi-selection (length > 1) gets a dashed accent outline. The
+ * single-selection visual is painted by Select's own redraw.
  */
 
 import type { TextObject } from '@whiteboard/shared'
@@ -43,15 +45,17 @@ export interface RenderTextsParams {
    *  on-canvas version doesn't double up with the editable. Null when
    *  no text is being edited. */
   editingId: string | null
-  /** Predicate identifying texts marked for batch delete (Cmd+A flow). */
-  isMarkedForBatchDelete: (id: string) => boolean
+  /** Predicate identifying texts that are part of a Select-tool
+   *  multi-selection (length > 1). The single-selection visual is
+   *  painted by Select's own redraw with handles + outline. */
+  isMultiSelected: (id: string) => boolean
 }
 
-const BATCH_OUTLINE_COLOR = '#2563eb'
+const MULTI_SELECTION_OUTLINE_COLOR = '#2563eb'
 const ROTATION_EPSILON = 1e-9
 
 export function renderTexts(params: RenderTextsParams): void {
-  const { texts, layer, camera, viewBBox, resolveColor, editingId, isMarkedForBatchDelete } = params
+  const { texts, layer, camera, viewBBox, resolveColor, editingId, isMultiSelected } = params
   const ctx = layer.ctx
   for (const t of texts) {
     if (t.deleted) continue
@@ -63,7 +67,7 @@ export function renderTexts(params: RenderTextsParams): void {
     const r = t.rotation ?? 0
     if (Math.abs(r) < ROTATION_EPSILON) {
       drawText(ctx, t, resolveColor)
-      if (isMarkedForBatchDelete(t.id)) drawBatchOutline(ctx, t, camera.scale)
+      if (isMultiSelected(t.id)) drawMultiSelectionOutline(ctx, t, camera.scale)
     } else {
       ctx.save()
       const cx = t.transform.x + t.transform.w / 2
@@ -82,7 +86,7 @@ export function renderTexts(params: RenderTextsParams): void {
         },
       }
       drawText(ctx, local, resolveColor)
-      if (isMarkedForBatchDelete(t.id)) drawBatchOutline(ctx, local, camera.scale)
+      if (isMultiSelected(t.id)) drawMultiSelectionOutline(ctx, local, camera.scale)
       ctx.restore()
     }
   }
@@ -125,10 +129,14 @@ function drawText(
   ctx.restore()
 }
 
-function drawBatchOutline(ctx: CanvasRenderingContext2D, t: TextObject, scale: number): void {
+function drawMultiSelectionOutline(
+  ctx: CanvasRenderingContext2D,
+  t: TextObject,
+  scale: number,
+): void {
   const { x, y, w, h } = t.transform
   ctx.save()
-  ctx.strokeStyle = BATCH_OUTLINE_COLOR
+  ctx.strokeStyle = MULTI_SELECTION_OUTLINE_COLOR
   ctx.lineWidth = 2 / scale
   ctx.setLineDash([6 / scale, 4 / scale])
   ctx.strokeRect(x, y, w, h)
