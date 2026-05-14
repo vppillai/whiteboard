@@ -74,7 +74,7 @@ import { attachPan } from './pan'
 import { runPerftest } from './perftest'
 import { createHelpPill } from './pill'
 import { attachPointer } from './pointer'
-import { dismissAllPopovers, getActivePopover, getActiveTag } from './popover'
+import { dismissAllPopovers, findPopoverByTag } from './popover'
 import { applyCamera, clearLayer, drawStrokeOntoLayer, drawStrokePath, setupCanvas } from './render'
 import { renderImages } from './renderimages'
 import { renderTexts } from './rendertexts'
@@ -884,17 +884,19 @@ async function main(): Promise<void> {
       if (e.button !== 2) return
       e.stopImmediatePropagation()
       e.preventDefault()
-      if (getActiveTag() === 'tools') {
+      const existingTools = findPopoverByTag('tools')
+      if (existingTools) {
         // A tool menu is already up. If it's pinned, the user explicitly
         // asked for it to persist — flash it to redirect their eye (the
         // pinned menu IS their context menu now) and don't open a new
         // instance. Otherwise, the right-click acts as a toggle and
-        // dismisses the current menu.
-        const active = getActivePopover()
-        if (active?.isPinned()) {
-          active.flashAttention()
+        // dismisses just the tool menu (any other coexisting popovers
+        // — color, options, export — are unaffected; this is a
+        // tool-menu-specific toggle, not a global cancel).
+        if (existingTools.isPinned()) {
+          existingTools.flashAttention()
         } else {
-          dismissAllPopovers()
+          existingTools.dismiss()
         }
         return
       }
@@ -1115,11 +1117,16 @@ async function main(): Promise<void> {
       clear: clearFlow.request,
       toggleTheme: cycleMode,
       toggleColor: () => {
-        if (getActiveTag() === 'color') dismissAllPopovers()
+        // Toggle the color picker specifically — leaves any other
+        // popovers (e.g. a pinned tools menu) alone. Same-tag toggle
+        // dispatch.
+        const existing = findPopoverByTag('color')
+        if (existing) existing.dismiss()
         else openColorPicker(lastPointer)
       },
       toggleOptions: () => {
-        if (getActiveTag() === 'options') dismissAllPopovers()
+        const existing = findPopoverByTag('options')
+        if (existing) existing.dismiss()
         else openOptionsMenu(lastPointer)
       },
       toggleHelp: help.toggle,
@@ -1231,7 +1238,10 @@ async function main(): Promise<void> {
         if (next) setColor(next)
       },
       openExport: () => {
-        if (getActiveTag() === 'export') dismissAllPopovers()
+        // Toggle export popover specifically. Doesn't touch a pinned
+        // tools menu or other coexisting popovers.
+        const existing = findPopoverByTag('export')
+        if (existing) existing.dismiss()
         else
           openExportPopover({
             anchor: lastPointer,

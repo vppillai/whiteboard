@@ -153,11 +153,13 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
         label: 'Grid…',
         title: 'Grid options',
         onClick: () => {
-          // Grid… opens another popover; the single-instance rule will
-          // replace this menu regardless of pin state. Use dismiss for
-          // honesty.
-          dismiss()
+          // Grid… opens another popover. Multi-popover coexistence
+          // (popover.ts) means same-tag-replaces, different-tag-
+          // coexists, so a pinned tools menu survives the Grid open
+          // (different tag). Use onAction so this menu stays pinned
+          // if the user pinned it.
           openOptionsMenu(opts.at)
+          onAction()
         },
       }),
     )
@@ -175,10 +177,10 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
       pill({
         label: 'Export…',
         onClick: () => {
-          // Export… opens another popover — same dismiss-on-navigation
-          // rationale as Grid… above.
-          dismiss()
+          // Export… opens another popover. Same coexistence rules as
+          // Grid… above — pinned tools menu survives via different tag.
           opts.onExport()
+          onAction()
         },
       }),
     )
@@ -196,12 +198,15 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
       }),
     )
 
-    // Destructive — at the bottom, separated.
+    // Destructive — at the bottom, separated. Uses onAction so a
+    // pinned menu survives the Clear flow being requested (the
+    // clearFlow opens a confirm dialog, not a popover, so coexistence
+    // is fine).
     root.appendChild(separator())
     root.appendChild(
       fullItem('Clear board…', () => {
-        dismiss()
         opts.onClear()
+        onAction()
       }),
     )
   }
