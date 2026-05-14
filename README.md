@@ -16,12 +16,13 @@ A low-latency, browser-based whiteboard tuned for Wacom Intuos and other indirec
 - **Universal clipboard** — `Cmd/Ctrl+C` / `Cmd/Ctrl+X` writes both a transparent-background PNG and a structured stroke + text bundle to the clipboard. Pasting back inside the whiteboard restores strokes and texts as live vectors with relative layout preserved; pasting into Google Docs / Slack / Confluence lands as PNG. A single-image selection writes the original image bytes for full-fidelity round-trip.
 - **Image paste** — `Ctrl/Cmd+V` or drag-drop a PNG / JPEG / WebP / GIF onto the canvas; lands as a floating object below the strokes layer so pen-on-image is the natural workflow. Auto-switches to the Select tool with handles shown so the user can drag into place.
 - **Text** (`T`) — multi-line text objects with mono / 12 px defaults. Bold / italic / underline via `Cmd/Ctrl+B/I/U`. Right-click menu for font / size / color. `Ctrl/Cmd+V` on the canvas with clipboard text creates a new TextObject at the cursor. Texts copied from the whiteboard paste back natively as text objects (with their font / size / color / wrap-width preserved). Drag the E/W edge handle on a selected text in `V` mode to set a wrap width and reflow content.
-- **Laser** (`L`) — fading polyline trail for presentations; color via the curated palette. Nothing persists.
-- **Exports** — PNG, SVG, PDF; all include images + texts in z-order with rotation and wrap-width preserved.
+- **Shape tool** — rectangle (`R`), ellipse (`O`), arrow (`A`), line (`L`). Drag to create; `Shift` constrains (square / circle / 45° lines). Sticky color, stroke width, and fill toggle (filled shapes get a translucent tint behind the outline). Resize handles + rotation work in `V` mode the same as for images and texts.
+- **Laser** (`P`) — fading polyline trail for presentations; color via the curated palette. Nothing persists.
+- **Exports** — PNG, SVG, PDF; all include images, texts, and shapes in z-order with rotation preserved. SVG exports emit native `<rect>` / `<ellipse>` / `<line>` for shapes so the output stays editable in other vector tools.
 - **Pressure-curve editor** — per-brush bezier graph with a live test pad. Mouse-mode synthetic pressure (velocity-shaped) ships on by default for mouse strokes.
 - **Infinite canvas** — wheel-pan, `Cmd/Ctrl+wheel` zoom, `Cmd/Ctrl+0` reset, `Cmd/Ctrl+1` zoom-to-fit.
 - **Themes** — light / dark / system; the `ink` color token tracks the theme.
-- **Color picker** (`C`) — curated palette, custom swatches, recent colors.
+- **Color picker** (`Shift+C`) — curated palette, custom swatches, recent colors.
 - **Configurable grid** — dots / lines / ruled / none, multiple spacings.
 - **Distraction-free mode** (`F`) — hides app chrome for clean drawing.
 - **Settings panel** (`Cmd/Ctrl+,`) — brush tuning, swatches, theme, grid, advanced.
@@ -96,7 +97,7 @@ Post-v1 work, tracked in [docs/milestones.md](docs/milestones.md) and [SPEC § 1
 
 ## Project status
 
-**v1.3.0** — single-user, offline-first, production-ready for the indirect-input drawing case the project was built for. Lint, typecheck, and 152 unit tests run on every push (`bun test`); latency budget (≤ 33 ms pen-to-photon) is feel-tested on Wacom Intuos at every milestone close.
+**v1.4.0** — single-user, offline-first, production-ready for the indirect-input drawing case the project was built for. Lint, typecheck, and 167 unit tests run on every push (`bun test`); latency budget (≤ 33 ms pen-to-photon) is feel-tested on Wacom Intuos at every milestone close.
 
 > **Authorship note.** This codebase is AI-generated under human direction: produced primarily by an AI coding assistant working from a human-authored spec, with design decisions, feel-test gates, and acceptance by a human. Published as OSS for anyone solving the same indirect-input drawing problem.
 
