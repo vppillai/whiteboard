@@ -9,5 +9,5 @@ export {
   type StampEdit,
 } from './eraser'
 export { createLaserTool } from './laser'
-export { createSelectTool, type SelectTool } from './select'
+export { createSelectTool, type SelectTool, type Selection } from './select'
 export { createTextTool, type TextTool } from './text'

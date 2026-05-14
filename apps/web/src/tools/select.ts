@@ -54,7 +54,11 @@ import { getStrokeBBox, getStrokePath, invalidateStrokeBBox } from '../stroke'
 import { TEXT_PADDING_X, pointInText, resizeToFit, textAABB } from '../textgeom'
 import type { Tool, ToolContext } from './types'
 
-type Selection =
+/** Discriminated-union pointer to a single board object across the
+ *  three v1.3 kinds. Exported so external callers (the clipboard
+ *  paste path in `main.ts`, future history-panel UI, etc.) can name
+ *  the shape directly rather than re-declaring a structural copy. */
+export type Selection =
   | { kind: 'image'; id: string }
   | { kind: 'text'; id: string }
   | { kind: 'stroke'; id: string }

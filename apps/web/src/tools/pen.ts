@@ -21,6 +21,7 @@
 import type { BrushConfig, Sample, Stroke } from '@whiteboard/shared'
 import { BRUSH_IDS, BRUSH_LABELS, BRUSH_PRESETS } from '../brushes'
 import { boardToScreen } from '../camera'
+import { makeStrokeId } from '../ids'
 import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
 import { applyCamera, clearLayer, drawStrokePath } from '../render'
 import { getBrushId, getColor, getSettings, setBrushId, setColor } from '../settings'
@@ -388,7 +389,7 @@ export function createPenTool(opts: PenToolOptions): Tool {
       // the first call as zero-velocity (heaviest synthetic pressure).
       lastSampleScreen = null
       active = {
-        id: makeId(),
+        id: makeStrokeId(),
         brush,
         samples: [sample(e, brush, ctx, e.pointerType)],
         startedAt: Date.now(),
@@ -526,9 +527,4 @@ export function createPenTool(opts: PenToolOptions): Tool {
 
     cleanup: cancel,
   }
-}
-
-function makeId(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
-  return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
 }

@@ -34,6 +34,7 @@
 
 import type { TextFontFamily, TextObject } from '@whiteboard/shared'
 import { CURATED_COLORS as PALETTE } from '../colorpicker'
+import { makeTextId } from '../ids'
 import { paletteGrid, pill, pillRow, sectionLabel, separator, swatch } from '../menu-ui'
 import type { Op } from '../ops'
 import {
@@ -165,11 +166,6 @@ export function createTextTool(deps: TextToolDeps): TextTool {
   // flows. null until populated; callsites null-check.
   let lastCtx: ToolContext | null = null
 
-  const makeId = (): string =>
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? `t_${crypto.randomUUID()}`
-      : `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
-
   /** Single factory for new TextObjects with sticky defaults applied + the
    *  content rect already measured. Used by both placement (empty-space
    *  pointerdown → enter edit mode) AND clipboard-text paste (content
@@ -178,7 +174,7 @@ export function createTextTool(deps: TextToolDeps): TextTool {
    *  for its flow. */
   const buildTextFromDefaults = (content: string, board: { x: number; y: number }): TextObject => {
     const nt: TextObject = {
-      id: makeId(),
+      id: makeTextId(),
       content,
       font: {
         family: getTextFont(),

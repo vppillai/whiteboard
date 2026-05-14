@@ -51,6 +51,7 @@ import { openExportPopover } from './exportpopover'
 import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid, invalidateGridColors } from './grid'
 import { createHelpOverlay } from './helpoverlay'
+import { makeStrokeId, makeTextId } from './ids'
 import { _clearImageCache, evictImageElement, loadImageElement } from './imagecache'
 import { writeImageToClipboard, writePngBlobToClipboard } from './imageclipboard'
 import {
@@ -95,6 +96,7 @@ import { openToolMenu } from './toolmenu'
 import { createToolPill } from './toolpill'
 import {
   type EraserTool,
+  type Selection,
   type Tool,
   type ToolContext,
   type ToolId,
@@ -700,21 +702,6 @@ async function main(): Promise<void> {
     showInfoToast('Text pasted')
   }
 
-  /** Generate a fresh stroke id. Mirrors `pen.ts`'s makeId — keeping a
-   *  local copy avoids cross-tool import for this one paste-path call. */
-  const makePastedStrokeId = (): string =>
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
-
-  /** Generate a fresh text id. Same shape as `text.ts`'s internal
-   *  makeId (`t_` prefix + UUID) so persisted records have a
-   *  consistent id form regardless of which path created them. */
-  const makePastedTextId = (): string =>
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? `t_${crypto.randomUUID()}`
-      : `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
-
   /** Paste a whiteboard-native bundle (strokes + texts) at the given
    *  board point. Each pasted object gets a fresh id (so it doesn't
    *  collide with the source if both are on the canvas) and its
@@ -742,12 +729,12 @@ async function main(): Promise<void> {
     const dx = board.x - bundle.origin.x
     const dy = board.y - bundle.origin.y
     const now = Date.now()
-    const newSelection: Array<{ kind: 'stroke' | 'text'; id: string }> = []
+    const newSelection: Selection[] = []
 
     for (let i = 0; i < bundle.strokes.length; i++) {
       const src = bundle.strokes[i]
       if (!src) continue
-      const id = makePastedStrokeId()
+      const id = makeStrokeId()
       const translatedSamples = src.samples.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy }))
       const translatedStamps = src.erasedStamps?.map((s) => ({ ...s, x: s.x + dx, y: s.y + dy }))
       const pasted: Stroke = {
@@ -768,7 +755,7 @@ async function main(): Promise<void> {
 
     for (const src of bundleTexts) {
       if (!src) continue
-      const id = makePastedTextId()
+      const id = makeTextId()
       const pasted: TextObject = {
         ...src,
         id,
