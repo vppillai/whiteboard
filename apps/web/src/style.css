@@ -1157,6 +1157,44 @@ body {
   background: rgba(239, 68, 68, 0.08);
 }
 
+/* "Danger zone" factory-reset footer. Visually distinct from the
+ * normal "Reset to defaults" so a stray click doesn't vaporize the
+ * user's boards: a tinted red background, a clear section label, a
+ * short description of what gets wiped, and a solid-red button (not
+ * the outline-only style used by the gentler reset above). v1.4. */
+.whiteboard-settings-danger {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.05);
+  border: 1px solid rgba(239, 68, 68, 0.18);
+}
+.whiteboard-settings-danger-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #ef4444;
+  margin-bottom: 6px;
+}
+.whiteboard-settings-danger-desc {
+  font-size: 11px;
+  color: var(--fg-muted, rgba(0, 0, 0, 0.6));
+  margin: 0 0 10px 0;
+  line-height: 1.4;
+}
+.whiteboard-settings-factory-reset-btn {
+  /* Solid red, not the outline variant — emphasizes the
+   * destructive nature beyond the gentler "Reset to defaults". */
+  background: #ef4444;
+  color: #fff;
+  border-color: #ef4444;
+}
+.whiteboard-settings-factory-reset-btn:hover {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
 /* First-run hint — empty-board discovery overlay (M2). */
 .firstrun-hint {
   position: fixed;

@@ -61,6 +61,7 @@ import { CURATED_COLORS, cyclePaletteIndex, openColorPicker } from './colorpicke
 import { exitDistractionFree, isDistractionFree, toggleDistractionFree } from './distractionfree'
 import { attachEraserHold } from './eraserhold'
 import { openExportPopover } from './exportpopover'
+import { createFactoryResetFlow } from './factoryreset'
 import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid, invalidateGridColors } from './grid'
 import { createHelpOverlay } from './helpoverlay'
@@ -583,6 +584,7 @@ async function main(): Promise<void> {
   //  close via the cleanup callback the panel-content factory returns.
   // ---------------------------------------------------------------------
   const resetFlow = createResetFlow({ refocusOnClose: root })
+  const factoryResetFlow = createFactoryResetFlow({ refocusOnClose: root })
   const togglePanel = (): void => {
     if (isSidePanelOpen()) {
       dismissSidePanel()
@@ -590,6 +592,7 @@ async function main(): Promise<void> {
     }
     const content = createPanelContent({
       onResetClick: () => resetFlow.request(),
+      onFactoryResetClick: () => factoryResetFlow.request(),
     })
     showSidePanel({
       title: 'Settings',
