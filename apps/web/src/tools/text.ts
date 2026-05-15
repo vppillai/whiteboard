@@ -54,10 +54,10 @@ import { buildSwatchPalette } from '../swatchpalette'
 import {
   FONT_CSS,
   LINE_HEIGHT_MULT,
-  TEXT_PADDING_X,
-  TEXT_PADDING_Y,
   pointInText,
   resizeToFit,
+  TEXT_PADDING_X,
+  TEXT_PADDING_Y,
 } from '../textgeom'
 import type { Tool, ToolContext } from './types'
 

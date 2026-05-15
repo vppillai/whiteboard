@@ -4,7 +4,7 @@
  * Theme intentionally not touched — see spec § 9.
  */
 
-import { type DestructiveConfirm, createDestructiveConfirm } from './destructiveconfirm'
+import { createDestructiveConfirm, type DestructiveConfirm } from './destructiveconfirm'
 import { resetAll } from './settings'
 
 export type ResetFlow = DestructiveConfirm

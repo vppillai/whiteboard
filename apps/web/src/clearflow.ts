@@ -4,7 +4,7 @@
  * priming-toast pattern.
  */
 
-import { type DestructiveConfirm, createDestructiveConfirm } from './destructiveconfirm'
+import { createDestructiveConfirm, type DestructiveConfirm } from './destructiveconfirm'
 
 export type ClearFlow = DestructiveConfirm
 

@@ -15,7 +15,7 @@ import { getSettings } from '../settings'
 import { type Bounds, computeBoardBounds, computeViewportBounds } from './bounds'
 import { exportPDF } from './pdf'
 import { exportPNG } from './png'
-import { type ImageDataUriMap, exportSVG } from './svg'
+import { exportSVG, type ImageDataUriMap } from './svg'
 
 export type ExportFormat = 'png' | 'svg' | 'pdf'
 /** Scope of the export — the bounding rectangle in board space. */

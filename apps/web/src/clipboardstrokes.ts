@@ -183,9 +183,9 @@ function isValidShapeShape(s: unknown): boolean {
  *  places a hostile `data-whiteboard-v1` blob in its copy text can't
  *  flood the user's canvas with infinite strokes when they paste. */
 export function extractStrokesFromHtml(html: string): ClipboardStrokeBundle | null {
-  if (!html || !html.includes('data-whiteboard-v1')) return null
+  if (!html?.includes('data-whiteboard-v1')) return null
   const match = html.match(ATTR_MATCH)
-  if (!match || !match[1]) return null
+  if (!match?.[1]) return null
   const json = decodeAttributeEntities(match[1])
   try {
     const parsed = JSON.parse(json) as ClipboardStrokeBundle

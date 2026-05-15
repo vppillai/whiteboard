@@ -17,7 +17,7 @@ import { getStroke } from 'perfect-freehand'
 import { imageAABB, imageCenter } from '../imagegeom'
 import { shapeAABB } from '../rendershapes'
 import type { GridType, SettingsV1 } from '../settings'
-import { FONT_CSS, TEXT_PADDING_X, TEXT_PADDING_Y, measureText, textAABB } from '../textgeom'
+import { FONT_CSS, measureText, TEXT_PADDING_X, TEXT_PADDING_Y, textAABB } from '../textgeom'
 import { resolveInkColor } from '../theme'
 import type { Bounds } from './bounds'
 

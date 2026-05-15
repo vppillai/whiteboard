@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import type { Stroke, TextObject } from '@whiteboard/shared'
 import {
-  type ClipboardStrokeBundle,
   buildClipboardHtml,
+  type ClipboardStrokeBundle,
   extractStrokesFromHtml,
 } from './clipboardstrokes'
 

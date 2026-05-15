@@ -7,7 +7,7 @@
  * in the side panel's Custom swatches section.
  */
 
-import { type Popover, findPopoverByTag, showPopover } from './popover'
+import { findPopoverByTag, type Popover, showPopover } from './popover'
 import {
   getColor,
   getCustomSwatches,

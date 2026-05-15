@@ -92,11 +92,7 @@ export interface EraserToolCallbacks {
    *  semantics for vector / raster objects are whole-object delete
    *  regardless of eraser mode. Empty arrays for kinds that weren't
    *  touched. v1.4. */
-  onWholeObjectErase: (deletes: {
-    shapes: string[]
-    texts: string[]
-    images: string[]
-  }) => void
+  onWholeObjectErase: (deletes: { shapes: string[]; texts: string[]; images: string[] }) => void
 }
 
 export interface EraserToolOptions {

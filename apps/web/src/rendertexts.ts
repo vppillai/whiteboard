@@ -25,7 +25,7 @@
 import type { TextObject } from '@whiteboard/shared'
 import type { Camera } from './camera'
 import type { CanvasLayer } from './render'
-import { TEXT_PADDING_X, TEXT_PADDING_Y, fontCss, measureText, textAABB } from './textgeom'
+import { fontCss, measureText, TEXT_PADDING_X, TEXT_PADDING_Y, textAABB } from './textgeom'
 
 export interface ViewBBox {
   minX: number

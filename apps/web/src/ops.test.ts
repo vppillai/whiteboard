@@ -12,7 +12,7 @@
 
 import { describe, expect, test } from 'bun:test'
 import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
-import { type Op, type OpContext, applyOp, unapplyOp } from './ops'
+import { applyOp, type Op, type OpContext, unapplyOp } from './ops'
 
 function mkText(id: string, overrides: Partial<TextObject> = {}): TextObject {
   return {

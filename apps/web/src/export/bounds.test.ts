@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { ImageObject, Stroke } from '@whiteboard/shared'
-import { type Bounds, EXPORT_MARGIN, computeBoardBounds } from './bounds'
+import { type Bounds, computeBoardBounds, EXPORT_MARGIN } from './bounds'
 
 function mkImage(x: number, y: number, w: number, h: number, deleted = false): ImageObject {
   return {

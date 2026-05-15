@@ -6,8 +6,6 @@
 
 import { BRUSH_IDS, BRUSH_LABELS, type BrushId } from '../brushes'
 import {
-  VALID_GRID_TYPE_VALUES,
-  VALID_SPACING_VALUES,
   clearPreset,
   getCustomSwatches,
   getEffectiveBrushConfig,
@@ -20,9 +18,11 @@ import {
   setMouseSyntheticPressure,
   setPredictedEvents,
   setPresetField,
+  VALID_GRID_TYPE_VALUES,
+  VALID_SPACING_VALUES,
 } from '../settings'
 import { createSwatchAdd } from '../swatchadd'
-import { type ThemeMode, getMode as getThemeMode, setMode as setThemeMode } from '../theme'
+import { getMode as getThemeMode, setMode as setThemeMode, type ThemeMode } from '../theme'
 import { mountCurveEditor, renderCurveThumbnail } from './curve-editor'
 
 export interface PanelContentOptions {
