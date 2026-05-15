@@ -147,9 +147,9 @@ Stored locally in IndexedDB as one row per stroke. The schema is CRDT-compatible
 
 ### 4.1 Tool set (v1)
 
-Brush (Pen), Eraser (two modes — see below), Text, Select (universal selection — single + multi via marquee / Shift+click / Cmd+A; see [ADRs 0014](docs/decisions/0014-select-tool-selection-union.md) + [0016](docs/decisions/0016-lasso-into-select-absorption.md)), Laser, Pan. That's it. The original Lasso tool was absorbed into Select post-v1.2.
+Brush (Pen), Eraser (two modes — see below), Text, Shape (rectangle / ellipse / arrow / line), Select (universal selection — single + multi via marquee / Shift+click / Cmd+A; see [ADRs 0014](docs/decisions/0014-select-tool-selection-union.md) + [0016](docs/decisions/0016-lasso-into-select-absorption.md)), Laser, Pan. That's it. The original Lasso tool was absorbed into Select in v1.3.
 
-> **Eraser model:** the wipe-mode eraser is **segment-level** ("cuts through") — only the part of a stroke the eraser physically passes over disappears; disconnected parts of the original stroke survive as separate live runs. Implemented per [ADR 0008](docs/decisions/0008-segment-eraser.md) via a per-sample mask (`Stroke.erasedSamples`). The object-mode eraser (Shift-modifier or Item pill) is still whole-stroke deletion — surgical removal when you want a stroke gone entirely.
+> **Eraser model:** the wipe-mode eraser is **pixel-mask** ("cuts through") — only the part of a stroke the eraser physically passes over disappears; disconnected parts of the original stroke survive as separate live runs. Implemented per [ADR 0009](docs/decisions/0009-pixel-mask-eraser.md) via cursor-disk stamps (`Stroke.erasedStamps`). The object-mode eraser (Shift-modifier or Item pill) deletes one topmost object per tap.
 
 ### 4.2 Discovery surfaces
 
@@ -157,7 +157,7 @@ No persistent toolbar above the canvas. Per-action discovery is covered by:
 
 - **Right-click context menu** (M1.5 → M1): COLOR · BRUSH · TOOL · VIEW · EXPORT · SETTINGS sections. Per-tool sections own themselves (ADR 0007).
 - **Keyboard shortcuts** (§ 4.3): every action has a single-keystroke or chord path.
-- **Color picker popover** (M1.5): `C` opens at cursor with curated + custom + recent colors.
+- **Color picker popover** (M1.5): `Shift+C` opens at cursor with curated + custom + recent colors.
 - **Settings side panel** (M1.7 + M2): brush preset tuning, custom swatches, theme, grid, advanced knobs, pressure curves, predicted-events toggle.
 - **First-run hint** (M2): empty-board guidance "Right-click for tools · ? for help" fades on first stroke; never shown again.
 
@@ -170,15 +170,17 @@ The original toolbar commitment was retired during M2 brainstorming on tenet gro
 | Key                            | Action                                    | Status |
 |--------------------------------|-------------------------------------------|--------|
 | `B`                            | Draw tool (keep current brush preset)     | ✅     |
-| `P`                            | Draw tool + Pen brush preset              | ✅     |
+| `P`                            | Laser tool                                | ✅     |
+| `Shift + P`                    | Draw tool + Pen brush preset              | ✅     |
 | `E` (hold)                     | Spring-loaded eraser — release reverts    | ✅     |
 | `Shift + E`                    | Sticky eraser (toggle to eraser tool)     | ✅     |
 | `V` / `S`                      | Select tool (universal — image / text / stroke; single or multi) | ✅     |
 | `Space` (hold) + drag          | Pan (any pointer device)                  | ✅     |
 | Middle-mouse drag              | Pan                                       | ✅     |
-| `1`–`5`                        | Switch to brush preset 1–5                | M1     |
+| `1`–`5`                        | Switch to brush preset 1–5                | ✅     |
 | `[` / `]`                      | Decrease / increase size                  | M1     |
 | `Shift+[` / `Shift+]`          | Cycle color palette                       | ✅     |
+| `R` / `O` / `A` / `L`          | Shape sub-tools (rect / ellipse / arrow / line) | ✅ |
 | `Cmd/Ctrl + E`                 | Export popover (PNG / SVG / PDF)          | ✅     |
 | `Cmd/Ctrl + ,`                 | Toggle settings panel                     | ✅     |
 | `Cmd/Ctrl + Z`                 | Undo                                      | ✅     |
@@ -189,7 +191,8 @@ The original toolbar commitment was retired during M2 brainstorming on tenet gro
 | `Delete` / `Backspace`         | Delete selected                           | ✅     |
 | `Cmd/Ctrl + Shift + K`         | Clear board (confirm twice within 3 s)    | ✅     |
 | `M`                            | Toggle metrics HUD                        | ✅     |
-| `T`                            | Cycle theme (system → light → dark)       | ✅     |
+| `T`                            | Text tool                                 | ✅     |
+| `Shift + T`                    | Cycle theme (system → light → dark)       | ✅     |
 | `F`                            | Toggle distraction-free (hide app chrome) | ✅     |
 | `?`                            | Toggle shortcut help overlay              | ✅     |
 | `Esc`                          | Cancel pending action (e.g. clear-confirm)| ✅     |
@@ -208,7 +211,7 @@ The v1 ship is single-user, single-device — no rooms, no shared URLs, no prese
 
 ## 6. Persistence
 
-- **Client**: IndexedDB. One database (`whiteboard-local`), one object store (`strokes`), keyed on stroke id. Strokes are persisted on `pointerup` so a power-loss event at most loses the in-flight stroke. Reads on app boot hydrate the committed canvas. Wrapped behind the `StrokeStore` interface seam (M2.1) so the persistence backend can be swapped without touching the orchestrator.
+- **Client**: IndexedDB. One database (`whiteboard-local`) with object stores for `strokes`, `images`, `images-blob`, `texts`, and `shapes`. Writes happen at gesture commit boundaries (`pointerup` / commit paths), so a power-loss event at most loses in-flight edits. Reads on app boot hydrate the committed canvas. Persistence is kept behind store interfaces (`StrokeStore`, `ImageStore`, `TextStore`, `ShapeStore`) so backends can be swapped without touching the orchestrator.
 - **Server**: None at v1. The Bun process is stateless — it serves static files and a `/health` endpoint. No SQLite, no `DATA_DIR` volume. (Server-side snapshot persistence is part of the deferred sharing design — see § 10 Backlog and [ADR 0012](docs/decisions/0012-sharing-deferred.md).)
 - **Export**: PNG (detached canvas + `canvas.toBlob`), SVG (custom serializer with mask-based erasure for `erasedStamps`), PDF (`jsPDF` wrapping a rasterized PNG; SVG-vector PDF deferred). Triggered via right-click → EXPORT or `Cmd/Ctrl+E`. Filename: `whiteboard-YYYY-MM-DD-HHMM.{ext}`. Empty board no-ops with a console warn.
 - **Import**: PNG/SVG drop onto canvas places it as a non-editable image layer (read-only in v1).
@@ -217,7 +220,7 @@ The v1 ship is single-user, single-device — no rooms, no shared URLs, no prese
 
 All three run in-browser via `transformers.js` + WebGPU. Triggered explicitly by the user; never auto.
 
-1. **Shape recognition** — small ONNX classifier on stroke-feature vectors. Select the strokes → press `R` → suggest clean primitive with accept/reject. ~5–10 MB.
+1. **Shape recognition** — small ONNX classifier on stroke-feature vectors. Select the strokes → run the shape-recognition action (shortcut TBD to avoid tool-key conflicts) → suggest clean primitive with accept/reject. ~5–10 MB.
 2. **Handwriting → text** — runs over the current Select-tool selection. Output is an editable text node. ~30–60 MB. English first.
 3. **Math / LaTeX** — separate model, scoped to the current selection. Outputs LaTeX, rendered via KaTeX. ~80–120 MB; lazy-loaded only when invoked.
 

@@ -8,6 +8,20 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 No entries yet.
 
+## [1.4.1] — 2026-05-14
+
+Patch — documentation accuracy hardening and a Text-tool empty-content guard fix.
+
+### Changed
+
+- **Docs consistency pass across core references.** Updated `README`, `SPEC`, architecture/development docs, ADR index, and clipboard ADR details so shipped shortcuts, persistence schema, shape support, and tool semantics match current behavior.
+- **Help overlay wording alignment.** In-app help now describes eraser item mode as deleting one object per click and describes fit-to-view as fitting all objects.
+
+### Fixed
+
+- **Whitespace-only text no longer creates/sticks empty text boxes.** The Text tool now treats blank and whitespace-only content as effectively empty in commit paths, preventing invisible placeholder objects from being persisted.
+- **Regression tests for empty-content guard.** Added focused tests covering blank/whitespace vs visible text behavior in the Text tool.
+
 ## [1.4.0] — 2026-05-14
 
 **Shape tool — vector primitives (rect / ellipse / line / arrow).** One unified tool with four sub-modes, sticky color / stroke-width / fill defaults, translucent fill (alpha 0.25) so overlapping shapes read as tinted rather than blocked. Lines and arrows encode endpoints via the sign of `transform.w / h`, so the existing rect-based transform pipeline (rotation, resize handles, marquee, multi-drag) carries shapes without per-kind divergence. See [ADR 0018](docs/decisions/0018-shape-data-model.md) for the data-model rationale.
@@ -58,7 +72,7 @@ Patch — pinned right-click tool menu now genuinely stays pinned across every a
 
 ### Changed
 
-- **Tool menu reorder.** The right-click TOOL row now reads `Draw | Text | Eraser | Lasso | Select | Laser` (input verbs first, then mark-removal, then selection/transform, with the presentation accent at the end). The tool-pill cycle order mirrors this.
+- **Tool menu reorder.** The right-click TOOL row was reordered for input-first flow; by release close (with Lasso absorbed) it reads `Draw | Text | Eraser | Select | Laser`. The tool-pill cycle order mirrors this.
 - **Empty-text auto-cleanup on commit.** Creating a text and Esc-committing without typing anything no longer leaves an empty TextObject behind. The text tool's `cleanup` / `commitEdit` paths now drop empty content as a final step.
 - **`select.ts` decomposed.** Per-kind commit and render helpers (`commitImageDrag` / `commitStrokeDrag` / `commitTextDrag`; `drawStrokeSelection` / `drawFloatingObjectSelection`) replace the inline switch-on-kind branches at three call sites. Each helper has its own docblock; file is longer in LOC but switch-site density is lower and the dispatch shape is the chosen incremental migration step before any full vtable refactor (see [ADR 0014](docs/decisions/0014-select-tool-selection-union.md) *Migration trigger*).
 - **`BatchSelection` module** (`apps/web/src/batchselection.ts`). The Cmd+A → Delete state for images + texts moves out of `main.ts` into a dedicated module with `markAll` / `clear` / `deleteAll` / `isMarked` surface. Reduces the orchestrator's surface and is straightforward to grow when strokes join the batch surface later.
@@ -107,10 +121,6 @@ Patch — pinned right-click tool menu now genuinely stays pinned across every a
 - **`Selection` type exported from the Select tool.** External callers — the clipboard paste path in `main.ts`, the selection-clipboard module — name the shape directly rather than re-declaring a structural copy.
 - **`isMarkedForBatchDelete` renamed to `isMultiSelected` across the render pipeline.** Name reflects current reality (the predicate is consulted for ANY multi-selection halo, not just batch-delete marking, since Lasso → Select absorption). The per-frame O(N×M) predicate (M images / texts × N selections) is replaced with a single per-frame `Set<string>` build (O(N+M) construction + O(1) lookup); removes the quadratic hotspot for boards with large multi-selections.
 - **Clipboard pipeline extracted into `apps/web/src/selectionclipboard.ts`.** Parallel to `imagepaste.ts` with the same Context-injected dependency pattern. The orchestrator drops ~270 LOC and the copy / cut / paste-back flow becomes testable in isolation.
-
-### Notes
-
-- Bundle and test-count effects pending the next versioned release; this section accumulates them as features land.
 
 ## [1.2.0] — 2026-05-13
 

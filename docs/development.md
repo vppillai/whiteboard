@@ -141,11 +141,11 @@ VS Code recommended. Install the [Biome extension](https://marketplace.visualstu
 Tests use **Bun's built-in test runner** — no extra framework. Run with:
 
 ```bash
-bun test          # runs every workspace's test suite (currently 92 tests / 191 expect() calls)
+bun test          # runs every workspace's test suite
 bun run test      # equivalent; uses the workspace script
 ```
 
-Tests live next to the code they cover (e.g., `settings.test.ts` alongside `settings.ts`, `partitioncompaction.test.ts` alongside `storage.ts`, export module tests under `export/`). The pattern is **pure-helper-first**: DOM-touching modules expose a pure core that's testable without a DOM polyfill, with DOM-gated wrappers guarded by `typeof document !== 'undefined'`. CI runs the suite on every push.
+Tests live next to the code they cover (e.g., `settings.test.ts` alongside `settings.ts`, `storage.test.ts` alongside `storage.ts`, export module tests under `export/`). The pattern is **pure-helper-first**: DOM-touching modules expose a pure core that's testable without a DOM polyfill, with DOM-gated wrappers guarded by `typeof document !== 'undefined'`. CI runs the suite on every push.
 
 ## Troubleshooting
 

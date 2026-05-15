@@ -44,6 +44,7 @@ interface ClipboardStrokeBundle {
   v: 1
   strokes: Stroke[]
   texts?: TextObject[]
+  shapes?: ShapeObject[]
   origin: { x: number; y: number }
 }
 ```
@@ -51,6 +52,7 @@ interface ClipboardStrokeBundle {
 - **`v: 1`** — integer schema version. Bumped only on *incompatible* changes (field removal, restructure). Additive fields stay at `v=1` (forward-compat — older readers silently ignore unknown fields).
 - **`strokes`** — full Stroke records; freshly id'd on paste so source + paste can coexist.
 - **`texts?`** — optional TextObject records; same fresh-id-on-paste treatment.
+- **`shapes?`** — optional ShapeObject records; same fresh-id-on-paste treatment.
 - **`origin: { x, y }`** — the union bbox top-left at copy time, in board coords. On paste, the whole selection translates by `(cursor - origin)` so relative layout is preserved and the user's group lands under the pointer.
 
 ### Validation
@@ -58,7 +60,7 @@ interface ClipboardStrokeBundle {
 Three layers of defense for incoming bundles (parsed in `extractStrokesFromHtml`):
 
 1. **Marker presence + extractable attribute** — `data-whiteboard-v1="..."` matched by regex (not DOMParser; lets the parser run in any JS runtime, including `bun:test`).
-2. **Schema** — JSON parse + version match (`v === 1`) + required-field shape check (id / samples / startedAt / brush for strokes; id / content / transform / font / color for texts) + origin presence.
+2. **Schema** — JSON parse + version match (`v === 1`) + required-field shape check (id / samples / startedAt / brush for strokes; id / content / transform / font / color for texts; id / kind / transform for shapes) + origin presence.
 3. **DoS caps** — 5000 strokes, 5000 texts, 50000 samples per stroke. Bundles past any cap reject the entire bundle (the caller falls through to PNG paste).
 
 Any layer failing → return `null` → caller uses PNG / text fallback. We never half-paste.
@@ -70,7 +72,7 @@ Any layer failing → return `null` → caller uses PNG / text fallback. We neve
 - Round-trip preserves vector fidelity inside the whiteboard. Strokes stay editable, texts stay editable, group relative layout is preserved at paste time.
 - PNG path keeps working for external apps. Existing Google Docs / Slack / Confluence workflows unchanged.
 - Cross-tab paste works (the system clipboard is the medium).
-- Forward-compat: adding an `images?: ImageObject[]` field later stays at `v=1` and older readers silently ignore it.
+- Forward-compat: additive optional fields can stay at `v=1`; older readers silently ignore unknown keys.
 - DoS-safe: a malicious page can't flood the user's canvas via a hostile `data-whiteboard-v1` blob.
 
 **Negative:**
