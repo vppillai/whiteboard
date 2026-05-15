@@ -6,7 +6,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 
 ## Current state
 
-**v1.3.1 shipped 2026-05-14.** Single-user, offline-first whiteboard with strokes, image paste, text, laser, lasso → Select absorption, whiteboard-native clipboard, and a hardened pinned-menu coexistence model. The Shape tool (rect / ellipse / line / arrow with one-token color + translucent fill) lands on `feat/next` for v1.4. Live collaboration deferred per [ADR 0012](decisions/0012-sharing-deferred.md). PWA install + deployment polish are post-v1 work tracked below.
+**v1.4.0 shipped 2026-05-14.** Single-user, offline-first whiteboard with strokes, image paste, text, laser, unified Select multi-object workflows, whiteboard-native clipboard round-trip, and Shape tool support (rect / ellipse / line / arrow) with a hardened pinned-menu interaction model. Live collaboration remains deferred per [ADR 0012](decisions/0012-sharing-deferred.md). PWA install + deployment polish are post-v1 work tracked below.
 
 | M  | Title                                                                    | Status |
 |----|--------------------------------------------------------------------------|--------|
@@ -23,7 +23,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | **v1.2.0** | Text tool + Select extension + laser + mouse synthetic pressure + lasso PNG copy | ✅ *(2026-05-13; tag `v1.2.0`)* |
 | **v1.3.0** | Lasso → Select absorption + whiteboard-native clipboard + 4-lane review hardening | ✅ *(2026-05-13; tag `v1.3.0`)* |
 | **v1.3.1** | Pinned right-click menu coexistence — pin survives opening other popovers | ✅ *(2026-05-14; tag `v1.3.1`)* |
-| **v1.4.0** | Shape tool — rect / ellipse / line / arrow with sticky color, stroke width, fill toggle | 🟦 in progress *(on `feat/next`; ADR 0018)* |
+| **v1.4.0** | Shape tool — rect / ellipse / line / arrow with sticky color, stroke width, fill toggle | ✅ *(2026-05-14; tag `v1.4.0`; ADR 0018)* |
 | M4 | Deployment polish — clean-host validation, reverse-proxy paths           | ⬜ post-v1 |
 | M4.5 | PWA install + offline (manifest, service worker)                       | ⬜ post-v1 |
 | M5 | AI: shape recognition                                                    | ⬜ v2 |

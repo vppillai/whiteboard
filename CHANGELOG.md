@@ -6,6 +6,10 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 ## [Unreleased]
 
+No entries yet.
+
+## [1.4.0] — 2026-05-14
+
 **Shape tool — vector primitives (rect / ellipse / line / arrow).** One unified tool with four sub-modes, sticky color / stroke-width / fill defaults, translucent fill (alpha 0.25) so overlapping shapes read as tinted rather than blocked. Lines and arrows encode endpoints via the sign of `transform.w / h`, so the existing rect-based transform pipeline (rotation, resize handles, marquee, multi-drag) carries shapes without per-kind divergence. See [ADR 0018](docs/decisions/0018-shape-data-model.md) for the data-model rationale.
 
 ### Added
