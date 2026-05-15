@@ -23,6 +23,7 @@ ADRs document non-obvious architectural choices. See [process.md](../process.md)
 | [0015](0015-text-wrap-width-per-object.md)   | Text wrap-width as a per-object field        | Accepted |
 | [0016](0016-lasso-into-select-absorption.md) | Lasso tool absorbed into the Select tool     | Accepted |
 | [0017](0017-whiteboard-native-clipboard-format.md) | Whiteboard-native clipboard format (dual-slot `data-whiteboard-v1`) | Accepted |
+| [0018](0018-shape-data-model.md) | Shape data model | Accepted |
 
 ## Format
 

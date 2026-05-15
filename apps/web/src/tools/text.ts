@@ -77,6 +77,10 @@ const FONT_OPTIONS: { id: TextFontFamily; label: string }[] = [
  *  the user-requested default. */
 const SIZE_OPTIONS: number[] = [12, 14, 18, 24, 36]
 
+export function _isEffectivelyEmptyTextContent(content: string): boolean {
+  return content.trim().length === 0
+}
+
 export interface TextToolDeps {
   /** Live in-memory text array (mutated by ops). */
   getTexts: () => TextObject[]
@@ -436,7 +440,7 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       wrapWidth: e.text.wrapWidth,
     }
 
-    if (e.isNewText && e.text.content === '') {
+    if (e.isNewText && _isEffectivelyEmptyTextContent(e.text.content)) {
       // Discard the empty starter — no point persisting an invisible
       // record. Roll back the in-memory insertion the tool did at
       // pointer-down time; persist as deleted so a future load skips it.
@@ -450,7 +454,7 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       return
     }
 
-    if (!e.isNewText && e.text.content === '') {
+    if (!e.isNewText && _isEffectivelyEmptyTextContent(e.text.content)) {
       // EXISTING text edited down to empty content → soft-delete so the
       // user doesn't have an invisible box on the canvas. Restore the
       // BEFORE state in-memory before saving so a single undo brings
