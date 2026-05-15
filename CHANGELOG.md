@@ -8,6 +8,15 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 No entries yet.
 
+## [1.4.2] — 2026-05-14
+
+Patch — factory-reset URL cleanup so one-shot reset query params do not linger after boot.
+
+### Fixed
+
+- **Factory reset query param is now one-shot.** After a factory reset reload, the app strips `factoryReset` from the URL via `history.replaceState`, preserving any other query params/hash.
+- **Regression coverage for URL cleanup.** Added focused tests for removing `factoryReset` while preserving the rest of the URL state.
+
 ## [1.4.1] — 2026-05-14
 
 Patch — documentation accuracy hardening and a Text-tool empty-content guard fix.

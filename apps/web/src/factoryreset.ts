@@ -34,6 +34,26 @@ export interface FactoryResetFlowOptions {
   refocusOnClose?: HTMLElement
 }
 
+export function _stripFactoryResetParamFromHref(href: string): string | null {
+  const url = new URL(href)
+  if (!url.searchParams.has('factoryReset')) return null
+  url.searchParams.delete('factoryReset')
+  return `${url.pathname}${url.search}${url.hash}`
+}
+
+export function clearFactoryResetQueryParam(
+  loc: Pick<Location, 'href'> = window.location,
+  hist: Pick<History, 'replaceState'> = window.history,
+): void {
+  try {
+    const cleaned = _stripFactoryResetParamFromHref(loc.href)
+    if (!cleaned) return
+    hist.replaceState(null, '', cleaned)
+  } catch {
+    // URL parsing/history APIs can fail in restricted contexts; ignore.
+  }
+}
+
 export function createFactoryResetFlow(opts: FactoryResetFlowOptions = {}): FactoryResetFlow {
   return createDestructiveConfirm({
     message:

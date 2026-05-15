@@ -62,7 +62,7 @@ import { exitDistractionFree, isDistractionFree, toggleDistractionFree } from '.
 import { createEraserCommitCallbacks } from './erasercallbacks'
 import { attachEraserHold } from './eraserhold'
 import { openExportPopover } from './exportpopover'
-import { createFactoryResetFlow } from './factoryreset'
+import { clearFactoryResetQueryParam, createFactoryResetFlow } from './factoryreset'
 import { dismissFirstRunHint, mountFirstRunHint } from './firstrun'
 import { drawGrid, invalidateGridColors } from './grid'
 import { createHelpOverlay } from './helpoverlay'
@@ -169,6 +169,7 @@ let perfRecording: number[] | null = null
 
 async function main(): Promise<void> {
   initTheme()
+  clearFactoryResetQueryParam()
 
   // StrokeStore seam: main.ts talks to a `StrokeStore` interface rather than
   // calling storage.ts directly. v1 wires the local IDB-backed implementation.

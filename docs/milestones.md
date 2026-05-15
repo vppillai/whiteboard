@@ -6,7 +6,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 
 ## Current state
 
-**v1.4.1 shipped 2026-05-14.** Single-user, offline-first whiteboard with strokes, image paste, text, laser, unified Select multi-object workflows, whiteboard-native clipboard round-trip, and Shape tool support (rect / ellipse / line / arrow), plus post-release docs hardening and an empty-text guard fix. Live collaboration remains deferred per [ADR 0012](decisions/0012-sharing-deferred.md). PWA install + deployment polish are post-v1 work tracked below.
+**v1.4.2 shipped 2026-05-14.** Single-user, offline-first whiteboard with strokes, image paste, text, laser, unified Select multi-object workflows, whiteboard-native clipboard round-trip, and Shape tool support (rect / ellipse / line / arrow), plus post-release docs/dependency hardening and factory-reset URL cleanup. Live collaboration remains deferred per [ADR 0012](decisions/0012-sharing-deferred.md). PWA install + deployment polish are post-v1 work tracked below.
 
 | M  | Title                                                                    | Status |
 |----|--------------------------------------------------------------------------|--------|
@@ -25,6 +25,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | **v1.3.1** | Pinned right-click menu coexistence — pin survives opening other popovers | ✅ *(2026-05-14; tag `v1.3.1`)* |
 | **v1.4.0** | Shape tool — rect / ellipse / line / arrow with sticky color, stroke width, fill toggle | ✅ *(2026-05-14; tag `v1.4.0`; ADR 0018)* |
 | **v1.4.1** | Docs accuracy hardening + whitespace-only text empty-box guard | ✅ *(2026-05-14; tag `v1.4.1`)* |
+| **v1.4.2** | Factory-reset query-param cleanup + dependency/tooling major upgrades | ✅ *(2026-05-14; tag `v1.4.2`)* |
 | M4 | Deployment polish — clean-host validation, reverse-proxy paths           | ⬜ post-v1 |
 | M4.5 | PWA install + offline (manifest, service worker)                       | ⬜ post-v1 |
 | M5 | AI: shape recognition                                                    | ⬜ v2 |
