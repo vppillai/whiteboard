@@ -9,11 +9,11 @@
 import { type Popover, showPopover } from './popover'
 import {
   type GridType,
-  VALID_GRID_TYPE_VALUES,
-  VALID_SPACING_VALUES,
   getSettings,
   setGridSpacing,
   setGridType,
+  VALID_GRID_TYPE_VALUES,
+  VALID_SPACING_VALUES,
 } from './settings'
 
 interface PillSpec<T> {

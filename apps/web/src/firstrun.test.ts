@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import {
-  type FirstRunStorage,
   __resetForTesting,
   dismissFirstRunHint,
+  type FirstRunStorage,
   shouldShowHint,
 } from './firstrun'
 

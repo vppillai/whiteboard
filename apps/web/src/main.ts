@@ -74,10 +74,10 @@ import {
   readImageFromDataTransfer,
   setupDragDropImagePaste,
 } from './imagepaste'
-import { type ImageStore, createLocalImageStore } from './imagestore'
+import { createLocalImageStore, type ImageStore } from './imagestore'
 import { attachKeymap } from './keymap'
-import { MetricsCollector, bindHudToggle, createHud } from './metrics'
-import { type Op, type OpContext, applyOp, unapplyOp } from './ops'
+import { bindHudToggle, createHud, MetricsCollector } from './metrics'
+import { applyOp, type Op, type OpContext, unapplyOp } from './ops'
 import { openOptionsMenu } from './optionsmenu'
 import { attachPan } from './pan'
 import { runPerftest } from './perftest'
@@ -91,9 +91,9 @@ import { renderShapes } from './rendershapes'
 import { renderTexts } from './rendertexts'
 import { createResetFlow } from './resetflow'
 import {
-  type SelectionClipboardContext,
   pasteSelectionBundle,
   performSelectCopy,
+  type SelectionClipboardContext,
 } from './selectionclipboard'
 import { createSelectionClipboardHandlers } from './selectionclipboard-events'
 import {
@@ -108,26 +108,25 @@ import {
   setLaserColor,
 } from './settings'
 import { createPanelContent } from './settings/panel-content'
-import { type ShapeStore, createLocalShapeStore } from './shapestore'
+import { createLocalShapeStore, type ShapeStore } from './shapestore'
 import { dismissSidePanel, isSidePanelOpen, showSidePanel } from './sidepanel'
 import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
-import { type StrokeStore, createLocalStrokeStore } from './strokestore'
-import { type TextStore, createLocalTextStore } from './textstore'
+import { createLocalStrokeStore, type StrokeStore } from './strokestore'
+import { createLocalTextStore, type TextStore } from './textstore'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { getPersistedPinnedAnchor, openToolMenu } from './toolmenu'
 import { createToolPill } from './toolpill'
 import {
-  type EraserTool,
-  type Selection,
-  type Tool,
-  type ToolContext,
-  type ToolId,
   createEraserTool,
   createLaserTool,
   createPenTool,
   createSelectTool,
   createShapeTool,
   createTextTool,
+  type EraserTool,
+  type Tool,
+  type ToolContext,
+  type ToolId,
 } from './tools'
 import { clearView, loadView, makeViewSaver } from './viewstate'
 import { fitToContent } from './zoomfit'

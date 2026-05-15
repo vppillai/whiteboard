@@ -87,7 +87,7 @@ import { pointInShape, shapeAABB } from '../rendershapes'
 import { getShapeFillOpacity } from '../settings'
 import { getStrokeBBox, getStrokePath, invalidateStrokeBBox } from '../stroke'
 import { buildSwatchPalette } from '../swatchpalette'
-import { TEXT_PADDING_X, pointInText, resizeToFit, textAABB } from '../textgeom'
+import { pointInText, resizeToFit, TEXT_PADDING_X, textAABB } from '../textgeom'
 import type { Tool, ToolContext } from './types'
 
 /** Discriminated-union pointer to a single board object across the
@@ -263,9 +263,6 @@ const ROTATE_HANDLE_OFFSET_PX = 24
 const HANDLE_PX = 8
 /** Half a handle, plus padding, in screen pixels — hit-test tolerance. */
 const HANDLE_HIT_PX = 10
-/** Selection outline + handle stroke color. Matches the existing UI accent. */
-const ACCENT = 'var(--whiteboard-accent, #2563eb)'
-
 /**
  * Custom rotation cursor — a circular arrow drawn inline as an SVG data URL.
  * CSS doesn't have a built-in "rotate" cursor and `grab` reads as "I'm

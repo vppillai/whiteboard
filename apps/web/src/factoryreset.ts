@@ -26,7 +26,7 @@
  * vaporize the user's drawings.
  */
 
-import { type DestructiveConfirm, createDestructiveConfirm } from './destructiveconfirm'
+import { createDestructiveConfirm, type DestructiveConfirm } from './destructiveconfirm'
 
 export type FactoryResetFlow = DestructiveConfirm
 

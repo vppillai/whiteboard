@@ -37,7 +37,7 @@
  */
 
 import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
-import { type ClipboardStrokeBundle, blobToDataUrl, buildClipboardHtml } from './clipboardstrokes'
+import { blobToDataUrl, buildClipboardHtml, type ClipboardStrokeBundle } from './clipboardstrokes'
 import { makeShapeId, makeStrokeId, makeTextId } from './ids'
 import { writeImageToClipboard, writePngBlobToClipboard } from './imageclipboard'
 import type { Op } from './ops'

@@ -96,7 +96,12 @@ body {
   height: 100%;
   overflow: hidden;
   background: var(--bg-page);
-  font: 14px / 1.4 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  font:
+    14px / 1.4 -apple-system,
+    BlinkMacSystemFont,
+    "Inter",
+    system-ui,
+    sans-serif;
   color: var(--fg-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -143,7 +148,11 @@ body {
   padding: 10px 14px;
   background: var(--hud-bg);
   color: var(--hud-fg);
-  font: 11px / 1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    11px / 1.55 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   border: 1px solid var(--hud-border);
   border-radius: 8px;
   pointer-events: none;
@@ -162,7 +171,11 @@ body {
   padding: 6px 10px;
   background: var(--pill-bg);
   color: var(--pill-fg);
-  font: 11px / 1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    11px / 1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   border-radius: 999px;
   pointer-events: none;
   z-index: 999;
@@ -175,7 +188,11 @@ body {
   right: 12px;
   background: var(--pill-bg);
   color: var(--pill-fg);
-  font: 11px / 1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    11px / 1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   font-weight: 600;
   border-radius: 999px;
   z-index: 999;
@@ -237,7 +254,11 @@ body {
   color: var(--banner-fg);
   padding: 20px 24px;
   border-radius: 12px;
-  font: 13px / 1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font:
+    13px / 1.5 -apple-system,
+    BlinkMacSystemFont,
+    system-ui,
+    sans-serif;
   z-index: 2000;
   pointer-events: none;
   box-shadow: var(--banner-shadow);
@@ -249,7 +270,11 @@ body {
 
 #whiteboard-banner pre {
   margin: 0;
-  font: 12px / 1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    12px / 1.6 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
 }
 
 #whiteboard-help {
@@ -283,13 +308,19 @@ body {
   border: none;
   border-radius: 4px;
   color: var(--hud-fg);
-  font: 12px / 1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    12px / 1 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   cursor: pointer;
   opacity: 0.6;
   /* Pin pointer-events back on so the button is clickable through the
      panel wrapper's pointer-events:none. */
   pointer-events: auto;
-  transition: opacity 0.12s, background-color 0.12s;
+  transition:
+    opacity 0.12s,
+    background-color 0.12s;
 }
 
 #whiteboard-help .whiteboard-help-close:hover {
@@ -299,7 +330,11 @@ body {
 
 #whiteboard-help .whiteboard-help-shortcuts {
   margin: 0;
-  font: 11px / 1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    11px / 1.6 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   white-space: pre;
 }
 
@@ -313,7 +348,11 @@ body {
   pointer-events: auto;
   color: var(--banner-fg);
   text-decoration: none;
-  font: 10px / 1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    10px / 1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   letter-spacing: 0.04em;
   opacity: 0.85;
   transition: opacity 0.12s;
@@ -332,7 +371,12 @@ body {
   padding: 8px 8px 8px 16px;
   background: var(--hud-bg);
   color: var(--hud-fg);
-  font: 12px / 1.4 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  font:
+    12px / 1.4 -apple-system,
+    BlinkMacSystemFont,
+    "Inter",
+    system-ui,
+    sans-serif;
   border: 1px solid var(--hud-border);
   border-radius: 999px;
   pointer-events: auto;
@@ -357,7 +401,9 @@ body {
   border-radius: 999px;
   font: inherit;
   cursor: pointer;
-  transition: background 0.12s, opacity 0.12s;
+  transition:
+    background 0.12s,
+    opacity 0.12s;
 }
 
 .whiteboard-toast-button:hover {
@@ -389,7 +435,12 @@ body {
   -webkit-backdrop-filter: blur(10px) saturate(1.2);
   z-index: 1500;
   pointer-events: auto;
-  font: 12px / 1.4 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  font:
+    12px / 1.4 -apple-system,
+    BlinkMacSystemFont,
+    "Inter",
+    system-ui,
+    sans-serif;
   user-select: none;
   -webkit-user-select: none;
   min-width: 220px;
@@ -407,7 +458,9 @@ body {
     transform: scale(1);
   }
   30% {
-    box-shadow: var(--banner-shadow), 0 0 0 4px var(--whiteboard-accent, #2563eb);
+    box-shadow:
+      var(--banner-shadow),
+      0 0 0 4px var(--whiteboard-accent, #2563eb);
     transform: scale(1.025);
   }
   100% {
@@ -451,7 +504,9 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.12s, color 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s;
 }
 
 .whiteboard-popover-icon-btn:hover {
@@ -496,7 +551,9 @@ body {
   cursor: pointer;
   padding: 0;
   background: transparent;
-  transition: transform 0.08s, box-shadow 0.12s;
+  transition:
+    transform 0.08s,
+    box-shadow 0.12s;
 }
 
 .whiteboard-color-swatch:hover {
@@ -504,7 +561,9 @@ body {
 }
 
 .whiteboard-color-swatch.active {
-  box-shadow: 0 0 0 2px var(--banner-bg), 0 0 0 4px var(--banner-fg);
+  box-shadow:
+    0 0 0 2px var(--banner-bg),
+    0 0 0 4px var(--banner-fg);
 }
 
 .whiteboard-color-swatch-ink {
@@ -583,14 +642,21 @@ body {
   border-radius: 50%;
   background: var(--banner-fg, #111);
   color: var(--banner-bg, #fff);
-  font: 700 12px / 1 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  font:
+    700 12px / 1 -apple-system,
+    BlinkMacSystemFont,
+    "Inter",
+    system-ui,
+    sans-serif;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   opacity: 0;
   transform: scale(0.85);
-  transition: opacity 0.12s, transform 0.12s;
+  transition:
+    opacity 0.12s,
+    transform 0.12s;
   z-index: 10;
   pointer-events: auto;
 }
@@ -613,11 +679,19 @@ body {
   border: 1px solid var(--hud-border);
   border-radius: 6px;
   padding: 7px 8px;
-  font: 11px / 1.4 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  font:
+    11px / 1.4 -apple-system,
+    BlinkMacSystemFont,
+    "Inter",
+    system-ui,
+    sans-serif;
   cursor: pointer;
   text-align: center;
   letter-spacing: 0.01em;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s;
 }
 
 .whiteboard-tool-pill:hover:not(.disabled):not(.active) {
@@ -667,7 +741,12 @@ body {
   border: none;
   color: var(--banner-fg);
   padding: 7px 10px;
-  font: 12px / 1.4 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  font:
+    12px / 1.4 -apple-system,
+    BlinkMacSystemFont,
+    "Inter",
+    system-ui,
+    sans-serif;
   cursor: pointer;
   border-radius: 6px;
   transition: background 0.12s;
@@ -710,7 +789,11 @@ body {
 .whiteboard-tool-item-shortcut {
   flex: 0 0 auto;
   opacity: 0.55;
-  font: 10px / 1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    10px / 1 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   letter-spacing: 0.02em;
   padding: 2px 4px;
   border-radius: 4px;
@@ -763,7 +846,11 @@ body {
 
 .whiteboard-fillopacity-readout {
   flex: 0 0 auto;
-  font: 11px / 1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    11px / 1 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   letter-spacing: 0.02em;
   min-width: 38px;
   text-align: right;
@@ -804,7 +891,10 @@ body {
   cursor: pointer;
   font-family: inherit;
   letter-spacing: 0.01em;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s;
 }
 
 .whiteboard-options-pill:hover {
@@ -1223,6 +1313,7 @@ body.distraction-free .helppill,
 body.distraction-free .toolmenu,
 body.distraction-free .whiteboard-sidepanel,
 body.distraction-free .whiteboard-popover {
+  /* biome-ignore lint/complexity/noImportantStyles: distraction-free must override runtime-injected display styles */
   display: none !important;
 }
 

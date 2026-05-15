@@ -1,17 +1,15 @@
-import { describe, expect, test } from 'bun:test'
-import { beforeEach } from 'bun:test'
+import { beforeEach, describe, expect, test } from 'bun:test'
 import {
   __resetForTesting,
-  addCustomSwatch,
-  getSettings,
-  pushRecentColor,
-  removeCustomSwatch,
-} from './settings'
-import { getEffectiveBrushConfig, migrate } from './settings'
-import {
   _isMissingLocalStorageError,
+  addCustomSwatch,
   clearPreset,
   clearPresetCurve,
+  getEffectiveBrushConfig,
+  getSettings,
+  migrate,
+  pushRecentColor,
+  removeCustomSwatch,
   resetAll,
   setBrushId,
   setColor,
