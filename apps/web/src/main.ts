@@ -59,6 +59,7 @@ import { createClearFlow } from './clearflow'
 import { extractStrokesFromHtml } from './clipboardstrokes'
 import { CURATED_COLORS, cyclePaletteIndex, openColorPicker } from './colorpicker'
 import { exitDistractionFree, isDistractionFree, toggleDistractionFree } from './distractionfree'
+import { createEraserCommitCallbacks } from './erasercallbacks'
 import { attachEraserHold } from './eraserhold'
 import { openExportPopover } from './exportpopover'
 import { createFactoryResetFlow } from './factoryreset'
@@ -80,6 +81,7 @@ import { type Op, type OpContext, applyOp, unapplyOp } from './ops'
 import { openOptionsMenu } from './optionsmenu'
 import { attachPan } from './pan'
 import { runPerftest } from './perftest'
+import { createWarnAndContinuePersist } from './persist-callbacks'
 import { createHelpPill } from './pill'
 import { attachPointer } from './pointer'
 import { dismissAllPopovers, findPopoverByTag } from './popover'
@@ -93,6 +95,7 @@ import {
   pasteSelectionBundle,
   performSelectCopy,
 } from './selectionclipboard'
+import { createSelectionClipboardHandlers } from './selectionclipboard-events'
 import {
   getBrushId,
   getColor,
@@ -388,35 +391,36 @@ async function main(): Promise<void> {
   // every move/resize/rotate, so consolidating the closure keeps the error
   // policy (currently: warn-and-continue) in one place — future changes
   // like surfacing a toast or retry only touch this line.
-  const persistImageMeta = (img: ImageObject): void => {
-    void imageStore.updateMeta(img).catch((err) => {
-      console.warn('whiteboard/web: failed to persist image metadata:', err)
-    })
-  }
+  const persistImageMeta = createWarnAndContinuePersist<ImageObject>(
+    imageStore.updateMeta.bind(imageStore),
+    'whiteboard/web: failed to persist image metadata:',
+  )
 
   // Same pattern for text records — single closure used by opCtx and the
   // Text tool. Errors are warn-and-continue (matching strokes / images).
-  const persistText = (t: TextObject): void => {
-    void textStore.update(t).catch((err) => {
-      console.warn('whiteboard/web: failed to persist text:', err)
-    })
-  }
+  const persistText = createWarnAndContinuePersist<TextObject>(
+    textStore.update.bind(textStore),
+    'whiteboard/web: failed to persist text:',
+  )
 
   // Same pattern for shape records — single closure used by opCtx (and the
   // Shape tool, in SH5). Errors are warn-and-continue.
-  const persistShape = (s: ShapeObject): void => {
-    void shapeStore.update(s).catch((err) => {
-      console.warn('whiteboard/web: failed to persist shape:', err)
-    })
-  }
+  const persistShape = createWarnAndContinuePersist<ShapeObject>(
+    shapeStore.update.bind(shapeStore),
+    'whiteboard/web: failed to persist shape:',
+  )
+  const persistStroke = createWarnAndContinuePersist<Stroke>(
+    strokeStore.save.bind(strokeStore),
+    'whiteboard/web: failed to persist stroke:',
+  )
+  const persistSelectStroke = createWarnAndContinuePersist<Stroke>(
+    strokeStore.save.bind(strokeStore),
+    'whiteboard/web: failed to persist stroke (Select move/delete):',
+  )
 
   const opCtx: OpContext = {
     strokes,
-    saveStroke: (s) => {
-      void strokeStore.save(s).catch((err) => {
-        console.warn('whiteboard/web: failed to persist stroke:', err)
-      })
-    },
+    saveStroke: persistStroke,
     images,
     saveImageMeta: persistImageMeta,
     texts,
@@ -427,6 +431,11 @@ async function main(): Promise<void> {
       committedDirty = true
     },
   }
+  const eraserCommitCallbacks = createEraserCommitCallbacks({
+    opCtx,
+    apply: applyOp,
+    push: pushUndoOp,
+  })
 
   // Image-paste context. Three input paths converge through this object:
   //   - Ctrl/Cmd+V → the document-level 'paste' event listener below
@@ -464,9 +473,7 @@ async function main(): Promise<void> {
         // First-run hint fades on first stroke commit. Idempotent — no-ops
         // after the first call and after the localStorage flag is set.
         dismissFirstRunHint()
-        void strokeStore.save(stroke).catch((err) => {
-          console.warn('whiteboard/web: failed to persist stroke:', err)
-        })
+        persistStroke(stroke)
       },
     },
   })
@@ -477,42 +484,7 @@ async function main(): Promise<void> {
       getShapes: () => shapes,
       getTexts: () => texts,
       getImages: () => images,
-      onObjectErase: (id) => {
-        const op: Op = { kind: 'delete', strokeIds: [id] }
-        applyOp(op, opCtx)
-        pushUndoOp(op)
-      },
-      onWipeErase: (edits) => {
-        if (edits.length === 0) return
-        // ADR 0009: pending stamps live in eraserTool until pointerup, then
-        // applyOp adds them to each stroke's `erasedStamps` and saves —
-        // ops are the source of truth, the sweep was just a render preview.
-        const op: Op = { kind: 'eraseStamps', edits }
-        applyOp(op, opCtx)
-        pushUndoOp(op)
-      },
-      onWholeObjectErase: ({ shapes: shapeIds, texts: textIds, images: imageIds }) => {
-        // Non-stroke whole-object deletes from the eraser pass. Emit
-        // one delete op per object (same per-kind ops the Select tool
-        // uses for Cmd+Delete). All applied + pushed in sequence so a
-        // single Cmd+Z reverses the whole eraser gesture in one step
-        // for the user, even though it's N undo entries internally.
-        for (const id of shapeIds) {
-          const op: Op = { kind: 'delete-shape', shapeId: id }
-          applyOp(op, opCtx)
-          pushUndoOp(op)
-        }
-        for (const id of textIds) {
-          const op: Op = { kind: 'delete-text', textId: id }
-          applyOp(op, opCtx)
-          pushUndoOp(op)
-        }
-        for (const id of imageIds) {
-          const op: Op = { kind: 'delete-image', imageId: id }
-          applyOp(op, opCtx)
-          pushUndoOp(op)
-        }
-      },
+      ...eraserCommitCallbacks,
     },
   })
 
@@ -524,14 +496,7 @@ async function main(): Promise<void> {
     getShapes: () => shapes,
     saveShape: persistShape,
     getStrokes: () => strokes,
-    // Stroke persistence — same warn-and-continue policy as
-    // persistImageMeta / persistText. Used by the Select tool's
-    // stroke-drag path (per-tick saves) and stroke-delete path.
-    saveStroke: (s) => {
-      void strokeStore.save(s).catch((err) => {
-        console.warn('whiteboard/web: failed to persist stroke (Select move/delete):', err)
-      })
-    },
+    saveStroke: persistSelectStroke,
     pushOp: (op) => pushUndoOp(op),
     markCommittedDirty: () => {
       committedDirty = true
@@ -955,33 +920,14 @@ async function main(): Promise<void> {
   //  to write but still deleting would lose the image with nowhere to
   //  paste it back from.
   // ---------------------------------------------------------------------
-  const isTextEditableTarget = (el: EventTarget | null): boolean =>
-    el instanceof HTMLInputElement ||
-    el instanceof HTMLTextAreaElement ||
-    (el instanceof HTMLElement && el.isContentEditable)
-
   // Copy / cut event wiring. The actual clipboard pipeline lives in
-  // `selectionclipboard.ts`; this layer just gates on context and
-  // delegates. Cut's delete is gated on clipboard-write success —
-  // data-loss-prevention rule that's been here since v1.1's image cut.
-  const onCopy = (e: ClipboardEvent): void => {
-    if (isTextEditableTarget(e.target)) return
-    if (tool.current !== selectTool) return
-    if (selectTool.getSelections().length === 0) return
-    e.preventDefault()
-    void performSelectCopy(selectionClipboardCtx)
-  }
-
-  const onCut = (e: ClipboardEvent): void => {
-    if (isTextEditableTarget(e.target)) return
-    if (tool.current !== selectTool) return
-    if (selectTool.getSelections().length === 0) return
-    e.preventDefault()
-    void (async () => {
-      const ok = await performSelectCopy(selectionClipboardCtx)
-      if (ok) selectTool.deleteSelected()
-    })()
-  }
+  // `selectionclipboard.ts`; this layer gates on context and delegates.
+  const { onCopy, onCut } = createSelectionClipboardHandlers({
+    isSelectActive: () => tool.current === selectTool,
+    selectionCount: () => selectTool.getSelections().length,
+    performCopy: () => performSelectCopy(selectionClipboardCtx),
+    deleteSelected: () => selectTool.deleteSelected(),
+  })
   document.addEventListener('copy', onCopy)
   document.addEventListener('cut', onCut)
   registerCleanup(() => {

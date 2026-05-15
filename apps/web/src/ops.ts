@@ -34,6 +34,7 @@ export interface StampEdit {
 export type Op =
   | { kind: 'create'; strokeId: string }
   | { kind: 'delete'; strokeIds: string[] }
+  | { kind: 'delete-many'; imageIds: string[]; textIds: string[]; shapeIds: string[] }
   | { kind: 'move'; strokeIds: string[]; dx: number; dy: number }
   | { kind: 'eraseStamps'; edits: StampEdit[] }
   /**
@@ -286,6 +287,11 @@ export function applyOp(op: Op, ctx: OpContext): void {
     case 'delete':
       flipStrokesDeleted(ctx, op.strokeIds, true)
       break
+    case 'delete-many':
+      for (const id of op.imageIds) flipImageDeleted(ctx, id, true)
+      for (const id of op.textIds) flipTextDeleted(ctx, id, true)
+      for (const id of op.shapeIds) flipShapeDeleted(ctx, id, true)
+      break
     case 'move':
       translateStrokes(ctx, op.strokeIds, op.dx, op.dy)
       break
@@ -349,6 +355,11 @@ export function unapplyOp(op: Op, ctx: OpContext): void {
       break
     case 'delete':
       flipStrokesDeleted(ctx, op.strokeIds, false)
+      break
+    case 'delete-many':
+      for (const id of op.imageIds) flipImageDeleted(ctx, id, false)
+      for (const id of op.textIds) flipTextDeleted(ctx, id, false)
+      for (const id of op.shapeIds) flipShapeDeleted(ctx, id, false)
       break
     case 'move':
       translateStrokes(ctx, op.strokeIds, -op.dx, -op.dy)

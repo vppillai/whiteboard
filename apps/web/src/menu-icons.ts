@@ -103,40 +103,27 @@ export function iconShape(): SVGElement {
   )
 }
 
-/** Eraser — block-eraser silhouette: a broad rectangle tilted slightly
- *  to the right, with a FLAT lower edge (the rubber surface that meets
- *  the paper) and a darker band near the top suggesting the cardboard
- *  wrap that holds the rubber. Distinctly NOT a pencil shape — broad
- *  body, no pointed tip. Erased-area dashes below the rubber edge
- *  reinforce the "this tool removes marks" reading. v1.4 fourth
- *  redesign per user feedback ("broader, flat tip, doesn't look like
- *  a pen"). */
+/** Eraser — minimal flat two-tone block. A clean tilted body with a
+ *  diagonal split reads quickly at small sizes while staying distinct
+ *  from the pen icon. The short chips under the edge suggest erased
+ *  marks without adding visual clutter. */
 export function iconEraser(): SVGElement {
-  // Broad rectangular body — wider than tall (the universal block-
-  // eraser proportion). Tilted ~10° right so the icon doesn't read
-  // as a perfect rectangle (which would look like a generic crate).
-  // Bottom edge is FLAT and horizontal — that's the eraser surface.
+  // Main body: clean block-eraser silhouette, slightly tilted.
   const body = svgEl('path', {
-    d: 'M 4 8 L 19 6 L 20 17 L 5 19 Z',
+    d: 'M 5 8 L 18 6 L 20 14 L 7 16 Z',
     fill: 'currentColor',
-    'fill-opacity': 0.22,
+    'fill-opacity': 0.2,
   })
   const bodyOutline = svgEl('path', {
-    d: 'M 4 8 L 19 6 L 20 17 L 5 19 Z',
+    d: 'M 5 8 L 18 6 L 20 14 L 7 16 Z',
   })
-  // Cardboard-wrap band across the upper third — visually separates
-  // the holder from the rubber working surface below it. Two lines
-  // give it the characteristic stripe.
-  const band1 = svgEl('path', { d: 'M 4.3 11 L 19.3 9' })
-  const band2 = svgEl('path', { d: 'M 4.6 13 L 19.6 11' })
-  // Erased-area dashes below the flat bottom edge — three short
-  // marks suggesting the just-cleared surface. Dashes vs a solid
-  // line read as "remnants" rather than "another shape edge."
-  const cleared = svgEl('path', {
-    d: 'M 6 22 L 18 22',
-    'stroke-dasharray': '2 2',
+  // Diagonal seam between sleeve and rubber face.
+  const seam = svgEl('path', { d: 'M 10 7.2 L 12 15.1' })
+  // Subtle erase chips.
+  const chips = svgEl('path', {
+    d: 'M 6 19 L 7.8 18.7 M 10 18.3 L 11.8 18 M 14 17.6 L 15.8 17.3',
   })
-  return makeSvg(body, bodyOutline, band1, band2, cleared)
+  return makeSvg(body, bodyOutline, seam, chips)
 }
 
 /** Select — arrow cursor. */

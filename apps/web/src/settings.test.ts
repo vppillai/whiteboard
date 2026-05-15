@@ -9,6 +9,7 @@ import {
 } from './settings'
 import { getEffectiveBrushConfig, migrate } from './settings'
 import {
+  _isMissingLocalStorageError,
   clearPreset,
   clearPresetCurve,
   resetAll,
@@ -18,6 +19,19 @@ import {
 } from './settings'
 
 beforeEach(__resetForTesting)
+
+describe('settings: persistence warning guard', () => {
+  test('identifies missing localStorage ReferenceError', () => {
+    expect(_isMissingLocalStorageError(new ReferenceError('localStorage is not defined'))).toBe(
+      true,
+    )
+  })
+
+  test('does not match other errors', () => {
+    expect(_isMissingLocalStorageError(new Error('boom'))).toBe(false)
+    expect(_isMissingLocalStorageError(new ReferenceError('something else'))).toBe(false)
+  })
+})
 
 describe('settings: migrate', () => {
   test('v0 with all fields migrates to v1 preserving values', () => {
