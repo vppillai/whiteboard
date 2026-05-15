@@ -964,7 +964,7 @@ async function main(): Promise<void> {
         }
         onCameraChange()
       },
-      onClear: clearFlow.request,
+      onClear: () => clearFlow.request(),
       togglePanel,
       onExport: () => {
         openExportPopover({
