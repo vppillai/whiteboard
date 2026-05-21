@@ -6,7 +6,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 
 ## Current state
 
-**v1.4.2 shipped 2026-05-14.** Single-user, offline-first whiteboard with strokes, image paste, text, laser, unified Select multi-object workflows, whiteboard-native clipboard round-trip, and Shape tool support (rect / ellipse / line / arrow), plus post-release docs/dependency hardening and factory-reset URL cleanup. Live collaboration remains deferred per [ADR 0012](decisions/0012-sharing-deferred.md). PWA install + deployment polish are post-v1 work tracked below.
+**v1.4.4 shipped 2026-05-20.** Single-user, offline-first whiteboard with strokes, image paste, text, laser, unified Select multi-object workflows, whiteboard-native clipboard round-trip, Shape tool support (rect / ellipse / line / arrow), plus post-v1.4.0 hardening: factory-reset URL cleanup, tool-menu TDZ fix, op-pipeline funneling for deletes, text measurement + pen halo pre-render caches, server CSP/security headers + path-traversal guard, and the standard OSS community-health files. Live collaboration remains deferred per [ADR 0012](decisions/0012-sharing-deferred.md). PWA install + deployment polish are post-v1 work tracked below.
 
 | M  | Title                                                                    | Status |
 |----|--------------------------------------------------------------------------|--------|
@@ -26,6 +26,8 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | **v1.4.0** | Shape tool — rect / ellipse / line / arrow with sticky color, stroke width, fill toggle | ✅ *(2026-05-14; tag `v1.4.0`; ADR 0018)* |
 | **v1.4.1** | Docs accuracy hardening + whitespace-only text empty-box guard | ✅ *(2026-05-14; tag `v1.4.1`)* |
 | **v1.4.2** | Factory-reset query-param cleanup + dependency/tooling major upgrades | ✅ *(2026-05-14; tag `v1.4.2`)* |
+| **v1.4.3** | Tool-menu clear-handler TDZ crash fix | ✅ *(2026-05-15; tag `v1.4.3`)* |
+| **v1.4.4** | Hardening pass — bug fixes, op-pipeline funnel, perf (text measure cache, pen halo pre-render), server security headers + path guard, OSS community files | ✅ *(2026-05-20; tag `v1.4.4`)* |
 | M4 | Deployment polish — clean-host validation, reverse-proxy paths           | ⬜ post-v1 |
 | M4.5 | PWA install + offline (manifest, service worker)                       | ⬜ post-v1 |
 | M5 | AI: shape recognition                                                    | ⬜ v2 |
@@ -49,7 +51,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 - ADRs 0001–0003.
 - MIT license, README, CONTRIBUTING, CHANGELOG.
 
-### M0 — Drawing core 🟦
+### M0 — Drawing core ✅
 
 > **Scope expanded** from the original "latency-only skeleton". User feedback during build pulled forward the things that make the tool genuinely usable from day one: theme support, infinite-canvas pan/zoom, and local persistence. Pan/zoom moved here from M1; persistence moved here from M2. The latency-validation gate is unchanged.
 
