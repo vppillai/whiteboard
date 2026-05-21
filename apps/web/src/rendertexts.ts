@@ -25,7 +25,7 @@
 import type { TextObject } from '@whiteboard/shared'
 import type { Camera } from './camera'
 import type { CanvasLayer } from './render'
-import { fontCss, measureText, TEXT_PADDING_X, TEXT_PADDING_Y, textAABB } from './textgeom'
+import { fontCss, getTextMeasurement, TEXT_PADDING_X, TEXT_PADDING_Y, textAABB } from './textgeom'
 
 export interface ViewBBox {
   minX: number
@@ -104,8 +104,10 @@ function drawText(
   // Get the rendered-line list via measureText so wrap-width text
   // (where the content was split by greedy word-wrap during measurement)
   // draws the same lines it measured. Without this, `content.split('\n')`
-  // would skip soft-wrap splits and produce a clipped render.
-  const m = measureText(t.content, t.font, t.wrapWidth)
+  // would skip soft-wrap splits and produce a clipped render. Cached per-
+  // TextObject via `getTextMeasurement` so committed-dirty re-renders
+  // don't re-pay the greedy word-wrap cost on every frame.
+  const m = getTextMeasurement(t)
   const baseX = t.transform.x + TEXT_PADDING_X
   const baseY = t.transform.y + TEXT_PADDING_Y
   for (let i = 0; i < m.lines.length; i++) {

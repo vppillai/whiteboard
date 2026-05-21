@@ -84,6 +84,58 @@ const JIGGLE_RATIO_THRESHOLD = 3
  *  linger felt slow to clear after the user finds the cursor. */
 const JIGGLE_HALO_LINGER_MS = 600
 
+/**
+ * Pre-rendered halo cache. The high-vis halo is `shadowBlur` + a crisp
+ * ring on top, which is comparatively expensive in Canvas2D (shadowBlur
+ * falls off the GPU fast path on most browsers). The halo's geometry is
+ * fully determined by `(inkColor, dpr)` — the SAME bitmap can be
+ * drawn at every hover frame during a jiggle hunt for the cost of one
+ * `drawImage`. We keep a single-slot cache because color changes are
+ * infrequent compared to hover frames; thrash on user color cycling
+ * is bounded by one regenerate per change.
+ */
+const HALO_PADDING_PX = 4
+const HALO_PLACEMENT_OFFSET_PX = IDLE_HALO_RADIUS_PX + IDLE_HALO_GLOW_BLUR + HALO_PADDING_PX
+
+interface HaloCache {
+  color: string
+  dpr: number
+  canvas: HTMLCanvasElement
+}
+let haloCache: HaloCache | null = null
+
+function getHaloCanvas(color: string, dpr: number): HTMLCanvasElement | null {
+  if (haloCache && haloCache.color === color && haloCache.dpr === dpr) {
+    return haloCache.canvas
+  }
+  if (typeof document === 'undefined') return null
+  const sizeCss = HALO_PLACEMENT_OFFSET_PX * 2
+  const canvas = document.createElement('canvas')
+  canvas.width = sizeCss * dpr
+  canvas.height = sizeCss * dpr
+  const c = canvas.getContext('2d')
+  if (!c) return null
+  c.scale(dpr, dpr)
+  c.strokeStyle = color
+  c.lineWidth = IDLE_HALO_LINE_WIDTH
+  // Glow pass — same parameters as the inline path that used to render
+  // here on every hover frame.
+  c.globalAlpha = 0.55
+  c.shadowColor = color
+  c.shadowBlur = IDLE_HALO_GLOW_BLUR
+  c.beginPath()
+  c.arc(HALO_PLACEMENT_OFFSET_PX, HALO_PLACEMENT_OFFSET_PX, IDLE_HALO_RADIUS_PX, 0, Math.PI * 2)
+  c.stroke()
+  // Crisp pass on top — shadowBlur cleared, alpha bumped.
+  c.shadowBlur = 0
+  c.globalAlpha = IDLE_HALO_ALPHA
+  c.beginPath()
+  c.arc(HALO_PLACEMENT_OFFSET_PX, HALO_PLACEMENT_OFFSET_PX, IDLE_HALO_RADIUS_PX, 0, Math.PI * 2)
+  c.stroke()
+  haloCache = { color, dpr, canvas }
+  return canvas
+}
+
 export interface PenToolCallbacks {
   /** Stroke finalized at pointerup. Caller pushes it to the strokes array
    *  and emits the create op. */
@@ -327,22 +379,26 @@ export function createPenTool(opts: PenToolOptions): Tool {
       const inkColor = ctx.resolveColor(getColor())
       c.save()
       c.setTransform(ctx.dpr, 0, 0, ctx.dpr, 0, 0)
-      c.strokeStyle = inkColor
       if (isHiViz) {
-        // Glow pass — shadowBlur on a wider semi-transparent stroke gives
-        // the bloom; the crisp ring lands on top. Same visual for both
-        // idle-hold and jiggle-hunt triggers.
-        c.globalAlpha = 0.55
-        c.lineWidth = IDLE_HALO_LINE_WIDTH
-        c.shadowColor = inkColor
-        c.shadowBlur = IDLE_HALO_GLOW_BLUR
-        c.beginPath()
-        c.arc(screen.x, screen.y, IDLE_HALO_RADIUS_PX, 0, Math.PI * 2)
-        c.stroke()
-        c.shadowBlur = 0
-        c.globalAlpha = IDLE_HALO_ALPHA
-        c.stroke()
+        // High-vis halo — pre-rendered offscreen and drawImage'd here.
+        // The fluorescent bloom uses `shadowBlur`, which is the canvas-
+        // perf cliff most likely to be hit during a jiggle hunt (200 Hz
+        // pointer events on Wacom Intuos). Caching by inkColor+dpr means
+        // a sustained hunt is one `drawImage` per frame instead of
+        // shadowBlur + two strokes.
+        const halo = getHaloCanvas(inkColor, ctx.dpr)
+        if (halo) {
+          const sizeCss = HALO_PLACEMENT_OFFSET_PX * 2
+          c.drawImage(
+            halo,
+            screen.x - HALO_PLACEMENT_OFFSET_PX,
+            screen.y - HALO_PLACEMENT_OFFSET_PX,
+            sizeCss,
+            sizeCss,
+          )
+        }
       } else {
+        c.strokeStyle = inkColor
         c.globalAlpha = HOVER_HALO_ALPHA
         c.lineWidth = 1
         c.beginPath()

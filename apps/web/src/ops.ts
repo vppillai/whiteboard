@@ -22,7 +22,7 @@
 
 import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import { addErasedStamps, invalidateStrokeBBox, removeErasedStamps } from './stroke'
-import { resizeToFit as resizeTextRect } from './textgeom'
+import { invalidateTextMeasurement, resizeToFit as resizeTextRect } from './textgeom'
 
 export interface StampEdit {
   strokeId: string
@@ -550,6 +550,10 @@ function setTextEdit(
   t.font = { ...payload.font }
   t.color = payload.color
   t.wrapWidth = payload.wrapWidth
+  // Drop the per-text measurement cache before re-fitting; the cache is
+  // keyed by TextObject identity and the new payload changes the inputs
+  // (content / font / wrapWidth) the cached measurement was derived from.
+  invalidateTextMeasurement(t)
   // Re-fit the rect to the new content + font + wrapWidth so move/
   // resize stay in sync with edit. `resizeTextRect` measures via a
   // detached canvas and falls back to a heuristic when no DOM is

@@ -53,6 +53,7 @@ import {
 import { buildSwatchPalette } from '../swatchpalette'
 import {
   FONT_CSS,
+  invalidateTextMeasurement,
   LINE_HEIGHT_MULT,
   pointInText,
   resizeToFit,
@@ -89,6 +90,10 @@ export interface TextToolDeps {
   nextZ: () => number
   /** Push an op onto the undo stack. */
   pushOp: (op: Op) => void
+  /** Apply an op (mutate in-memory state + persist). Used by the
+   *  empty-content commit path so the soft-delete goes through the
+   *  same single mutation surface the eraser uses. */
+  applyOp: (op: Op) => void
   /** Persist a text record. */
   saveText: (t: TextObject) => void
   /** Mark the committed layer dirty (text render lives there). */
@@ -464,13 +469,21 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       e.text.font = { ...e.before.font }
       e.text.color = e.before.color
       e.text.wrapWidth = e.before.wrapWidth
+      // Content / font / wrapWidth changed (relative to whatever the
+      // measurement cache last saw) — drop the cache so the next
+      // committed render measures the restored payload, not stale data.
+      invalidateTextMeasurement(e.text)
       // Re-fit so the rect matches the restored content (otherwise
       // it'd retain the zero-content size).
       const refitted = resizeToFit(e.text)
       e.text.transform = refitted.transform
-      e.text.deleted = true
-      deps.saveText(e.text)
-      deps.pushOp({ kind: 'delete-text', textId: e.text.id })
+      // Funnel the soft-delete through `applyOp` so the mutation +
+      // persistence path is the same one undo/redo uses. applyOp's
+      // `flipTextDeleted` writes the full record, so the restored
+      // before-state content is persisted alongside `deleted: true`.
+      const op: Op = { kind: 'delete-text', textId: e.text.id }
+      deps.applyOp(op)
+      deps.pushOp(op)
       deps.markCommittedDirty()
       return
     }

@@ -125,6 +125,36 @@ function wrapLine(line: string, maxWidth: number, measure: (s: string) => number
   return out.length > 0 ? out : [line]
 }
 
+/**
+ * Per-TextObject measurement cache. The committed re-render pass calls
+ * `measureText(t.content, t.font, t.wrapWidth)` once per visible text per
+ * dirty frame — for boards with many wrapped texts the greedy word-wrap +
+ * per-token `ctx.measureText` calls were a hot allocation/CPU site. Same
+ * pattern as `bboxCache` in `stroke.ts` — keyed by object identity, dropped
+ * via `invalidateTextMeasurement` whenever an op mutates content / font /
+ * wrapWidth (see `setTextEdit` in ops.ts).
+ */
+const measurementCache = new WeakMap<TextObject, TextMeasurement>()
+
+/** Cached form of `measureText` keyed by the TextObject reference. The
+ *  in-edit text is rendered through the DOM overlay, not the canvas pass,
+ *  so its measurement is never consulted while content is mutating. */
+export function getTextMeasurement(t: TextObject): TextMeasurement {
+  let m = measurementCache.get(t)
+  if (!m) {
+    m = measureText(t.content, t.font, t.wrapWidth)
+    measurementCache.set(t, m)
+  }
+  return m
+}
+
+/** Drop the cached measurement for `t`. Called from `setTextEdit` (the
+ *  one ops.ts site that mutates content / font / wrapWidth in place) so
+ *  the next renderpass re-measures against the new payload. */
+export function invalidateTextMeasurement(t: TextObject): void {
+  measurementCache.delete(t)
+}
+
 export function measureText(
   content: string,
   font: TextObject['font'],

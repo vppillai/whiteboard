@@ -238,6 +238,13 @@ interface SelectToolDeps {
   saveStroke: (s: Stroke) => void
   /** Push an op into the undo stack — fired on drag-end + on delete. */
   pushOp: (op: Op) => void
+  /** Apply an op (mutate in-memory state + persist). Used by the
+   *  delete path so the single mutation surface is `applyOp`, matching
+   *  the canonical pattern in `erasercallbacks.ts`. In-flight drag
+   *  paths still mutate directly + save per tick (see `saveStroke`
+   *  contract above) because they need fine-grained intermediate
+   *  state, not one atomic apply. */
+  applyOp: (op: Op) => void
   /** Mark the committed layer dirty so the next frame re-renders. */
   markCommittedDirty: () => void
   /** Fired when the user double-clicks a TEXT body. Caller (main.ts)
@@ -2089,8 +2096,10 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
           finalizeMarquee(m)
         } else {
           // Pointer-down + immediate release on empty space = click
-          // intent → deselect.
-          if (selected.length > 0) selected = []
+          // intent → deselect. Route through setSelection so the
+          // onSelectionChange hook (which the pinned tool menu uses
+          // to drop the prior selection's contextual section) fires.
+          if (selected.length > 0) setSelection([])
         }
         ctx.markCommittedDirty()
         return
@@ -2439,33 +2448,38 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       // corrupt the undo sequence.
       let didDelete = false
       for (const sel of selected) {
+        // Route every delete through `applyOp` so the mutation surface is
+        // single (same pattern as `erasercallbacks.ts`). The four branches
+        // differ only in op kind + which array they read for the
+        // already-deleted guard; the mutation + persistence is handled
+        // by `flipDeletedOn` inside applyOp.
         if (sel.kind === 'image') {
           const img = deps.getImages().find((i) => i.id === sel.id)
           if (!img || img.deleted) continue
-          img.deleted = true
-          deps.saveImageMeta(img)
-          deps.pushOp({ kind: 'delete-image', imageId: sel.id })
+          const op: Op = { kind: 'delete-image', imageId: sel.id }
+          deps.applyOp(op)
+          deps.pushOp(op)
           didDelete = true
         } else if (sel.kind === 'text') {
           const t = deps.getTexts().find((x) => x.id === sel.id)
           if (!t || t.deleted) continue
-          t.deleted = true
-          deps.saveText(t)
-          deps.pushOp({ kind: 'delete-text', textId: sel.id })
+          const op: Op = { kind: 'delete-text', textId: sel.id }
+          deps.applyOp(op)
+          deps.pushOp(op)
           didDelete = true
         } else if (sel.kind === 'shape') {
           const sh = deps.getShapes().find((x) => x.id === sel.id)
           if (!sh || sh.deleted) continue
-          sh.deleted = true
-          deps.saveShape(sh)
-          deps.pushOp({ kind: 'delete-shape', shapeId: sel.id })
+          const op: Op = { kind: 'delete-shape', shapeId: sel.id }
+          deps.applyOp(op)
+          deps.pushOp(op)
           didDelete = true
         } else {
           const s = deps.getStrokes().find((x) => x.id === sel.id)
           if (!s || s.deleted) continue
-          s.deleted = true
-          deps.saveStroke(s)
-          deps.pushOp({ kind: 'delete', strokeIds: [sel.id] })
+          const op: Op = { kind: 'delete', strokeIds: [sel.id] }
+          deps.applyOp(op)
+          deps.pushOp(op)
           didDelete = true
         }
       }
