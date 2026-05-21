@@ -11,6 +11,7 @@ This project is **AI-generated under human direction**. The code, documentation,
 1. **Open an issue first** for anything non-trivial. Bug reports and feature ideas are welcome; "I'd like to add X" PRs without prior discussion are likely to be redirected.
 2. Read [SPEC.md](SPEC.md) to understand the product scope and what is intentionally out of scope.
 3. Read the relevant ADR(s) under [docs/decisions/](docs/decisions/) before proposing changes that touch architectural choices.
+4. For architectural changes, add a new ADR under [docs/decisions/](docs/decisions/) using the next available number (the existing files follow `NNNN-kebab-title.md`); reference it from [docs/architecture.md](docs/architecture.md) and the [docs/process.md](docs/process.md) doc-update checklist.
 
 ## Local development
 
@@ -21,7 +22,7 @@ See [docs/development.md](docs/development.md). The short version: `bun install`
 - Lint and format are enforced via [Biome](https://biomejs.dev). Run `bun run lint` before committing; the pre-commit hook will block obviously bad commits.
 - TypeScript strict mode is on. New code is expected to type-check cleanly (`bun run typecheck`).
 - Comments explain *why*, not *what*. Names should make the *what* obvious.
-- Tests are required for non-trivial logic in `packages/shared` and `apps/server`. UI test coverage is best-effort.
+- Tests are required for non-trivial logic in `packages/shared` and `apps/server`. UI test coverage is best-effort. Run the suite with `bun test`; tests live alongside the modules they cover (`foo.test.ts` next to `foo.ts`).
 
 ## Pull requests
 

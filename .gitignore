@@ -43,3 +43,6 @@ test-results/
 
 # Superpowers brainstorm sessions (mockups + state, not code)
 .superpowers/
+
+# OMC session state (project memory, run state — not project artifacts)
+.omc/

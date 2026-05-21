@@ -69,8 +69,16 @@ const SAVE_DEBOUNCE_MS = 500
  *
  * Also wires up a flush on `visibilitychange` (page hide) so the last
  * frame of motion is captured even if the user closes the tab quickly.
+ *
+ * `cleanup()` removes both listeners. main.ts registers it via the
+ * teardown registry so an HMR cycle doesn't leak stale listeners that
+ * close over a now-detached camera.
  */
-export function makeViewSaver(camera: Camera): { queueSave(): void; flush(): void } {
+export function makeViewSaver(camera: Camera): {
+  queueSave(): void
+  flush(): void
+  cleanup(): void
+} {
   let timer: ReturnType<typeof setTimeout> | null = null
   const flush = (): void => {
     if (timer !== null) {
@@ -84,10 +92,20 @@ export function makeViewSaver(camera: Camera): { queueSave(): void; flush(): voi
     timer = setTimeout(flush, SAVE_DEBOUNCE_MS)
   }
 
-  document.addEventListener('visibilitychange', () => {
+  const onVisibilityChange = (): void => {
     if (document.visibilityState === 'hidden') flush()
-  })
+  }
+  document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('pagehide', flush)
 
-  return { queueSave, flush }
+  const cleanup = (): void => {
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+    window.removeEventListener('pagehide', flush)
+    if (timer !== null) {
+      clearTimeout(timer)
+      timer = null
+    }
+  }
+
+  return { queueSave, flush, cleanup }
 }

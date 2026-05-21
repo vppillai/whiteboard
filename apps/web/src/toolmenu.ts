@@ -285,6 +285,12 @@ export function openToolMenu(opts: ToolMenuOptions): Popover {
       // opened this menu) so a future page-refresh can re-open here.
       if (pinned) writePersistedAnchor(opts.at)
     },
+    // When the user drags a pinned menu, persist the new position so a
+    // page refresh restores it where they put it (was: re-opened at the
+    // original click point, ignoring the drag).
+    onAnchorChange: (at) => {
+      if (popoverRef.current?.isPinned()) writePersistedAnchor(at)
+    },
     onDismiss: settingsUnsub,
   })
   // Expose a rebuild hook so external state changes (tool switch via

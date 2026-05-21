@@ -8,6 +8,55 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 No entries yet.
 
+## [1.4.4] — 2026-05-20
+
+**Hardening pass — bug fixes, architectural cleanup, perf wins, security headers, OSS gates.** Multi-specialist code review on v1.4.3 surfaced a set of small defects, a CRDT-readiness gap in the op-pipeline (delete paths bypassed `applyOp`), two cheap perf wins on the renderer, and a defense-in-depth opportunity on the static server. Repo also gains the standard OSS community-health files (SECURITY, CODE_OF_CONDUCT, issue + PR templates) so external contributors land softly.
+
+### Fixed
+
+- **Marquee deselect now rebuilds the pinned tool menu.** Tap on empty canvas after a pinned-menu selection: the contextual section drops immediately, not on the next interaction. (Was the one selection-mutation site that escaped the v1.4 `setSelection` route + `onSelectionChange` hook from PR #12.)
+- **Pinned tool menu now persists its dragged position.** Pin → drag the menu by its header → reload: the menu re-opens where you put it, not at the original right-click anchor.
+- **`viewstate` + `settings` pagehide listeners get explicit teardown.** Wired into `main.ts`'s cleanup registry so HMR cycles don't leak stale closures pinned to detached camera / persist-timer state. The file header's "this discipline keeps the codebase safe if anyone adds `accept()` later" promise is now uniformly held.
+- **Factory-reset query-param cleanup runs before any awaitable boot step.** Was after `initTheme()` — moved to line 1 of `main()` so a boot exception in any subsequent step doesn't leave `?factoryReset=…` stuck in the URL across reloads.
+- **Render-loop comment numbering fixed** (`Pass 1` / `Pass 3` had a removed-pass gap → renumbered to `Pass 1` / `Pass 2`).
+
+### Changed (architecture)
+
+- **Select-tool and Text-tool deletes now funnel through `applyOp`.** `deleteSelected`'s 4 parallel mutation paths (image / text / shape / stroke) collapse to the canonical `applyOp(op); pushOp(op)` pattern that `erasercallbacks.ts` already uses. The Text tool's edit-down-to-empty soft-delete path joins the same funnel. Same observable behavior; a single mutation surface that's CRDT-binding-friendly when sharing returns per [ADR 0012](docs/decisions/0012-sharing-deferred.md).
+- **Per-`TextObject` measurement cache.** The committed re-render previously re-ran greedy word-wrap + per-token `ctx.measureText` for every visible wrapped text on every committed-dirty frame; now cached via a WeakMap (mirroring the existing `stroke.ts` bbox cache pattern), invalidated in `setTextEdit` when content / font / wrapWidth mutate. Settings-slider drags on text-heavy boards feel meaningfully snappier.
+- **Pen high-vis halo (idle + jiggle-hunt) pre-renders once per ink color.** `shadowBlur=14` + crisp ring used to render inline on every hover frame during a jiggle hunt — Canvas2D's `shadowBlur` is a known GPU fast-path-buster. Now drawn once to an offscreen canvas keyed by `(color, dpr)`; hover frames are a single `drawImage`. Regenerates lazily on color change.
+
+### Security
+
+- **Static server adds a baseline security-header set on every response.** `Content-Security-Policy` (default-src 'self', frame-ancestors 'none', script-src 'self', etc.), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Permissions-Policy: geolocation=(), microphone=(), camera=(), interest-cohort=()`. CSP allows `'unsafe-inline'` for styles only (Vite-injected style blocks).
+- **Application-layer path-traversal guard on the static server.** Previous code relied on Bun's URL parser to normalize `..` segments before `Bun.file()` saw them. Now `safeResolve` decodes + verifies the resolved path is inside `distRoot`, so the invariant holds across runtime swaps, alternative routers, and proxy-forward-verbatim configurations.
+- **`?perftest=…` URL params gated behind `import.meta.env.DEV`.** Closes the "phishing link sends `?perftest=1&n=10000000` → victim's browser DoS" vector — production builds tree-shake the entire perftest harness.
+
+### Documentation
+
+- **SPEC § 9 milestone table now includes v1.1.0 through v1.4.4** (was stopping at v1.0.0).
+- **SPEC § 4.3 shortcut table** gains `Shift+C` (color picker), `Shift+O` (options), `Cmd/Ctrl+1` (zoom-to-fit) — keys wired since v1.4 but missing from the doc.
+- **SPEC § 3.2 render pipeline** corrected from "two stacked `<canvas>`" to the actual three-layer model (committed / strokes-offscreen / live) per [ADR 0009](docs/decisions/0009-pixel-mask-eraser.md).
+- **SPEC § 6** export filename `HHMM` → `HHMMSS` (matched code since v1.1).
+- **`docs/architecture.md`** `render.ts` row documents within-committed pass order (grid → images → texts → shapes → strokes composite) per [ADR 0018](docs/decisions/0018-shape-tool.md).
+- **CONTRIBUTING.md** mentions `bun test` and ADR creation workflow.
+- **Various comment fixes** (`docs/milestones.md` M0 emoji, `main.ts` top-of-file shortcut comment).
+
+### Added (community)
+
+- **`SECURITY.md`** — vulnerability disclosure flow.
+- **`CODE_OF_CONDUCT.md`** — Contributor Covenant 2.1.
+- **`.github/ISSUE_TEMPLATE/`** — bug-report and feature-request templates. Feature template has a "Tenet alignment" section that keeps SPEC § 0 visible in the request workflow.
+- **`.github/PULL_REQUEST_TEMPLATE.md`** — mirrors the `docs/process.md` doc-update + test + CHANGELOG checklist.
+
+## [1.4.3] — 2026-05-15
+
+Patch — single regression fix.
+
+### Fixed
+
+- **Tool menu clear handler no longer crashes on first open / restore.** The menu's clear-board action read `clearFlow` during contextual-menu setup, but `clearFlow` is initialized later in `main()`; wrapping the read in a deferred callback eliminates the temporal-dead-zone `ReferenceError`.
+
 ## [1.4.2] — 2026-05-14
 
 Patch — factory-reset URL cleanup so one-shot reset query params do not linger after boot.

@@ -13,7 +13,7 @@
  *   T                  — text tool  (Shift+T cycles theme)
  *   1 – 5              — brush preset
  *   C                  — color picker (at pointer)
- *   O                  — options (grid type, spacing)
+ *   Shift+O            — options (grid type, spacing)
  *   F                  — toggle distraction-free mode
  *   M                  — toggle metrics HUD
  *   ?                  — toggle help overlay
@@ -102,6 +102,7 @@ import {
   getEffectiveBrushConfig,
   getLaserColor,
   getSettings,
+  installSettingsLifecycle,
   onChange as onSettingsChange,
   setBrushId,
   setColor,
@@ -168,8 +169,11 @@ const ZOOM_WHEEL_FACTOR = 1.0015 // per pixel of deltaY
 let perfRecording: number[] | null = null
 
 async function main(): Promise<void> {
-  initTheme()
+  // Strip the factory-reset query param first so a boot-time exception
+  // in any later step (theme init, store hydrate, etc.) doesn't leave
+  // the URL stuck with ?factoryReset= on the user's next reload.
   clearFactoryResetQueryParam()
+  initTheme()
 
   // StrokeStore seam: main.ts talks to a `StrokeStore` interface rather than
   // calling storage.ts directly. v1 wires the local IDB-backed implementation.
@@ -226,6 +230,8 @@ async function main(): Promise<void> {
     camera.scale = persistedView.scale
   }
   const viewSaver = makeViewSaver(camera)
+  registerCleanup(viewSaver.cleanup)
+  registerCleanup(installSettingsLifecycle())
 
   // ---------------------------------------------------------------------
   //  Static UI: metrics HUD, help overlay, help pill
@@ -498,6 +504,7 @@ async function main(): Promise<void> {
     getStrokes: () => strokes,
     saveStroke: persistSelectStroke,
     pushOp: (op) => pushUndoOp(op),
+    applyOp: (op) => applyOp(op, opCtx),
     markCommittedDirty: () => {
       committedDirty = true
     },
@@ -533,6 +540,7 @@ async function main(): Promise<void> {
     getTexts: () => texts,
     nextZ: nextTextZ,
     pushOp: pushUndoOp,
+    applyOp: (op) => applyOp(op, opCtx),
     saveText: persistText,
     markCommittedDirty: () => {
       committedDirty = true
@@ -1405,7 +1413,7 @@ async function main(): Promise<void> {
         maxY: camera.y + target.height / camera.scale,
       }
 
-      // ----- Pass 1: per-stroke draw + per-stroke destination-out -----
+      // ----- Pass 1: strokes offscreen — per-stroke draw + per-stroke destination-out -----
       // ADR 0009: strokes go to a dedicated offscreen so destination-out
       // for eraser stamps doesn't subtract from the grid. Each stroke's
       // stamps must be applied *immediately after that stroke is drawn*
@@ -1436,7 +1444,7 @@ async function main(): Promise<void> {
         )
       }
 
-      // ----- Pass 3: committed layer (grid + images + composited strokes) -----
+      // ----- Pass 2: committed layer (grid + images + texts + shapes + composited strokes) -----
       clearLayer(target.committed)
       applyCamera(target.committed, camera, target.dpr)
       drawGrid(target.committed, camera, target.width, target.height, getSettings().grid)
@@ -1547,8 +1555,14 @@ async function main(): Promise<void> {
     import.meta.hot.dispose(runAllCleanups)
   }
 
-  // Perftest mode.
-  if (params.has('perftest')) {
+  // Perftest mode — DEV builds only. The harness allocates large stroke
+  // batches and runs unbounded loops; in a production bundle a crafted
+  // `?perftest=1&n=10000000` link could DoS a victim's browser. The
+  // `import.meta.env.DEV` gate is a compile-time constant in Vite, so
+  // production builds tree-shake the entire harness (runPerftest +
+  // runPerfMode + runErasePerfMode + runScalePerfMode + populatePerfStrokes
+  // + buildPerfBanner) out of the bundle.
+  if (import.meta.env.DEV && params.has('perftest')) {
     const mode = params.get('perftest')
     const dirty = (): void => {
       committedDirty = true

@@ -54,6 +54,13 @@ export interface PopoverOptions {
    *  persist the state (e.g., toolmenu writes to sessionStorage so the
    *  pin choice survives a menu close / reopen within the tab). v1.4. */
   onPinnedChange?: (pinned: boolean) => void
+  /** Called after a drag-to-move ends. Receives a synthesized "anchor"
+   *  that — when passed back as `anchor` to a new `showPopover` call
+   *  with the same `placement` — re-derives the current top-left
+   *  position. Callers can persist this opaquely without modelling the
+   *  placement math themselves. Toolmenu uses it to keep a pinned
+   *  menu's drag position across reloads. */
+  onAnchorChange?: (at: { x: number; y: number }) => void
 }
 
 export interface Popover {
@@ -230,6 +237,24 @@ export function showPopover(opts: PopoverOptions): Popover {
     if (header.hasPointerCapture(drag.pointerId)) header.releasePointerCapture(drag.pointerId)
     drag = null
     header.style.cursor = 'grab'
+    // Re-derive the "anchor" that, passed to `positionPopover` with the
+    // current placement, would re-produce the current top-left. The
+    // 12-px offset mirrors `positionPopover`'s `offset` constant — kept
+    // in sync; if that changes, update here too.
+    if (opts.onAnchorChange) {
+      const rect = el.getBoundingClientRect()
+      const placement = opts.placement ?? 'below'
+      if (placement === 'below') {
+        opts.onAnchorChange({
+          x: rect.left + rect.width / 2,
+          y: rect.top - 12,
+        })
+      } else {
+        // 'right-of': anchor's x is the left edge of the region the
+        // popover layers beside; mirror that here.
+        opts.onAnchorChange({ x: rect.left - 12, y: rect.top })
+      }
+    }
   }
   header.addEventListener('pointerup', endDrag)
   header.addEventListener('pointercancel', endDrag)

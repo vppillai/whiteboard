@@ -96,10 +96,11 @@ canvas.addEventListener('pointerup', e => commitStroke())
 
 ### 3.2 Render pipeline
 
-Two stacked `<canvas>` elements:
+Three canvas layers (per [ADR 0009](docs/decisions/0009-pixel-mask-eraser.md) — the pixel-mask eraser drove the offscreen split):
 
-- **Committed layer**: all finalized strokes. Re-rasterized only on pan/zoom or stroke commit/erase. Optionally `OffscreenCanvas` + worker once stroke count > ~500.
-- **Live layer**: cleared and redrawn each `requestAnimationFrame` — current stroke + predicted-points lookahead. This is the layer the user actually sees moving.
+- **Committed layer** (DOM `<canvas>`): grid + composited image / text / shape / stroke results. Re-rasterized only on pan/zoom or commit/erase boundary events.
+- **Strokes offscreen layer** (`OffscreenCanvas`): destination-out target for pixel-mask eraser stamps. Each stroke draws here, then its `erasedStamps` are subtracted, then the resulting pixels are composited into the committed layer. Isolating destination-out to this layer keeps the grid intact (a global destination-out would punch holes through it too).
+- **Live layer** (DOM `<canvas>`): cleared and redrawn each `requestAnimationFrame` — current stroke + predicted-points lookahead. This is the layer the user actually sees moving.
 
 Stroke geometry: [`perfect-freehand`](https://github.com/steveruizok/perfect-freehand) with these defaults per brush preset:
 
@@ -180,12 +181,15 @@ The original toolbar commitment was retired during M2 brainstorming on tenet gro
 | `1`–`5`                        | Switch to brush preset 1–5                | ✅     |
 | `[` / `]`                      | Decrease / increase size                  | M1     |
 | `Shift+[` / `Shift+]`          | Cycle color palette                       | ✅     |
-| `R` / `O` / `A` / `L`          | Shape sub-tools (rect / ellipse / arrow / line) | ✅ |
+| `Shift+C`                      | Color picker popover (at pointer)         | ✅     |
+| `Shift+O`                      | Options popover (grid type, spacing)      | ✅     |
+| `R` / `O` / `A` / `L`          | Shape sub-tools (rect / ellipse / arrow / line) — `O` and `L` rebound from earlier roles (now `Shift+O` for options, `P` / `Shift+P` for laser / pen) | ✅ |
 | `Cmd/Ctrl + E`                 | Export popover (PNG / SVG / PDF)          | ✅     |
 | `Cmd/Ctrl + ,`                 | Toggle settings panel                     | ✅     |
 | `Cmd/Ctrl + Z`                 | Undo                                      | ✅     |
 | `Cmd/Ctrl + Shift + Z`         | Redo (also `Cmd/Ctrl + Y`)                | ✅     |
 | `Cmd/Ctrl + 0`                 | Reset zoom                                | ✅     |
+| `Cmd/Ctrl + 1`                 | Zoom to fit all non-deleted objects       | ✅     |
 | `Cmd/Ctrl + =` / `-`           | Zoom in / out                             | ✅     |
 | `Cmd/Ctrl + A`                 | Select all non-deleted objects (activates Select tool) | ✅     |
 | `Delete` / `Backspace`         | Delete selected                           | ✅     |
@@ -213,7 +217,7 @@ The v1 ship is single-user, single-device — no rooms, no shared URLs, no prese
 
 - **Client**: IndexedDB. One database (`whiteboard-local`) with object stores for `strokes`, `images`, `images-blob`, `texts`, and `shapes`. Writes happen at gesture commit boundaries (`pointerup` / commit paths), so a power-loss event at most loses in-flight edits. Reads on app boot hydrate the committed canvas. Persistence is kept behind store interfaces (`StrokeStore`, `ImageStore`, `TextStore`, `ShapeStore`) so backends can be swapped without touching the orchestrator.
 - **Server**: None at v1. The Bun process is stateless — it serves static files and a `/health` endpoint. No SQLite, no `DATA_DIR` volume. (Server-side snapshot persistence is part of the deferred sharing design — see § 10 Backlog and [ADR 0012](docs/decisions/0012-sharing-deferred.md).)
-- **Export**: PNG (detached canvas + `canvas.toBlob`), SVG (custom serializer with mask-based erasure for `erasedStamps`), PDF (`jsPDF` wrapping a rasterized PNG; SVG-vector PDF deferred). Triggered via right-click → EXPORT or `Cmd/Ctrl+E`. Filename: `whiteboard-YYYY-MM-DD-HHMM.{ext}`. Empty board no-ops with a console warn.
+- **Export**: PNG (detached canvas + `canvas.toBlob`), SVG (custom serializer with mask-based erasure for `erasedStamps`), PDF (`jsPDF` wrapping a rasterized PNG; SVG-vector PDF deferred). Triggered via right-click → EXPORT or `Cmd/Ctrl+E`. Filename: `whiteboard-YYYY-MM-DD-HHMMSS.{ext}`. Empty board no-ops with a console warn.
 - **Import**: PNG/SVG drop onto canvas places it as a non-editable image layer (read-only in v1).
 
 ## 7. AI roadmap (v2)
@@ -267,6 +271,13 @@ The sharing-related env vars (`OWNER_TOKEN`, `DATA_DIR`, `MAX_ROOMS`, `MAX_BOARD
 | M2        | Export (PNG/SVG/PDF), distraction-free, palette cycle, pressure-curve UI, first-run hint, predicted-events toggle | ✅ |
 | M2.1      | Pre-sharing hardening; `StrokeStore` interface seam; CRDT-safe schema choices; identity scrub | ✅ |
 | **v1.0.0** | First production release — offline-first, pen-optimized              | ✅ *(2026-05-11)* |
+| **v1.1.0** | Image paste — Select tool, move / resize / rotate, export integration | ✅ *(2026-05-12)* |
+| **v1.2.0** | Text tool + Select extension + laser + mouse synthetic pressure + lasso PNG copy | ✅ *(2026-05-13)* |
+| **v1.3.0** | Lasso → Select absorption + whiteboard-native clipboard + hardening | ✅ *(2026-05-13)* |
+| **v1.3.1** | Pinned right-click menu coexistence — pin survives opening other popovers | ✅ *(2026-05-14)* |
+| **v1.4.0** | Shape tool — rect / ellipse / line / arrow with sticky color, stroke width, fill toggle | ✅ *(2026-05-14)* |
+| **v1.4.1** | Docs accuracy hardening + whitespace-only text empty-box guard | ✅ *(2026-05-14)* |
+| **v1.4.2** | Factory-reset query-param cleanup + dependency / tooling upgrades | ✅ *(2026-05-14)* |
 | M4        | Deployment polish: clean-host validation, reverse-proxy paths, release notes | ⬜ post-v1 |
 | M4.5      | PWA install + offline (manifest, service worker, install affordance)  | ⬜ post-v1 |
 | M5        | AI v2-a: shape recognition                                            | ⬜ v2 |

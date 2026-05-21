@@ -372,14 +372,31 @@ function persist(): void {
 // Flush any pending debounced write on tab close so a trailing slider edit
 // doesn't get lost. `pagehide` is more reliable than `beforeunload` on
 // mobile / SPA navigation (the latter doesn't always fire).
-if (typeof window !== 'undefined') {
-  window.addEventListener('pagehide', () => {
-    if (persistTimer !== null) {
-      clearTimeout(persistTimer)
-      persistTimer = null
-      persistNow()
+function _settingsOnPageHide(): void {
+  if (persistTimer !== null) {
+    clearTimeout(persistTimer)
+    persistTimer = null
+    persistNow()
+  }
+}
+
+let _settingsLifecycleInstalled = false
+
+/** Install the pagehide flush listener; returns a cleanup that removes it.
+ *  Idempotent across calls. main.ts wires the cleanup into its teardown
+ *  registry so an HMR dispose doesn't leave a stale closure pinned to
+ *  this module's old `persistTimer` / `state`. */
+export function installSettingsLifecycle(): () => void {
+  if (!_settingsLifecycleInstalled && typeof window !== 'undefined') {
+    window.addEventListener('pagehide', _settingsOnPageHide)
+    _settingsLifecycleInstalled = true
+  }
+  return () => {
+    if (_settingsLifecycleInstalled && typeof window !== 'undefined') {
+      window.removeEventListener('pagehide', _settingsOnPageHide)
+      _settingsLifecycleInstalled = false
     }
-  })
+  }
 }
 
 function emit(): void {
