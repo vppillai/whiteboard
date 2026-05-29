@@ -2,7 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "lib": ["ES2022"]
+    "lib": ["ES2022"],
+    "types": ["bun"]
   },
   "include": ["src/**/*"]
 }

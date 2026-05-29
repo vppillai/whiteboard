@@ -62,6 +62,7 @@ function applyMode(mode: ThemeMode): void {
  */
 export function resolveInkColor(token: string): string {
   if (token !== 'ink') return token
+  if (typeof document === 'undefined') return '#1a1a1a'
   const v = getComputedStyle(document.documentElement).getPropertyValue('--ink').trim()
   return v || '#1a1a1a'
 }

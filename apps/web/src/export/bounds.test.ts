@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { ImageObject, Stroke } from '@whiteboard/shared'
+import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import { type Bounds, computeBoardBounds, EXPORT_MARGIN } from './bounds'
 
 function mkImage(x: number, y: number, w: number, h: number, deleted = false): ImageObject {
@@ -9,6 +9,39 @@ function mkImage(x: number, y: number, w: number, h: number, deleted = false): I
     format: 'png',
     natural: { w, h },
     transform: { x, y, w, h },
+    z: 1,
+    createdAt: 0,
+    deleted,
+  }
+}
+
+function mkText(x: number, y: number, w: number, h: number, deleted = false): TextObject {
+  return {
+    id: Math.random().toString(36).slice(2),
+    content: 'hello',
+    font: { family: 'mono', size: 12, bold: false, italic: false, underline: false },
+    color: 'ink',
+    transform: { x, y, w, h },
+    z: 1,
+    createdAt: 0,
+    deleted,
+  }
+}
+
+function mkShape(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  kind: ShapeObject['shape'] = 'rect',
+  deleted = false,
+): ShapeObject {
+  return {
+    id: Math.random().toString(36).slice(2),
+    shape: kind,
+    transform: { x, y, w, h },
+    color: 'ink',
+    strokeWidth: 2,
     z: 1,
     createdAt: 0,
     deleted,
@@ -141,7 +174,50 @@ describe('export/bounds: computeBoardBounds', () => {
     expect(b.x + b.width).toBeLessThan(500)
   })
 
-  test('empty strokes + empty images → null', () => {
-    expect(computeBoardBounds([], [])).toBeNull()
+  test('texts contribute to bounds', () => {
+    const t = mkText(150, 150, 80, 20)
+    const b = expectBounds(computeBoardBounds([], [], [t]))
+    expect(b.x).toBe(150 - EXPORT_MARGIN)
+    expect(b.y).toBe(150 - EXPORT_MARGIN)
+    expect(b.width).toBe(80 + 2 * EXPORT_MARGIN)
+    expect(b.height).toBe(20 + 2 * EXPORT_MARGIN)
+  })
+
+  test('deleted texts do not contribute', () => {
+    const live = mkText(0, 0, 50, 20)
+    const dead = mkText(500, 500, 100, 20, true)
+    const b = expectBounds(computeBoardBounds([], [], [live, dead]))
+    expect(b.x + b.width).toBeLessThan(500)
+  })
+
+  test('shapes contribute to bounds', () => {
+    const s = mkShape(120, 120, 60, 40) // strokeWidth = 2, so pad is 1
+    const b = expectBounds(computeBoardBounds([], [], [], [s]))
+    // pad is 1, so minX = 120 - 1 = 119. minX - EXPORT_MARGIN = 119 - 32 = 87
+    expect(b.x).toBe(119 - EXPORT_MARGIN)
+    expect(b.y).toBe(119 - EXPORT_MARGIN)
+    expect(b.width).toBe(62 + 2 * EXPORT_MARGIN)
+    expect(b.height).toBe(42 + 2 * EXPORT_MARGIN)
+  })
+
+  test('deleted shapes do not contribute', () => {
+    const live = mkShape(0, 0, 50, 50)
+    const dead = mkShape(500, 500, 100, 100, 'rect', true)
+    const b = expectBounds(computeBoardBounds([], [], [], [live, dead]))
+    expect(b.x + b.width).toBeLessThan(500)
+  })
+
+  test('all four element types combined gives the union of their bounds', () => {
+    const stroke = mkStroke([{ x: 0, y: 0 }])
+    const img = mkImage(100, 100, 50, 50)
+    const txt = mkText(200, 200, 50, 20)
+    const sh = mkShape(300, 300, 50, 50)
+    const b = expectBounds(computeBoardBounds([stroke], [img], [txt], [sh]))
+    expect(b.x).toBeLessThanOrEqual(0)
+    expect(b.x + b.width).toBeGreaterThanOrEqual(350)
+  })
+
+  test('empty strokes + empty images + empty texts + empty shapes → null', () => {
+    expect(computeBoardBounds([], [], [], [])).toBeNull()
   })
 })
