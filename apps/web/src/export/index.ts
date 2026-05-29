@@ -41,6 +41,10 @@ export interface ExportOptions {
   /** Fired after the download has been triggered with the chosen format
    *  ('png' | 'svg' | 'pdf') so callers can surface a confirmation toast. */
   onSuccess?: (format: ExportFormat) => void
+  /** Fired if the export throws (renderer failure, image decode / file-read
+   *  error). The happy path fires `onSuccess` instead; callers surface a
+   *  failure toast so a silently-dismissed popover can't read as success. */
+  onError?: (format: ExportFormat, err: unknown) => void
 }
 
 export async function exportBoard(
@@ -48,32 +52,42 @@ export async function exportBoard(
   scope: ExportScope,
   opts: ExportOptions,
 ): Promise<void> {
-  const strokes = opts.getStrokes()
-  const images = opts.getImages?.() ?? []
-  const texts = opts.getTexts?.() ?? []
-  const shapes = opts.getShapes?.() ?? []
-  const bounds =
-    scope === 'visible'
-      ? computeViewportBounds(opts.camera, opts.viewportWidth, opts.viewportHeight)
-      : computeBoardBounds(strokes, images, texts, shapes)
-  if (!bounds) {
-    if (opts.onEmptyBoard) opts.onEmptyBoard()
-    else console.warn('whiteboard/export: nothing to export')
-    return
+  try {
+    const strokes = opts.getStrokes()
+    const images = opts.getImages?.() ?? []
+    const texts = opts.getTexts?.() ?? []
+    const shapes = opts.getShapes?.() ?? []
+    const bounds =
+      scope === 'visible'
+        ? computeViewportBounds(opts.camera, opts.viewportWidth, opts.viewportHeight)
+        : computeBoardBounds(strokes, images, texts, shapes)
+    if (!bounds) {
+      if (opts.onEmptyBoard) opts.onEmptyBoard()
+      else console.warn('whiteboard/export: nothing to export')
+      return
+    }
+    const snap = getSettings()
+    const blob = await renderFormat(
+      format,
+      strokes,
+      images,
+      texts,
+      shapes,
+      opts.imageStore ?? null,
+      bounds,
+      snap,
+    )
+    triggerDownload(blob, filename(format))
+    opts.onSuccess?.(format)
+  } catch (err) {
+    // Wrap the whole body so a synchronous getter throw OR a renderer
+    // rejection surfaces to the caller instead of becoming an unhandled
+    // promise rejection. The popover dismisses regardless of outcome, so
+    // without this a failed export silently reads as success. onSuccess
+    // stays on the happy path above, never in this catch.
+    console.error('whiteboard/export: failed', err)
+    opts.onError?.(format, err)
   }
-  const snap = getSettings()
-  const blob = await renderFormat(
-    format,
-    strokes,
-    images,
-    texts,
-    shapes,
-    opts.imageStore ?? null,
-    bounds,
-    snap,
-  )
-  triggerDownload(blob, filename(format))
-  opts.onSuccess?.(format)
 }
 
 async function renderFormat(

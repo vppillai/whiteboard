@@ -32,6 +32,8 @@ export interface ExportPopoverOptions {
   onEmptyBoard?: () => void
   /** Fires after the file has been downloaded; callers surface a toast. */
   onSuccess?: (format: ExportFormat) => void
+  /** Fires if the export throws; callers surface a failure toast. */
+  onError?: (format: ExportFormat, err: unknown) => void
 }
 
 // Persist scope across popover opens within a session — sensible default
@@ -98,6 +100,7 @@ export function openExportPopover(opts: ExportPopoverOptions): Popover {
         viewportHeight: opts.viewportHeight,
         onEmptyBoard: opts.onEmptyBoard,
         onSuccess: opts.onSuccess,
+        onError: opts.onError,
       })
       popoverRef.current?.dismiss()
     })

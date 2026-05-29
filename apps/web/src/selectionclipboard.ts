@@ -38,6 +38,8 @@
 
 import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import { blobToDataUrl, buildClipboardHtml, type ClipboardStrokeBundle } from './clipboardstrokes'
+import { computeBoardBounds } from './export/bounds'
+import { exportPNG } from './export/png'
 import { makeShapeId, makeStrokeId, makeTextId } from './ids'
 import { writeImageToClipboard, writePngBlobToClipboard } from './imageclipboard'
 import type { Op } from './ops'
@@ -126,11 +128,13 @@ function collectSelection(ctx: SelectionClipboardContext): SelectionSnapshot | n
   }
 }
 
-/** Render the categorized selection to a PNG blob using the shared
- *  export pipeline. Transparent background so the paste lands cleanly
- *  in Google Docs / Slack / Confluence. Dynamic-imports the export
- *  module so its (~10kb) code isn't paid for on app boot — only on
- *  the first copy. */
+/** Render the categorized selection to a PNG blob using the shared export
+ *  pipeline. Transparent background so the paste lands cleanly in Google
+ *  Docs / Slack / Confluence. The export modules are imported statically:
+ *  they already live in the entry chunk via main.ts → exportpopover →
+ *  export, so a dynamic import here produced only empty re-export shim
+ *  chunks plus a Rollup [INEFFECTIVE_DYNAMIC_IMPORT] warning — not real
+ *  lazy-loading. */
 async function renderSelectionAsPng(
   snap: SelectionSnapshot,
   settings: SettingsV1,
@@ -143,8 +147,6 @@ async function renderSelectionAsPng(
   ) {
     return null
   }
-  const { computeBoardBounds } = await import('./export/bounds')
-  const { exportPNG } = await import('./export/png')
   const bounds = computeBoardBounds(snap.strokes, snap.images, snap.texts, snap.shapes)
   if (!bounds) return null
   return exportPNG(snap.strokes, snap.images, snap.texts, snap.shapes, bounds, settings, null, {

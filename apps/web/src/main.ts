@@ -993,6 +993,7 @@ async function main(): Promise<void> {
           viewportHeight: target.height,
           onEmptyBoard: () => showInfoToast('Nothing to export'),
           onSuccess: (fmt) => showInfoToast(`Exported ${fmt.toUpperCase()}`),
+          onError: (fmt) => showInfoToast(`Export failed (${fmt.toUpperCase()})`),
         })
       },
     })
@@ -1395,6 +1396,7 @@ async function main(): Promise<void> {
             viewportHeight: target.height,
             onEmptyBoard: () => showInfoToast('Nothing to export'),
             onSuccess: (fmt) => showInfoToast(`Exported ${fmt.toUpperCase()}`),
+            onError: (fmt) => showInfoToast(`Export failed (${fmt.toUpperCase()})`),
           })
       },
     }),
