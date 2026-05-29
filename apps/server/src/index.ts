@@ -67,7 +67,7 @@ const server = Bun.serve({
 
     if (url.pathname === '/health') {
       return Response.json(
-        { status: 'ok', stage: 'M2.1' },
+        { status: 'ok' },
         { headers: { ...SECURITY_HEADERS, 'cache-control': 'no-store' } },
       )
     }
