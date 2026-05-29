@@ -677,12 +677,17 @@ body {
     opacity 0.12s,
     transform 0.12s;
   z-index: 10;
-  pointer-events: auto;
+  /* Not hit-testable while hidden. The badge is opacity:0 by default and its
+     ::before hit-target reaches past the swatch into the inter-swatch gap, so
+     keeping it clickable would let a near-swatch click fire delete instead of
+     picking the neighbour. Re-enabled only when the badge is revealed below. */
+  pointer-events: none;
 }
 
 /* Pen-friendly hit target: a transparent inset extends the clickable area
    well past the visible 16px badge (to ~30px) without changing how it looks.
-   Clicks on the ::before still resolve to the badge element. */
+   Clicks on the ::before still resolve to the badge element. Only live while
+   the badge is revealed (pointer-events gated on the rule below). */
 .whiteboard-color-swatch-delete::before {
   content: "";
   position: absolute;
@@ -693,6 +698,7 @@ body {
 .whiteboard-color-swatch-delete:focus-visible {
   opacity: 1;
   transform: scale(1);
+  pointer-events: auto;
 }
 
 .whiteboard-tools-row {
