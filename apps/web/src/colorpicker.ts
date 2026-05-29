@@ -7,7 +7,7 @@
  * in the side panel's Custom swatches section.
  */
 
-import { makeColorSwatch } from './menu-ui'
+import { makeAddSwatchTile, makeColorSwatch } from './menu-ui'
 import { findPopoverByTag, type Popover, showPopover } from './popover'
 import {
   getColor,
@@ -66,7 +66,7 @@ export function openColorPicker(at: { x: number; y: number }): Popover {
       sw.appendChild(makeSwatchDeleteBadge(c))
       palette.appendChild(sw)
     }
-    palette.appendChild(makeAddTile(() => openSwatchAddSubpopover()))
+    palette.appendChild(makeAddSwatchTile({ onClick: () => openSwatchAddSubpopover() }))
     syncActive()
   }
 
@@ -137,17 +137,6 @@ export function openColorPicker(at: { x: number; y: number }): Popover {
   })
 
   return popoverRef.current
-}
-
-function makeAddTile(onClick: () => void): HTMLButtonElement {
-  const tile = document.createElement('button')
-  tile.type = 'button'
-  tile.className = 'whiteboard-color-swatch whiteboard-color-swatch-add'
-  tile.title = 'Add custom color'
-  tile.setAttribute('aria-label', 'Add custom color')
-  tile.textContent = '+'
-  tile.addEventListener('click', onClick)
-  return tile
 }
 
 /**

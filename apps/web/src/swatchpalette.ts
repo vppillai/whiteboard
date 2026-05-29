@@ -29,7 +29,7 @@
  */
 
 import { CURATED_COLORS } from './colorpicker'
-import { makeColorSwatch } from './menu-ui'
+import { makeAddSwatchTile, makeColorSwatch } from './menu-ui'
 import { findPopoverByTag, showPopover } from './popover'
 import { getCustomSwatches, removeCustomSwatch } from './settings'
 import { createSwatchAdd } from './swatchadd'
@@ -64,7 +64,7 @@ export function buildSwatchPalette(opts: SwatchPaletteOptions): HTMLDivElement {
   for (const c of getCustomSwatches()) {
     palette.appendChild(makeSwatch(c, true, opts))
   }
-  palette.appendChild(makeAddTile(() => openAddSubpopover(opts)))
+  palette.appendChild(makeAddSwatchTile({ small: true, onClick: () => openAddSubpopover(opts) }))
   return palette
 }
 
@@ -121,18 +121,6 @@ export function makeSwatchDeleteBadge(color: string, onAfterDelete?: () => void)
     if (e.key === 'Enter' || e.key === ' ') handler(e)
   })
   return el
-}
-
-function makeAddTile(onClick: () => void): HTMLButtonElement {
-  const tile = document.createElement('button')
-  tile.type = 'button'
-  tile.className =
-    'whiteboard-color-swatch whiteboard-color-swatch-small whiteboard-color-swatch-add'
-  tile.title = 'Add custom color'
-  tile.setAttribute('aria-label', 'Add custom color')
-  tile.textContent = '+'
-  tile.addEventListener('click', onClick)
-  return tile
 }
 
 /** Open the swatch-add sub-popover to the SIDE of the parent right-

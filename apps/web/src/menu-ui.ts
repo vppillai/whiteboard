@@ -171,3 +171,23 @@ export function makeColorSwatch(opts: ColorSwatchOptions): HTMLButtonElement {
   sw.addEventListener('click', opts.onClick)
   return sw
 }
+
+/** The "+" add-custom-color tile shown after the swatches in both the Color
+ *  picker popover and the settings swatch palette. `small` matches the
+ *  compact palette variant. Shares the swatch DOM/classes with makeColorSwatch
+ *  so the tile lines up with the grid. */
+export function makeAddSwatchTile(opts: {
+  small?: boolean
+  onClick: () => void
+}): HTMLButtonElement {
+  const tile = document.createElement('button')
+  tile.type = 'button'
+  tile.className = 'whiteboard-color-swatch'
+  if (opts.small) tile.classList.add('whiteboard-color-swatch-small')
+  tile.classList.add('whiteboard-color-swatch-add')
+  tile.title = 'Add custom color'
+  tile.setAttribute('aria-label', 'Add custom color')
+  tile.textContent = '+'
+  tile.addEventListener('click', opts.onClick)
+  return tile
+}
