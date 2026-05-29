@@ -680,6 +680,15 @@ body {
   pointer-events: auto;
 }
 
+/* Pen-friendly hit target: a transparent inset extends the clickable area
+   well past the visible 16px badge (to ~30px) without changing how it looks.
+   Clicks on the ::before still resolve to the badge element. */
+.whiteboard-color-swatch-delete::before {
+  content: "";
+  position: absolute;
+  inset: -7px;
+}
+
 .whiteboard-color-swatch:hover .whiteboard-color-swatch-delete,
 .whiteboard-color-swatch-delete:focus-visible {
   opacity: 1;

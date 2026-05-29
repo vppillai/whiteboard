@@ -29,6 +29,7 @@
  */
 
 import { CURATED_COLORS } from './colorpicker'
+import { makeColorSwatch } from './menu-ui'
 import { findPopoverByTag, showPopover } from './popover'
 import { getCustomSwatches, removeCustomSwatch } from './settings'
 import { createSwatchAdd } from './swatchadd'
@@ -68,24 +69,16 @@ export function buildSwatchPalette(opts: SwatchPaletteOptions): HTMLDivElement {
 }
 
 function makeSwatch(color: string, isCustom: boolean, opts: SwatchPaletteOptions): HTMLElement {
-  const sw = document.createElement('button')
-  sw.type = 'button'
-  sw.className = 'whiteboard-color-swatch whiteboard-color-swatch-small'
-  if (isCustom) sw.classList.add('whiteboard-color-swatch-custom')
-  sw.dataset.color = color
-  sw.title = color === 'ink' ? 'theme ink' : color
-  sw.setAttribute('aria-label', sw.title)
-  if (color === 'ink') sw.classList.add('whiteboard-color-swatch-ink')
-  else sw.style.background = color
-  if (opts.active === color) sw.classList.add('active')
-  sw.addEventListener('click', () => opts.onPick(color))
-  // Custom swatches get a hover-revealed × delete badge in the corner.
-  // The badge is a <span role="button"> (not a <button>) so it can live
-  // inside the swatch button — HTML doesn't allow nested interactive
-  // elements, but a span with role="button" + Enter/Space handler is
-  // accessible and DOM-legal. position: absolute on the badge anchors
-  // it to the swatch's top-right corner via position: relative on
-  // .whiteboard-color-swatch.
+  const sw = makeColorSwatch({
+    color,
+    custom: isCustom,
+    small: true,
+    active: opts.active === color,
+    onClick: () => opts.onPick(color),
+  })
+  // Custom swatches get a hover-revealed × delete badge anchored to the
+  // swatch's top-right corner (shared factory below; see its doc for the
+  // span-role-button + event-suppression rationale).
   if (isCustom) sw.appendChild(makeSwatchDeleteBadge(color, opts.onPaletteChanged))
   return sw
 }
