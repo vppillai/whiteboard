@@ -7,6 +7,17 @@ import {
   clearPresetCurve,
   getEffectiveBrushConfig,
   getSettings,
+  getShapeColor,
+  getShapeFillEnabled,
+  getShapeFillOpacity,
+  getShapeKind,
+  getShapeStrokeWidth,
+  getTextBold,
+  getTextColor,
+  getTextFont,
+  getTextItalic,
+  getTextSize,
+  getTextUnderline,
   migrate,
   pushRecentColor,
   removeCustomSwatch,
@@ -14,6 +25,17 @@ import {
   setBrushId,
   setColor,
   setPresetField,
+  setShapeColor,
+  setShapeFillEnabled,
+  setShapeFillOpacity,
+  setShapeKind,
+  setShapeStrokeWidth,
+  setTextBold,
+  setTextColor,
+  setTextFont,
+  setTextItalic,
+  setTextSize,
+  setTextUnderline,
 } from './settings'
 
 beforeEach(__resetForTesting)
@@ -423,5 +445,137 @@ describe('settings: resetAll', () => {
     expect(s.brush).toBe('pen')
     expect(s.eraserSize).toBe('medium')
     expect(s.grid).toEqual({ type: 'dots', spacing: 24 })
+  })
+})
+
+describe('settings: text defaults and setters', () => {
+  test('getters return default values initially', () => {
+    expect(getTextFont()).toBe('mono')
+    expect(getTextSize()).toBe(12)
+    expect(getTextBold()).toBe(false)
+    expect(getTextItalic()).toBe(false)
+    expect(getTextUnderline()).toBe(false)
+    expect(getTextColor()).toBe('ink')
+  })
+
+  test('setters mutate state correctly', () => {
+    setTextFont('sans')
+    expect(getTextFont()).toBe('sans')
+
+    setTextSize(18)
+    expect(getTextSize()).toBe(18)
+
+    setTextBold(true)
+    expect(getTextBold()).toBe(true)
+
+    setTextItalic(true)
+    expect(getTextItalic()).toBe(true)
+
+    setTextUnderline(true)
+    expect(getTextUnderline()).toBe(true)
+
+    setTextColor('#ff0000')
+    expect(getTextColor()).toBe('#ff0000')
+  })
+})
+
+describe('settings: shape defaults and setters', () => {
+  test('getters return default values initially', () => {
+    expect(getShapeKind()).toBe('rect')
+    expect(getShapeColor()).toBe('ink')
+    expect(getShapeStrokeWidth()).toBe(2)
+    expect(getShapeFillEnabled()).toBe(false)
+    expect(getShapeFillOpacity()).toBe(0.25)
+  })
+
+  test('setters mutate state correctly', () => {
+    setShapeKind('ellipse')
+    expect(getShapeKind()).toBe('ellipse')
+
+    setShapeColor('#00ff00')
+    expect(getShapeColor()).toBe('#00ff00')
+
+    setShapeStrokeWidth(4)
+    expect(getShapeStrokeWidth()).toBe(4)
+
+    setShapeFillEnabled(true)
+    expect(getShapeFillEnabled()).toBe(true)
+  })
+
+  test('setShapeFillOpacity clamps opacity to [0.05, 1.0]', () => {
+    setShapeFillOpacity(0.5)
+    expect(getShapeFillOpacity()).toBe(0.5)
+
+    setShapeFillOpacity(0.01) // below min
+    expect(getShapeFillOpacity()).toBe(0.05)
+
+    setShapeFillOpacity(1.5) // above max
+    expect(getShapeFillOpacity()).toBe(1.0)
+  })
+})
+
+describe('settings: text and shape migration rules', () => {
+  test('migrate v0 or empty text settings to defaults', () => {
+    const v1 = migrate({ schemaVersion: 1 })
+    expect(v1.textFont).toBe('mono')
+    expect(v1.textSize).toBe(12)
+    expect(v1.textBold).toBe(false)
+    expect(v1.textItalic).toBe(false)
+    expect(v1.textUnderline).toBe(false)
+    expect(v1.textColor).toBe('ink')
+  })
+
+  test('migrate text font family invalid fallback', () => {
+    const v1 = migrate({ textFont: 'comic-sans' })
+    expect(v1.textFont).toBe('mono')
+  })
+
+  test('migrate text font family valid preservation', () => {
+    const v1 = migrate({ textFont: 'serif' })
+    expect(v1.textFont).toBe('serif')
+  })
+
+  test('migrate text size invalid fallback', () => {
+    const v1 = migrate({ textSize: -5 })
+    expect(v1.textSize).toBe(12)
+    const v2 = migrate({ textSize: 'banana' })
+    expect(v2.textSize).toBe(12)
+  })
+
+  test('migrate v0 or empty shape settings to defaults', () => {
+    const v1 = migrate({ schemaVersion: 1 })
+    expect(v1.shapeKind).toBe('rect')
+    expect(v1.shapeColor).toBe('ink')
+    expect(v1.shapeStrokeWidth).toBe(2)
+    expect(v1.shapeFillEnabled).toBe(false)
+    expect(v1.shapeFillOpacity).toBe(0.25)
+  })
+
+  test('migrate shapeKind invalid fallback', () => {
+    const v1 = migrate({ shapeKind: 'star' })
+    expect(v1.shapeKind).toBe('rect')
+  })
+
+  test('migrate shapeKind valid preservation', () => {
+    const v1 = migrate({ shapeKind: 'arrow' })
+    expect(v1.shapeKind).toBe('arrow')
+  })
+
+  test('migrate shapeStrokeWidth invalid fallback', () => {
+    const v1 = migrate({ shapeStrokeWidth: 0 })
+    expect(v1.shapeStrokeWidth).toBe(2)
+    const v2 = migrate({ shapeStrokeWidth: -10 })
+    expect(v2.shapeStrokeWidth).toBe(2)
+    const v3 = migrate({ shapeStrokeWidth: 'thick' })
+    expect(v3.shapeStrokeWidth).toBe(2)
+  })
+
+  test('migrate shapeFillOpacity clamping/validation fallback', () => {
+    const v1 = migrate({ shapeFillOpacity: 0.01 })
+    expect(v1.shapeFillOpacity).toBe(0.25)
+    const v2 = migrate({ shapeFillOpacity: 1.5 })
+    expect(v2.shapeFillOpacity).toBe(0.25)
+    const v3 = migrate({ shapeFillOpacity: 'semi-transparent' })
+    expect(v3.shapeFillOpacity).toBe(0.25)
   })
 })

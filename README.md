@@ -97,7 +97,7 @@ Current backlog, tracked in [docs/milestones.md](docs/milestones.md) and [SPEC �
 
 ## Project status
 
-**v1.4.2** — single-user, offline-first, production-ready for the indirect-input drawing case the project was built for. Lint, typecheck, and 195 unit tests run on every push (`bun test`); latency budget (≤ 33 ms pen-to-photon) is feel-tested on Wacom Intuos at every milestone close.
+**v1.4.4** — single-user, offline-first, production-ready for the indirect-input drawing case the project was built for. Lint, typecheck, and 232 unit tests run on every push (`bun test`); latency budget (≤ 33 ms pen-to-photon) is feel-tested on Wacom Intuos at every milestone close.
 
 > **Authorship note.** This codebase is AI-generated under human direction: produced primarily by an AI coding assistant working from a human-authored spec, with design decisions, feel-test gates, and acceptance by a human. Published as OSS for anyone solving the same indirect-input drawing problem.
 

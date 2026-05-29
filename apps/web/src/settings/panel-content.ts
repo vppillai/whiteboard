@@ -285,9 +285,17 @@ function renderCustomSwatchesSection(): Section {
     addContainer.appendChild(addUI)
   })
 
+  // Guard the rebuild behind a fingerprint of the swatch list (same pattern
+  // as the brush-card thumbnail above) so unrelated settings changes — e.g.
+  // a brush-size slider drag firing onChange ~60×/s — don't tear down and
+  // rebuild this whole list on every tick.
+  let listSnapshot: string | null = null
   const update = () => {
-    list.replaceChildren()
     const swatches = getCustomSwatches()
+    const next = swatches.join('|')
+    if (next === listSnapshot) return
+    listSnapshot = next
+    list.replaceChildren()
     if (swatches.length === 0) {
       empty.style.display = ''
       return

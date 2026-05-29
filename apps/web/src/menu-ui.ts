@@ -131,3 +131,63 @@ export function fullItem(opts: FullItemOptions): HTMLButtonElement {
   btn.addEventListener('click', opts.onClick)
   return btn
 }
+
+export interface ColorSwatchOptions {
+  /** `'ink'` renders the theme-tracking swatch; any other value is a literal
+   *  CSS color applied as the background. */
+  color: string
+  /** User-added custom swatch — adds the -custom modifier. The delete badge
+   *  itself is appended by the caller (its wiring differs per host). */
+  custom?: boolean
+  /** Recent-colors variant (color picker only). */
+  recent?: boolean
+  /** Compact variant used by the settings swatch palette. */
+  small?: boolean
+  /** Renders the current-selection ring (settings palette). */
+  active?: boolean
+  onClick: () => void
+}
+
+/** Color swatch button shared by the Color picker popover (Shift+C) and the
+ *  settings swatch palette. Centralizes the swatch DOM + aria + ink-token
+ *  handling so both surfaces stay identical. Custom swatches' × delete badge
+ *  is appended by the caller (see `makeSwatchDeleteBadge`). */
+export function makeColorSwatch(opts: ColorSwatchOptions): HTMLButtonElement {
+  const sw = document.createElement('button')
+  sw.type = 'button'
+  sw.className = 'whiteboard-color-swatch'
+  if (opts.small) sw.classList.add('whiteboard-color-swatch-small')
+  if (opts.custom) sw.classList.add('whiteboard-color-swatch-custom')
+  if (opts.recent) sw.classList.add('whiteboard-color-swatch-recent')
+  sw.dataset.color = opts.color
+  sw.title = opts.color === 'ink' ? 'theme ink' : opts.color
+  sw.setAttribute('aria-label', sw.title)
+  if (opts.color === 'ink') {
+    sw.classList.add('whiteboard-color-swatch-ink')
+  } else {
+    sw.style.background = opts.color
+  }
+  if (opts.active) sw.classList.add('active')
+  sw.addEventListener('click', opts.onClick)
+  return sw
+}
+
+/** The "+" add-custom-color tile shown after the swatches in both the Color
+ *  picker popover and the settings swatch palette. `small` matches the
+ *  compact palette variant. Shares the swatch DOM/classes with makeColorSwatch
+ *  so the tile lines up with the grid. */
+export function makeAddSwatchTile(opts: {
+  small?: boolean
+  onClick: () => void
+}): HTMLButtonElement {
+  const tile = document.createElement('button')
+  tile.type = 'button'
+  tile.className = 'whiteboard-color-swatch'
+  if (opts.small) tile.classList.add('whiteboard-color-swatch-small')
+  tile.classList.add('whiteboard-color-swatch-add')
+  tile.title = 'Add custom color'
+  tile.setAttribute('aria-label', 'Add custom color')
+  tile.textContent = '+'
+  tile.addEventListener('click', opts.onClick)
+  return tile
+}

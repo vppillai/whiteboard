@@ -16,6 +16,7 @@
  */
 
 import type { ImageObject } from '@whiteboard/shared'
+import { makeImageId } from './ids'
 import { loadImageElement } from './imagecache'
 import type { ImageStore } from './imagestore'
 import type { Op } from './ops'
@@ -224,11 +225,4 @@ async function getNaturalDims(blob: Blob): Promise<{ w: number; h: number }> {
   } finally {
     URL.revokeObjectURL(url)
   }
-}
-
-function makeImageId(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return `img_${crypto.randomUUID()}`
-  }
-  return `img_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
 }

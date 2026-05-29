@@ -19,6 +19,7 @@
 const STROKE_PREFIX = 's_'
 const TEXT_PREFIX = 't_'
 const SHAPE_PREFIX = 'sh_'
+const IMAGE_PREFIX = 'img_'
 
 function randomId(prefix: string): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -43,4 +44,11 @@ export function makeTextId(): string {
  *  text/shape ids visually distinct in persisted logs. */
 export function makeShapeId(): string {
   return randomId(SHAPE_PREFIX)
+}
+
+/** Fresh id for a new ImageObject. Prefix `img_`. Centralized here so the
+ *  prefix convention + `crypto.randomUUID()` fallback stay uniform with
+ *  stroke / text / shape ids; the image-paste flow imports this. */
+export function makeImageId(): string {
+  return randomId(IMAGE_PREFIX)
 }

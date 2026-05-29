@@ -7,6 +7,7 @@
  * in the side panel's Custom swatches section.
  */
 
+import { makeAddSwatchTile, makeColorSwatch } from './menu-ui'
 import { findPopoverByTag, type Popover, showPopover } from './popover'
 import {
   getColor,
@@ -55,17 +56,17 @@ export function openColorPicker(at: { x: number; y: number }): Popover {
   const renderPalette = (): void => {
     palette.replaceChildren()
     for (const c of CURATED_COLORS) {
-      palette.appendChild(makeSwatch(c, false, () => onPick(c)))
+      palette.appendChild(makeColorSwatch({ color: c, onClick: () => onPick(c) }))
     }
     for (const c of getCustomSwatches()) {
       // Custom swatches get a hover-revealed × delete badge — shared
       // factory in swatchpalette.ts so the badge's DOM, accessibility,
       // and event-suppression rules match the right-click menu version.
-      const sw = makeSwatch(c, true, () => onPick(c))
+      const sw = makeColorSwatch({ color: c, custom: true, onClick: () => onPick(c) })
       sw.appendChild(makeSwatchDeleteBadge(c))
       palette.appendChild(sw)
     }
-    palette.appendChild(makeAddTile(() => openSwatchAddSubpopover()))
+    palette.appendChild(makeAddSwatchTile({ onClick: () => openSwatchAddSubpopover() }))
     syncActive()
   }
 
@@ -80,7 +81,7 @@ export function openColorPicker(at: { x: number; y: number }): Popover {
     recentLabel.style.display = ''
     recentRow.style.display = ''
     for (const c of recents) {
-      recentRow.appendChild(makeSwatch(c, false, () => onPick(c), true))
+      recentRow.appendChild(makeColorSwatch({ color: c, recent: true, onClick: () => onPick(c) }))
     }
   }
 
@@ -136,42 +137,6 @@ export function openColorPicker(at: { x: number; y: number }): Popover {
   })
 
   return popoverRef.current
-}
-
-function makeSwatch(
-  color: string,
-  isCustom: boolean,
-  onClick: () => void,
-  isRecent = false,
-): HTMLButtonElement {
-  const sw = document.createElement('button')
-  sw.type = 'button'
-  sw.className = 'whiteboard-color-swatch'
-  if (isCustom) sw.classList.add('whiteboard-color-swatch-custom')
-  if (isRecent) sw.classList.add('whiteboard-color-swatch-recent')
-  sw.dataset.color = color
-  sw.title = color === 'ink' ? 'theme ink' : color
-  sw.setAttribute('aria-label', sw.title)
-
-  if (color === 'ink') {
-    sw.classList.add('whiteboard-color-swatch-ink')
-  } else {
-    sw.style.background = color
-  }
-
-  sw.addEventListener('click', onClick)
-  return sw
-}
-
-function makeAddTile(onClick: () => void): HTMLButtonElement {
-  const tile = document.createElement('button')
-  tile.type = 'button'
-  tile.className = 'whiteboard-color-swatch whiteboard-color-swatch-add'
-  tile.title = 'Add custom color'
-  tile.setAttribute('aria-label', 'Add custom color')
-  tile.textContent = '+'
-  tile.addEventListener('click', onClick)
-  return tile
 }
 
 /**

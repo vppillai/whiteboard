@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import type { ImageObject, Stroke, TextObject } from '@whiteboard/shared'
+import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import {
   partitionForCompaction,
   partitionImagesForCompaction,
+  partitionShapesForCompaction,
   partitionTextsForCompaction,
 } from './storage'
 
@@ -151,6 +152,52 @@ describe('storage/partitionTextsForCompaction', () => {
 
   test('empty input → empty output', () => {
     const { kept, toCompact } = partitionTextsForCompaction([])
+    expect(kept).toEqual([])
+    expect(toCompact).toEqual([])
+  })
+})
+
+function mkShape(id: string, opts: { deleted?: boolean } = {}): ShapeObject {
+  return {
+    id,
+    shape: 'rect',
+    transform: { x: 0, y: 0, w: 100, h: 100 },
+    color: 'ink',
+    strokeWidth: 2,
+    z: 1,
+    createdAt: 0,
+    ...(opts.deleted !== undefined ? { deleted: opts.deleted } : {}),
+  }
+}
+
+describe('storage/partitionShapesForCompaction', () => {
+  test('keeps non-deleted shapes', () => {
+    const ts = [mkShape('a'), mkShape('b'), mkShape('c')]
+    const { kept, toCompact } = partitionShapesForCompaction(ts)
+    expect(kept.map((s) => s.id)).toEqual(['a', 'b', 'c'])
+    expect(toCompact).toEqual([])
+  })
+
+  test('moves deleted=true shapes to toCompact (id only)', () => {
+    const ts = [
+      mkShape('a'),
+      mkShape('b', { deleted: true }),
+      mkShape('c'),
+      mkShape('d', { deleted: true }),
+    ]
+    const { kept, toCompact } = partitionShapesForCompaction(ts)
+    expect(kept.map((s) => s.id)).toEqual(['a', 'c'])
+    expect(toCompact).toEqual(['b', 'd'])
+  })
+
+  test('treats deleted=false as kept', () => {
+    const { kept, toCompact } = partitionShapesForCompaction([mkShape('a', { deleted: false })])
+    expect(kept).toHaveLength(1)
+    expect(toCompact).toEqual([])
+  })
+
+  test('empty input → empty output', () => {
+    const { kept, toCompact } = partitionShapesForCompaction([])
     expect(kept).toEqual([])
     expect(toCompact).toEqual([])
   })

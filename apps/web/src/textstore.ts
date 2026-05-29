@@ -5,9 +5,9 @@
  * swap a server-backed store in without rewriting main.ts.
  *
  * v1 has one concrete implementation: a local IDB-backed store. Unlike
- * ImageStore, there's no metadata/binary split — text records carry
- * their payload inline (plain string `content`), so `insert` and
- * `updateMeta` collapse to the same single-store write.
+ * ImageStore, there's no metadata/binary split — text records carry their
+ * payload inline (plain string `content`), so a single `update` upsert
+ * covers create / edit / soft-delete.
  */
 
 import type { TextObject } from '@whiteboard/shared'
@@ -18,9 +18,7 @@ export type TextStoreEvent = unknown
 export interface TextStore {
   /** Load all text records (deleted ones compacted away). Sorted by z asc. */
   load(): Promise<TextObject[]>
-  /** Insert a new text record. */
-  insert(text: TextObject): Promise<void>
-  /** Update an existing record (move / resize / edit / soft-delete). */
+  /** Upsert a record — create, move / resize / edit, or soft-delete. */
   update(text: TextObject): Promise<void>
   /** Hard-delete by id. Used by background compaction on load. */
   hardDelete(id: string): Promise<void>
@@ -35,7 +33,6 @@ export interface TextStore {
 export function createLocalTextStore(): TextStore {
   return {
     load: loadAllTexts,
-    insert: saveText,
     update: saveText,
     hardDelete: deleteText,
     clear: clearAllTexts,

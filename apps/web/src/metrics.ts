@@ -76,7 +76,8 @@ export function createHud(): Hud {
     'font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace',
     'border-radius:6px',
     'pointer-events:none',
-    'z-index:1000',
+    // z-index intentionally omitted: the #whiteboard-hud stylesheet rule sets
+    // it from the --z-hud scale token, so the layering stays single-sourced.
     'min-width:180px',
     'white-space:pre',
     'backdrop-filter:blur(6px)',

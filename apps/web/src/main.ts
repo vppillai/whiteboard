@@ -707,20 +707,24 @@ async function main(): Promise<void> {
   // `lastPointer` is declared earlier (above toolCtx) so its binding is
   // already initialized when toolCtx's getLastPointer closure captures
   // it. The listener body below assigns into that same binding.
-  root.addEventListener('pointermove', (e) => {
+  const onRootPointerMove = (e: PointerEvent): void => {
     if (!(e instanceof PointerEvent)) return
     lastPointer = { x: e.clientX, y: e.clientY }
     metrics.notePointerEvent(1)
-  })
+  }
+  root.addEventListener('pointermove', onRootPointerMove)
+  registerCleanup(() => root.removeEventListener('pointermove', onRootPointerMove))
 
   // When the pointer exits the canvas root, drop any tool-set hover cursor
   // (resize / rotate / move) so we don't leave a "ready to rotate" affordance
   // showing while the user is over the gear menu or off-canvas. Reset to the
   // active tool's static cursor — `setCursor('')` restores it via the
   // fallthrough in toolCtx.setCursor.
-  root.addEventListener('pointerleave', () => {
+  const onRootPointerLeave = (): void => {
     root.style.cursor = tool.current.cursor ?? ''
-  })
+  }
+  root.addEventListener('pointerleave', onRootPointerLeave)
+  registerCleanup(() => root.removeEventListener('pointerleave', onRootPointerLeave))
 
   // ---------------------------------------------------------------------
   //  Right-click → tool menu (capture phase + stopImmediatePropagation so
@@ -728,7 +732,9 @@ async function main(): Promise<void> {
   //  button=0,buttons=3 for barrel-as-right-click and we want to handle it
   //  cleanly regardless).
   // ---------------------------------------------------------------------
-  root.addEventListener('contextmenu', (e) => e.preventDefault())
+  const onRootContextMenu = (e: Event): void => e.preventDefault()
+  root.addEventListener('contextmenu', onRootContextMenu)
+  registerCleanup(() => root.removeEventListener('contextmenu', onRootContextMenu))
   // Defensive document-level guard. The root listener above covers events
   // whose target is `root` or a descendant. But MANY app surfaces live
   // OUTSIDE root (toolpill, help pill, HUD, text editor overlay, etc.) —
@@ -987,6 +993,7 @@ async function main(): Promise<void> {
           viewportHeight: target.height,
           onEmptyBoard: () => showInfoToast('Nothing to export'),
           onSuccess: (fmt) => showInfoToast(`Exported ${fmt.toUpperCase()}`),
+          onError: (fmt) => showInfoToast(`Export failed (${fmt.toUpperCase()})`),
         })
       },
     })
@@ -1035,21 +1042,19 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------
   //  Wheel — pan (plain) or zoom (Cmd/Ctrl/pinch).
   // ---------------------------------------------------------------------
-  root.addEventListener(
-    'wheel',
-    (e) => {
-      e.preventDefault()
-      const fx = e.clientX - canvasRect.left
-      const fy = e.clientY - canvasRect.top
-      if (e.ctrlKey || e.metaKey) {
-        zoomAt(camera, fx, fy, ZOOM_WHEEL_FACTOR ** -e.deltaY)
-      } else {
-        panByScreen(camera, -e.deltaX, -e.deltaY)
-      }
-      onCameraChange()
-    },
-    { passive: false },
-  )
+  const onRootWheel = (e: WheelEvent): void => {
+    e.preventDefault()
+    const fx = e.clientX - canvasRect.left
+    const fy = e.clientY - canvasRect.top
+    if (e.ctrlKey || e.metaKey) {
+      zoomAt(camera, fx, fy, ZOOM_WHEEL_FACTOR ** -e.deltaY)
+    } else {
+      panByScreen(camera, -e.deltaX, -e.deltaY)
+    }
+    onCameraChange()
+  }
+  root.addEventListener('wheel', onRootWheel, { passive: false })
+  registerCleanup(() => root.removeEventListener('wheel', onRootWheel))
 
   // ---------------------------------------------------------------------
   //  Theme + settings change hooks
@@ -1391,6 +1396,7 @@ async function main(): Promise<void> {
             viewportHeight: target.height,
             onEmptyBoard: () => showInfoToast('Nothing to export'),
             onSuccess: (fmt) => showInfoToast(`Exported ${fmt.toUpperCase()}`),
+            onError: (fmt) => showInfoToast(`Export failed (${fmt.toUpperCase()})`),
           })
       },
     }),
