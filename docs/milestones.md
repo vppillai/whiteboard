@@ -6,7 +6,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 
 ## Current state
 
-**v1.4.4 shipped 2026-05-20.** Single-user, offline-first whiteboard with strokes, image paste, text, laser, unified Select multi-object workflows, whiteboard-native clipboard round-trip, Shape tool support (rect / ellipse / line / arrow), plus post-v1.4.0 hardening: factory-reset URL cleanup, tool-menu TDZ fix, op-pipeline funneling for deletes, text measurement + pen halo pre-render caches, server CSP/security headers + path-traversal guard, and the standard OSS community-health files. Live collaboration remains deferred per [ADR 0012](decisions/0012-sharing-deferred.md). PWA install + deployment polish are post-v1 work tracked below.
+**v1.4.5 shipped 2026-05-29.** Single-user, offline-first whiteboard with strokes, image paste, text, laser, unified Select multi-object workflows, whiteboard-native clipboard round-trip, Shape tool support (rect / ellipse / line / arrow), plus post-v1.4.0 hardening: factory-reset URL cleanup, tool-menu TDZ fix, op-pipeline funneling for deletes, text measurement + pen halo pre-render caches, server CSP/security headers + path-traversal guard, and the standard OSS community-health files; plus a v1.4.5 cleanup & frontend pass — keyboard focus rings, a documented z-index scale, export error handling, and internal dedup. Live collaboration remains deferred per [ADR 0012](decisions/0012-sharing-deferred.md). PWA install + deployment polish are post-v1 work tracked below.
 
 | M  | Title                                                                    | Status |
 |----|--------------------------------------------------------------------------|--------|
@@ -28,6 +28,7 @@ The work is broken into discrete milestones. Each milestone has a defined scope,
 | **v1.4.2** | Factory-reset query-param cleanup + dependency/tooling major upgrades | ✅ *(2026-05-14; tag `v1.4.2`)* |
 | **v1.4.3** | Tool-menu clear-handler TDZ crash fix | ✅ *(2026-05-15; tag `v1.4.3`)* |
 | **v1.4.4** | Hardening pass — bug fixes, op-pipeline funnel, perf (text measure cache, pen halo pre-render), server security headers + path guard, OSS community files | ✅ *(2026-05-20; tag `v1.4.4`)* |
+| **v1.4.5** | Cleanup & frontend pass — keyboard focus rings, z-index scale (toast/popover fix), export error handling, swatch + stroke-move dedup, dead-code removal | ✅ *(2026-05-29; tag `v1.4.5`)* |
 | M4 | Deployment polish — clean-host validation, reverse-proxy paths           | ⬜ post-v1 |
 | M4.5 | PWA install + offline (manifest, service worker)                       | ⬜ post-v1 |
 | M5 | AI: shape recognition                                                    | ⬜ v2 |

@@ -8,6 +8,34 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 No entries yet.
 
+## [1.4.5] — 2026-05-29
+
+**Cleanup & frontend pass — accessibility, layering, robustness, and internal dedup.** A milestone-gated pass (M0–M4) in which every substantive change was adversarially verified before it landed. Headline user-facing wins: keyboard focus rings, a documented z-index scale that resolves a toast/popover stacking collision, and export failures that now actually surface. The remainder is internal consolidation and doc accuracy. Two perf items (boot image-decode cap, per-frame stroke-path allocation) were deliberately deferred pending on-device pen-to-photon measurement — `perftest.ts` does not measure pen-to-photon, so they can only be validated on the Wacom Intuos.
+
+### Added
+
+- **Keyboard focus rings.** A subtle accent `:focus-visible` ring (`2px var(--accent)`, 2px offset) now appears when tabbing through the right-click menu, popovers, and the settings panel — keyboard-only, so it stays invisible for mouse + pen. Replaces an `outline: none` that had suppressed keyboard focus indication on the tool-pill controls. Backed by a single global rule with intentional higher-specificity overrides (`#app` canvas, swatch-delete badge).
+- **Export failure feedback.** A failed export (null 2D context, `toBlob` failure, image-decode / file-read error) now surfaces a toast via a new `onError` hook instead of silently dismissing the popover — previously a swallowed promise rejection that read as success. The whole `exportBoard` body is wrapped so even a synchronous accessor throw is caught; `onSuccess` stays strictly on the happy path. First dispatcher-level export tests added.
+
+### Fixed
+
+- **Toast / popover z-index collision.** The info toast and popovers both sat at `z-index: 1500`. Introduced a documented `--z-*` stacking scale (`hint < panel < pill < hud < popover < toast < banner`) and raised toasts above popovers (`1600 > 1500`) so transient feedback is never occluded by an open menu.
+- **Pen-friendly custom-swatch delete.** The × delete badge's enlarged hit target was live while the badge was hidden, so a click *near* (not on) a custom swatch could fire delete instead of picking the neighbour. The enlarged target is now gated to the revealed (hover / focus) state via `pointer-events`.
+- **Documentation accuracy.** README test count (→ 232), the `/health` response-body example (after the `stage` field was dropped), and the deployment-doc health snippet.
+
+### Changed (internal)
+
+- **Shared swatch DOM factories.** `makeColorSwatch` + `makeAddSwatchTile` (in `menu-ui.ts`) replace near-identical implementations that were duplicated across the color picker (`Shift+C`) and the settings swatch palette; class output is byte-identical per variant (small / recent / active).
+- **`_applyStrokeMoveStep` extraction.** The one byte-identical stroke move-delta block shared by the Select tool's single-drag (`onPointerMove`) and multi-drag (`tickMultiDrag`) paths is now a single helper (+ unit tests). The six other superficially-similar per-kind branches were intentionally left alone — they diverge in op kind, id field, and tolerance semantics.
+- **Scoped settings-panel rebuild.** The custom-swatches section rebuilt its entire list on *every* settings change (≈60×/s during a slider drag); now fingerprint-guarded to rebuild only when the swatch list actually changes, matching the existing brush-card thumbnail pattern.
+- **Dead code + consistency.** Removed the unused `insert()` from `TextStore` / `ShapeStore` (both persist via `update`, an upsert); centralized `makeImageId` into `ids.ts` alongside the stroke / text / shape id factories; dropped the stale `stage` field from `/health`.
+- **Honest static imports.** The clipboard PNG path dynamically imported `export/bounds` + `export/png`, but they were already in the entry chunk — Rollup emitted `INEFFECTIVE_DYNAMIC_IMPORT` warnings and two empty shim chunks. Converted to static imports; the production build is now warning- and shim-free.
+- **Build / listeners.** Production builds no longer ship source maps (Vite's default); the four `root` event listeners in `main.ts` now register teardown callbacks, matching the file's stated cleanup discipline; `@whiteboard/server` + `@whiteboard/shared` typecheck under TypeScript 6.0 via explicit `"types": ["bun"]`.
+
+### Tests
+
+- +6 unit tests (**232** total): export-dispatcher error / empty-board paths, `_applyStrokeMoveStep` arithmetic + `erasedStamps` translation + zero-step no-op, and expanded texts/shapes coverage for export bounds.
+
 ## [1.4.4] — 2026-05-20
 
 **Hardening pass — bug fixes, architectural cleanup, perf wins, security headers, OSS gates.** Multi-specialist code review on v1.4.3 surfaced a set of small defects, a CRDT-readiness gap in the op-pipeline (delete paths bypassed `applyOp`), two cheap perf wins on the renderer, and a defense-in-depth opportunity on the static server. Repo also gains the standard OSS community-health files (SECURITY, CODE_OF_CONDUCT, issue + PR templates) so external contributors land softly.
