@@ -359,6 +359,37 @@ export function _shouldPushStrokeTransformManyItem(
   return true
 }
 
+/** Translate a stroke's samples (and erasedStamps) by the STEP delta since
+ *  the last applied total, then advance the `applied` tracker to the new
+ *  total. Shared by the single-object stroke move (onPointerMove) and the
+ *  multi-drag stroke branch — the only two byte-identical per-kind blocks in
+ *  the Select tool. Step-delta (not absolute) keeps per-tick work bounded by
+ *  the drag step, not the cumulative distance. No-op on a zero step. Exported
+ *  underscored for unit testing; not part of the public Tool surface. */
+export function _applyStrokeMoveStep(
+  stroke: Stroke,
+  applied: { dx: number; dy: number },
+  totalDx: number,
+  totalDy: number,
+): void {
+  const stepDx = totalDx - applied.dx
+  const stepDy = totalDy - applied.dy
+  if (stepDx === 0 && stepDy === 0) return
+  for (const s of stroke.samples) {
+    s.x += stepDx
+    s.y += stepDy
+  }
+  if (stroke.erasedStamps) {
+    for (const stamp of stroke.erasedStamps) {
+      stamp.x += stepDx
+      stamp.y += stepDy
+    }
+  }
+  invalidateStrokeBBox(stroke)
+  applied.dx = totalDx
+  applied.dy = totalDy
+}
+
 /**
  * The Select tool has three drag modes — single-object transform,
  * multi-object move, marquee selection. They are mutually exclusive
@@ -1064,22 +1095,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       } else {
         const stroke = deps.getStrokes().find((x) => x.id === item.id)
         if (!stroke || stroke.deleted) continue
-        const stepDx = dx - item.applied.dx
-        const stepDy = dy - item.applied.dy
-        if (stepDx === 0 && stepDy === 0) continue
-        for (const s of stroke.samples) {
-          s.x += stepDx
-          s.y += stepDy
-        }
-        if (stroke.erasedStamps) {
-          for (const stamp of stroke.erasedStamps) {
-            stamp.x += stepDx
-            stamp.y += stepDy
-          }
-        }
-        invalidateStrokeBBox(stroke)
-        item.applied.dx = dx
-        item.applied.dy = dy
+        _applyStrokeMoveStep(stroke, item.applied, dx, dy)
       }
     }
   }
@@ -1935,25 +1951,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
           // the fresh extent.
           const stroke = view.obj as Stroke
           const applied = drag.strokeMoveApplied
-          if (applied) {
-            const stepDx = totalDx - applied.dx
-            const stepDy = totalDy - applied.dy
-            if (stepDx !== 0 || stepDy !== 0) {
-              for (const sample of stroke.samples) {
-                sample.x += stepDx
-                sample.y += stepDy
-              }
-              if (stroke.erasedStamps) {
-                for (const stamp of stroke.erasedStamps) {
-                  stamp.x += stepDx
-                  stamp.y += stepDy
-                }
-              }
-              invalidateStrokeBBox(stroke)
-              applied.dx = totalDx
-              applied.dy = totalDy
-            }
-          }
+          if (applied) _applyStrokeMoveStep(stroke, applied, totalDx, totalDy)
         } else {
           // Image / text / shape: rect-transform objects. Move = re-derive
           // transform.x/y from `before` + total delta (single in-place
