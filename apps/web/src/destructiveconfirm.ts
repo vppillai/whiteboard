@@ -24,10 +24,12 @@ export interface DestructiveConfirmOptions {
 
 export function createDestructiveConfirm(opts: DestructiveConfirmOptions): DestructiveConfirm {
   const windowMs = opts.windowMs ?? DEFAULT_WINDOW_MS
+  // Created here but only attached to the DOM while visible: main.ts builds
+  // several confirms (clear + reset flows), and keeping idle copies of
+  // `#whiteboard-toast` in the document would break id uniqueness (the CSS
+  // styles the toast by id).
   const toast = document.createElement('div')
   toast.id = 'whiteboard-toast'
-  toast.style.display = 'none'
-  document.body.appendChild(toast)
 
   let timer: ReturnType<typeof setTimeout> | null = null
 
@@ -40,14 +42,17 @@ export function createDestructiveConfirm(opts: DestructiveConfirmOptions): Destr
     clearTimeout(timer)
     timer = null
     toast.replaceChildren()
-    toast.style.display = 'none'
+    toast.remove()
     refocus()
     return true
   }
 
   const renderToast = (): void => {
     toast.replaceChildren()
+    // CSS (`#whiteboard-toast`) supplies layout but not `display`; flex is
+    // set inline, as before, and the element is attached only while shown.
     toast.style.display = 'flex'
+    document.body.appendChild(toast)
 
     const msg = document.createElement('span')
     msg.className = 'whiteboard-toast-message'
