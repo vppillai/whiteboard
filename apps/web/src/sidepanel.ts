@@ -82,6 +82,10 @@ export function showSidePanel(opts: SidePanelOptions): SidePanel {
 
   const onKey = (e: KeyboardEvent): void => {
     if (e.key === 'Escape') {
+      // Esc inside an editable (the settings hex field etc.) belongs to
+      // the field — leave the browser default intact and keep the panel.
+      const t = e.target as HTMLElement | null
+      if (t?.closest('input, textarea, [contenteditable]')) return
       e.preventDefault()
       dismiss()
     }

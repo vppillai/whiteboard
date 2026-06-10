@@ -107,6 +107,16 @@ export interface KeyHandlers {
 
 export function attachKeymap(handlers: KeyHandlers): () => void {
   const onKey = (e: KeyboardEvent): void => {
+    // Never hijack keys aimed at an editable. The settings panel's form
+    // inputs (hex field etc.) must receive typed characters and native
+    // editing commands (⌘Z / ⌘A / Backspace / Esc) untouched — no
+    // binding here is meant to fire while one is focused. The
+    // contenteditable text editor protects itself via stopPropagation;
+    // plain inputs don't, so the guard lives here. Same idiom as
+    // main.ts's onDocContextMenu.
+    const target = e.target as HTMLElement | null
+    if (target?.closest('input, textarea, [contenteditable]')) return
+
     const meta = e.metaKey || e.ctrlKey
     const { shiftKey: shift, altKey: alt } = e
     const k = e.key.toLowerCase()
