@@ -261,6 +261,19 @@ describe('ops: shape op kinds', () => {
     const h = mkShapeHarness([mkShape('s1', { rotation: Math.PI / 4 })])
     applyOp({ kind: 'rotate-shape', shapeId: 's1', before: Math.PI / 4, after: 0 }, h.ctx)
     expect(h.ctx.shapes[0]?.rotation).toBeUndefined()
+    unapplyOp({ kind: 'rotate-shape', shapeId: 's1', before: Math.PI / 4, after: 0 }, h.ctx)
+    expect(h.ctx.shapes[0]?.rotation).toBe(Math.PI / 4)
+  })
+
+  test('rotate-shape stores a nonzero angle as-is; unapply restores rotation-was-undefined', () => {
+    const h = mkShapeHarness([mkShape('s1')])
+    const op: Op = { kind: 'rotate-shape', shapeId: 's1', before: 0, after: Math.PI / 3 }
+    applyOp(op, h.ctx)
+    expect(h.ctx.shapes[0]?.rotation).toBe(Math.PI / 3)
+    // Undo back to the never-rotated state: the compact-record invariant
+    // stores `undefined`, not an explicit 0.
+    unapplyOp(op, h.ctx)
+    expect(h.ctx.shapes[0]?.rotation).toBeUndefined()
   })
 
   test('edit-shape swaps color / strokeWidth / fill / fillOpacity', () => {
@@ -301,6 +314,75 @@ describe('ops: shape op kinds', () => {
     expect(h.ctx.shapes[0]?.transform).toEqual({ x: 30, y: 30, w: 100, h: 80 })
     unapplyOp(op, h.ctx)
     expect(h.ctx.shapes[0]?.transform).toEqual({ x: 0, y: 0, w: 100, h: 80 })
+  })
+})
+
+describe('ops: rotate-image / rotate-text round-trips', () => {
+  function mkRotImg(id: string, overrides: Partial<ImageObject> = {}): ImageObject {
+    return {
+      id,
+      blobRef: id,
+      format: 'png',
+      natural: { w: 100, h: 100 },
+      transform: { x: 0, y: 0, w: 100, h: 100 },
+      z: 1,
+      createdAt: 0,
+      ...overrides,
+    }
+  }
+
+  function mkImgHarness(initial: ImageObject[] = []): { ctx: OpContext } {
+    const images: ImageObject[] = initial.map((i) => ({ ...i, transform: { ...i.transform } }))
+    const ctx: OpContext = {
+      strokes: [],
+      saveStroke: () => {},
+      images,
+      saveImageMeta: () => {},
+      texts: [],
+      saveText: () => {},
+      shapes: [],
+      saveShape: () => {},
+      markDirty: () => {},
+    }
+    return { ctx }
+  }
+
+  test('rotate-image stores a nonzero angle as-is; unapply restores rotation-was-undefined', () => {
+    const h = mkImgHarness([mkRotImg('i1')])
+    const op: Op = { kind: 'rotate-image', imageId: 'i1', before: 0, after: Math.PI / 3 }
+    applyOp(op, h.ctx)
+    expect(h.ctx.images[0]?.rotation).toBe(Math.PI / 3)
+    // Undo back to the never-rotated state: the compact-record invariant
+    // stores `undefined`, not an explicit 0.
+    unapplyOp(op, h.ctx)
+    expect(h.ctx.images[0]?.rotation).toBeUndefined()
+  })
+
+  test('rotate-image to exactly 0 stores undefined; unapply restores the prior angle', () => {
+    const h = mkImgHarness([mkRotImg('i1', { rotation: Math.PI / 4 })])
+    const op: Op = { kind: 'rotate-image', imageId: 'i1', before: Math.PI / 4, after: 0 }
+    applyOp(op, h.ctx)
+    expect(h.ctx.images[0]?.rotation).toBeUndefined()
+    unapplyOp(op, h.ctx)
+    expect(h.ctx.images[0]?.rotation).toBe(Math.PI / 4)
+  })
+
+  test('rotate-text stores a nonzero angle as-is; unapply restores rotation-was-undefined', () => {
+    const h = mkHarness([mkText('t1')])
+    const op: Op = { kind: 'rotate-text', textId: 't1', before: 0, after: Math.PI / 6 }
+    applyOp(op, h.ctx)
+    expect(h.ctx.texts[0]?.rotation).toBe(Math.PI / 6)
+    unapplyOp(op, h.ctx)
+    expect(h.ctx.texts[0]?.rotation).toBeUndefined()
+  })
+
+  test('rotate-text to exactly 0 stores undefined; unapply restores the prior angle', () => {
+    const h = mkHarness([mkText('t1', { rotation: Math.PI / 2 })])
+    const op: Op = { kind: 'rotate-text', textId: 't1', before: Math.PI / 2, after: 0 }
+    applyOp(op, h.ctx)
+    expect(h.ctx.texts[0]?.rotation).toBeUndefined()
+    unapplyOp(op, h.ctx)
+    expect(h.ctx.texts[0]?.rotation).toBe(Math.PI / 2)
   })
 })
 
