@@ -96,14 +96,73 @@ interface ActiveEntry {
 }
 const activeRegistry: ActiveEntry[] = []
 
-const PIN_SVG_OUTLINE =
-  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>'
+// ── Header icons ──────────────────────────────────────────────────────────
+// Built via `createElementNS` DOM factories (mirroring menu-icons.ts — no
+// `innerHTML`), constructed once as templates and CLONED into buttons so a
+// pin toggle is a cheap clone, not an HTML re-parse. Templates are built
+// lazily on first use because this module is also imported in DOM-less
+// bun:test runs where `document` doesn't exist at module-eval time.
 
-const PIN_SVG_FILLED =
-  '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>'
+const SVG_NS = 'http://www.w3.org/2000/svg'
 
-const CLOSE_SVG =
-  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
+/** Build an SVG element with attributes — same tiny shim menu-icons.ts
+ *  uses so factories skip the namespace + setAttribute boilerplate. */
+function svgEl(tag: string, attrs: Record<string, string | number> = {}): SVGElement {
+  const el = document.createElementNS(SVG_NS, tag)
+  for (const [k, v] of Object.entries(attrs)) {
+    el.setAttribute(k, String(v))
+  }
+  return el
+}
+
+/** 12×12 header-icon container with the shared round caps / joins. */
+function makeHeaderIcon(
+  attrs: Record<string, string | number>,
+  ...children: SVGElement[]
+): SVGElement {
+  const svg = svgEl('svg', {
+    width: 12,
+    height: 12,
+    viewBox: '0 0 24 24',
+    'stroke-linecap': 'round',
+    'stroke-linejoin': 'round',
+    ...attrs,
+  })
+  for (const c of children) svg.appendChild(c)
+  return svg
+}
+
+const PIN_PATH_D =
+  'M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z'
+
+interface HeaderIcons {
+  pinOutline: SVGElement
+  pinFilled: SVGElement
+  close: SVGElement
+}
+
+let headerIconTemplates: HeaderIcons | null = null
+
+function headerIcons(): HeaderIcons {
+  headerIconTemplates ??= {
+    pinOutline: makeHeaderIcon(
+      { fill: 'none', stroke: 'currentColor', 'stroke-width': 2 },
+      svgEl('line', { x1: 12, y1: 17, x2: 12, y2: 22 }),
+      svgEl('path', { d: PIN_PATH_D }),
+    ),
+    pinFilled: makeHeaderIcon(
+      { fill: 'currentColor', stroke: 'currentColor', 'stroke-width': 1.5 },
+      svgEl('line', { x1: 12, y1: 17, x2: 12, y2: 22 }),
+      svgEl('path', { d: PIN_PATH_D }),
+    ),
+    close: makeHeaderIcon(
+      { fill: 'none', stroke: 'currentColor', 'stroke-width': 2.5 },
+      svgEl('line', { x1: 18, y1: 6, x2: 6, y2: 18 }),
+      svgEl('line', { x1: 6, y1: 6, x2: 18, y2: 18 }),
+    ),
+  }
+  return headerIconTemplates
+}
 
 export function showPopover(opts: PopoverOptions): Popover {
   // Same-tag replacement: dismiss any existing popover whose tag
@@ -144,7 +203,7 @@ export function showPopover(opts: PopoverOptions): Popover {
   closeBtn.type = 'button'
   closeBtn.title = 'Close'
   closeBtn.setAttribute('aria-label', 'Close')
-  closeBtn.innerHTML = CLOSE_SVG
+  closeBtn.replaceChildren(headerIcons().close.cloneNode(true))
 
   actions.append(pinBtn, closeBtn)
   header.appendChild(actions)
@@ -159,7 +218,8 @@ export function showPopover(opts: PopoverOptions): Popover {
   syncPinUI()
 
   function syncPinUI(): void {
-    pinBtn.innerHTML = pinned ? PIN_SVG_FILLED : PIN_SVG_OUTLINE
+    const icons = headerIcons()
+    pinBtn.replaceChildren((pinned ? icons.pinFilled : icons.pinOutline).cloneNode(true))
     pinBtn.classList.toggle('pinned', pinned)
   }
 

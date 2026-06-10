@@ -6,6 +6,16 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 ## [Unreleased]
 
+### Added
+
+- **Dialog and pill a11y.** The settings side panel now declares `aria-modal="true"` and moves keyboard focus into the dialog on open (focus still returns to the opener on close, as before); the options menu's grid / spacing pills gain `aria-pressed` so screen readers announce the active selection, matching the right-click menu's pills.
+
+### Changed (internal)
+
+- **Popover header icons are DOM-built.** The pin / close icons were the last `innerHTML`-injected SVGs, against the `menu-icons.ts` `createElementNS` discipline — now built once as DOM templates and cloned in, so a pin toggle clones a node instead of re-parsing HTML. Byte-identical visual output.
+- **Session-only settings changes no longer schedule disk writes.** `setEraserMode` (and the mode-only path of `setEraserConfig`) debounce-scheduled a localStorage write even though the session-scoped `eraserMode` is stripped before the write — a guaranteed no-op. Those paths now just notify subscribers; an `eraserSize` change still persists.
+- **Architecture-doc catch-up.** The §2.1 module table in `docs/architecture.md` gains the four rows it was missing: `swatchpalette.ts`, `factoryreset.ts`, `menu-fillopacity.ts`, `menu-icons.ts`.
+
 ### Security
 
 - **CI / deploy supply-chain + runtime hardening.** Every GitHub Action is now pinned to a full commit SHA (with a `# vX.Y.Z` comment for readability; Dependabot's `github-actions` ecosystem updates SHA pins natively), `bun-version` is pinned to 1.3.13 instead of `latest`, and `ci.yml` gains a top-level `permissions: contents: read` so its token can't write anything (pages / codeql already scoped theirs). The Docker base image is pinned to the `oven/bun:1.3-slim` manifest-list digest so builds are immune to tag repointing, and the compose service drops all capabilities, blocks privilege escalation (`no-new-privileges`), and mounts the root filesystem read-only — the server writes only to the `/data` named volume (still writable) and a `/tmp` tmpfs.
