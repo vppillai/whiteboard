@@ -21,6 +21,7 @@ WORKDIR /app
 COPY --link package.json bun.lock* bun.lockb* ./
 COPY --link apps/web/package.json ./apps/web/
 COPY --link apps/server/package.json ./apps/server/
+COPY --link apps/e2e/package.json ./apps/e2e/
 COPY --link packages/shared/package.json ./packages/shared/
 
 RUN bun install --frozen-lockfile
@@ -49,6 +50,7 @@ WORKDIR /app
 COPY --link package.json bun.lock* bun.lockb* ./
 COPY --link apps/web/package.json ./apps/web/
 COPY --link apps/server/package.json ./apps/server/
+COPY --link apps/e2e/package.json ./apps/e2e/
 COPY --link packages/shared/package.json ./packages/shared/
 RUN bun install --frozen-lockfile --production
 
