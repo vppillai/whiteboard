@@ -35,6 +35,7 @@ export function showSidePanel(opts: SidePanelOptions): SidePanel {
   const el = document.createElement('aside')
   el.className = 'whiteboard-sidepanel'
   el.setAttribute('role', 'dialog')
+  el.setAttribute('aria-modal', 'true')
   el.setAttribute('aria-label', opts.title)
 
   const header = document.createElement('div')
@@ -63,6 +64,12 @@ export function showSidePanel(opts: SidePanelOptions): SidePanel {
 
   // Trigger slide-in animation on next frame.
   requestAnimationFrame(() => el.classList.add('open'))
+
+  // Move focus into the dialog so keyboard / screen-reader users land in
+  // the panel they just opened (the close button is the first focusable —
+  // a conventional initial target for dialogs). `dismiss` already returns
+  // focus to `refocusOnClose`, so open-focus + close-refocus round-trip.
+  el.querySelector<HTMLElement>('button, input, [tabindex="0"]')?.focus({ preventScroll: true })
 
   let dismissed = false
   const dismiss = (): void => {

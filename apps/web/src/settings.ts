@@ -606,7 +606,9 @@ export function getEraserMode(): EraserMode {
 export function setEraserMode(mode: EraserMode): void {
   if (state.eraserMode === mode) return
   state.eraserMode = mode
-  persist()
+  // No persist(): eraserMode is session-only — persistNow() strips it
+  // before the localStorage write, so scheduling a write here would be
+  // a no-op disk churn.
   emit()
 }
 
@@ -616,19 +618,21 @@ export function setEraserMode(mode: EraserMode): void {
  * its previous value (which doesn't matter for item mode).
  */
 export function setEraserConfig(config: { mode: EraserMode; size?: EraserSize }): void {
-  let changed = false
+  // eraserMode is session-only (stripped by persistNow before the write),
+  // so a mode-only change just emits; only an eraserSize change — the
+  // persisted field — schedules a localStorage write.
+  let sessionChanged = false
+  let persistedChanged = false
   if (state.eraserMode !== config.mode) {
     state.eraserMode = config.mode
-    changed = true
+    sessionChanged = true
   }
   if (config.size !== undefined && state.eraserSize !== config.size) {
     state.eraserSize = config.size
-    changed = true
+    persistedChanged = true
   }
-  if (changed) {
-    persist()
-    emit()
-  }
+  if (persistedChanged) persist()
+  if (sessionChanged || persistedChanged) emit()
 }
 
 export function setPresetField<K extends PresetField>(

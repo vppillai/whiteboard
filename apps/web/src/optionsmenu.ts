@@ -88,7 +88,16 @@ function pillRow<T>(pills: PillSpec<T>[], current: T, onSelect: (v: T) => void):
     btn.type = 'button'
     btn.className = 'whiteboard-options-pill'
     btn.textContent = p.label
-    if (p.value === current) btn.classList.add('active')
+    // aria-pressed mirrors the visual `active` class so screen readers
+    // announce the current selection (matches menu-ui.ts's pill()).
+    // Build-time only is enough: renderGrid rebuilds both rows on every
+    // selection change, so the attribute can never go stale.
+    if (p.value === current) {
+      btn.classList.add('active')
+      btn.setAttribute('aria-pressed', 'true')
+    } else {
+      btn.setAttribute('aria-pressed', 'false')
+    }
     btn.addEventListener('click', () => onSelect(p.value))
     row.appendChild(btn)
   }

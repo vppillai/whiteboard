@@ -82,6 +82,10 @@ Key submodules:
 | `destructiveconfirm.ts` | M1.7 ✅ | Generalized priming-toast (shared by clear + reset). |
 | `resetflow.ts`  | M1.7 ✅  | Reset-to-defaults flow.                                  |
 | `swatchadd.ts`  | M1.7 ✅  | Hex + OS color picker UI shared between picker and panel. |
+| `swatchpalette.ts` | v1.4 ✅ | Shared swatch-palette factory for right-click contextual menus — curated colors + custom swatches + "+" add tile, unified across the per-tool sections. |
+| `factoryreset.ts` | v1.4 ✅ | Factory reset — wipes ALL per-origin browser state (IndexedDB, localStorage, sessionStorage, CacheStorage, service workers) and reloads; distinct from `resetflow.ts`, which only resets in-app settings. |
+| `menu-fillopacity.ts` | v1.4 ✅ | Shared fill-opacity slider widget (range input + percent readout) for the Shape tool and the Select tool's shape menu — same visual, per-host commit semantics (sticky setting vs. per-shape edit op). |
+| `menu-icons.ts` | v1.4 ✅  | Right-click menu icon library — `createElementNS` factories returning fresh stroke-based 24×24 SVGs (never `innerHTML`); `currentColor` lets host-pill states light icons up without per-icon styling. |
 | `popover.ts`    | M1.5 ✅  | Anchored, viewport-clamped, pinnable popover primitive.  |
 | `colorpicker.ts`| M1.5 ✅  | Color picker popover content (swatches).                 |
 | `optionsmenu.ts`| M1.5 ✅  | Options popover content (grid type, spacing).            |
