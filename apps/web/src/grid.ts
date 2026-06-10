@@ -55,6 +55,10 @@ export function drawGrid(
   screenW: number,
   screenH: number,
   config: GridConfig,
+  // Callers rendering to a tracked target should pass its dpr so the grid
+  // matches the canvas backing store during DPR changes (monitor drags).
+  // The window fallback keeps the PNG-export path working unchanged.
+  dpr: number = window.devicePixelRatio || 1,
 ): void {
   if (config.type === 'none') return
 
@@ -65,7 +69,6 @@ export function drawGrid(
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
 
-  const dpr = window.devicePixelRatio || 1
   const colors = readGridColors()
 
   if (config.type === 'dots') {
