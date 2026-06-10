@@ -6,7 +6,9 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 ## [Unreleased]
 
-No entries yet.
+### Security
+
+- **CI / deploy supply-chain + runtime hardening.** Every GitHub Action is now pinned to a full commit SHA (with a `# vX.Y.Z` comment for readability; Dependabot's `github-actions` ecosystem updates SHA pins natively), `bun-version` is pinned to 1.3.13 instead of `latest`, and `ci.yml` gains a top-level `permissions: contents: read` so its token can't write anything (pages / codeql already scoped theirs). The Docker base image is pinned to the `oven/bun:1.3-slim` manifest-list digest so builds are immune to tag repointing, and the compose service drops all capabilities, blocks privilege escalation (`no-new-privileges`), and mounts the root filesystem read-only — the server writes only to the `/data` named volume (still writable) and a `/tmp` tmpfs.
 
 ## [1.4.6] — 2026-06-10
 
