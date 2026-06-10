@@ -24,6 +24,12 @@ import {
   resetAll,
   setBrushId,
   setColor,
+  setEraserConfig,
+  setGridSpacing,
+  setGridType,
+  setLaserColor,
+  setMouseSyntheticPressure,
+  setPredictedEvents,
   setPresetField,
   setShapeColor,
   setShapeFillEnabled,
@@ -430,21 +436,55 @@ describe('settings: pressureCurve preset (M2)', () => {
 })
 
 describe('settings: resetAll', () => {
-  test('wipes presets, customSwatches, recentColors, scalar settings', () => {
+  test('restores every settings field to its default', () => {
+    // Fresh state right after __resetForTesting IS the defaults — snapshot it.
+    const defaults = structuredClone(getSettings()) as unknown as Record<string, unknown>
+
+    // Drive every settable field to a non-default value via public setters.
+    // When a new field lands in DEFAULTS, the "moved off default" loop below
+    // fails until a setter call is added here — keeping this test exhaustive.
     setPresetField('pen', 'size', 5)
     addCustomSwatch('#fbcfe8')
     pushRecentColor('#111111')
     setColor('#22c55e')
     setBrushId('marker')
+    setEraserConfig({ mode: 'item', size: 'large' })
+    setGridType('lines')
+    setGridSpacing(48)
+    setPredictedEvents(true)
+    setMouseSyntheticPressure(false)
+    setLaserColor('#00ff00')
+    setTextFont('sans')
+    setTextSize(18)
+    setTextBold(true)
+    setTextItalic(true)
+    setTextUnderline(true)
+    setTextColor('#ff0000')
+    setShapeKind('ellipse')
+    setShapeColor('#00ff00')
+    setShapeStrokeWidth(4)
+    setShapeFillEnabled(true)
+    setShapeFillOpacity(0.9)
+
+    // Sanity gate: every field (except the un-settable schemaVersion) must
+    // actually have moved off its default, or the assertions after resetAll
+    // would pass vacuously.
+    const mutated = getSettings() as unknown as Record<string, unknown>
+    for (const key of Object.keys(defaults)) {
+      if (key === 'schemaVersion') continue
+      expect(mutated[key]).not.toEqual(defaults[key])
+    }
+
     resetAll()
-    const s = getSettings()
-    expect(s.presets).toEqual({})
-    expect(s.customSwatches).toEqual([])
-    expect(s.recentColors).toEqual([])
-    expect(s.color).toBe('ink')
-    expect(s.brush).toBe('pen')
-    expect(s.eraserSize).toBe('medium')
-    expect(s.grid).toEqual({ type: 'dots', spacing: 24 })
+
+    // Every field — including any added to DEFAULTS in the future — must be
+    // back at its default. Iterates keys programmatically so resetAll drift
+    // fails this test automatically.
+    const after = getSettings() as unknown as Record<string, unknown>
+    for (const key of Object.keys(defaults)) {
+      expect(after[key]).toEqual(defaults[key])
+    }
+    expect(Object.keys(after).sort()).toEqual(Object.keys(defaults).sort())
   })
 })
 

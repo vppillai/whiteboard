@@ -667,16 +667,20 @@ export function clearPresetCurve(brushId: BrushId): void {
   emit()
 }
 
+/** Reset every settings field to its default (spec § 6.1.7 Scope B).
+ *
+ *  Structural copy from DEFAULTS rather than a field-by-field list, so a
+ *  new setting can never be silently omitted here again (v1.2–v1.4 fields
+ *  were). `Object.assign` mutates in place because `state` is a const
+ *  binding other modules hold via `getSettings()`; `cloneSettings` deep-
+ *  copies so nested objects (grid, presets) don't alias DEFAULTS.
+ *
+ *  Deliberately untouched:
+ *  - theme — not reset, see spec § 9 (lives outside this module anyway).
+ *  - syncedAt / remoteId — sync metadata, not user preferences; absent
+ *    from DEFAULTS, so the assign leaves them as-is. */
 export function resetAll(): void {
-  state.presets = {}
-  state.customSwatches = []
-  state.recentColors = []
-  state.color = DEFAULTS.color
-  state.brush = DEFAULTS.brush
-  state.eraserSize = DEFAULTS.eraserSize
-  state.eraserMode = DEFAULTS.eraserMode
-  state.grid = { ...DEFAULTS.grid }
-  // theme intentionally NOT reset — see spec § 9
+  Object.assign(state, cloneSettings(DEFAULTS))
   persist()
   emit()
 }
