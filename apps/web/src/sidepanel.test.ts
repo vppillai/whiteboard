@@ -25,7 +25,12 @@ interface ElStub {
   classList: { add: () => void; remove: () => void }
   remove: () => void
   focus: () => void
+  querySelector: () => ElStub
 }
+
+// Set when the element returned by querySelector receives focus — lets the
+// focus-on-open behavior be asserted without a real DOM tree.
+let queryResultFocused = false
 
 function makeElStub(): ElStub {
   return {
@@ -40,6 +45,13 @@ function makeElStub(): ElStub {
     classList: { add: () => {}, remove: () => {} },
     remove: () => {},
     focus: () => {},
+    querySelector: () => {
+      const child = makeElStub()
+      child.focus = () => {
+        queryResultFocused = true
+      }
+      return child
+    },
   }
 }
 
@@ -130,4 +142,17 @@ test('Esc from a non-editable target dismisses the panel and prevents default', 
 
   expect(isSidePanelOpen()).toBe(false)
   expect(wasPrevented()).toBe(true)
+})
+
+test('opening the panel moves keyboard focus into the dialog', () => {
+  queryResultFocused = false
+  showSidePanel({
+    title: 'Settings',
+    content: makeElStub() as unknown as HTMLElement,
+  })
+  expect(queryResultFocused).toBe(true)
+
+  if (!captureKeydown) throw new Error('panel keydown listener not attached')
+  captureKeydown(makeEscEvent(false).event) // leave no open panel behind
+  expect(isSidePanelOpen()).toBe(false)
 })
