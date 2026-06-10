@@ -10,6 +10,10 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 - **Dialog and pill a11y.** The settings side panel now declares `aria-modal="true"` and moves keyboard focus into the dialog on open (focus still returns to the opener on close, as before); the options menu's grid / spacing pills gain `aria-pressed` so screen readers announce the active selection, matching the right-click menu's pills.
 
+### Fixed
+
+- **Group delete and group paste now undo in one step.** Deleting a multi-selection previously pushed one per-kind op per object — a 30-object delete took 30 Cmd+Z presses to unwind; pasting a whiteboard-native bundle had the same N-undo-step problem. `deleteSelected` now emits a single composite `delete-many` op (extended to carry stroke ids alongside the existing image / text / shape id lists), and `pasteSelectionBundle` emits a single new `create-many` op for the whole pasted bundle. Both mirror the `transform-many` pattern group move already uses: one gesture → one op → one undo step, and — relevant for the deferred sync layer — one transaction per gesture instead of N. Per-object soft-delete and persistence semantics are unchanged; the canonical `applyOp(op); pushOp(op)` mutation funnel from v1.4.4 is preserved. `create-many` deliberately omits images: the native clipboard bundle never carries them (image selections copy as PNG-only), and the separate image-paste flow keeps its own `paste-image` op.
+
 ### Changed (internal)
 
 - **Popover header icons are DOM-built.** The pin / close icons were the last `innerHTML`-injected SVGs, against the `menu-icons.ts` `createElementNS` discipline — now built once as DOM templates and cloned in, so a pin toggle clones a node instead of re-parsing HTML. Byte-identical visual output.
@@ -19,6 +23,10 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 ### Security
 
 - **CI / deploy supply-chain + runtime hardening.** Every GitHub Action is now pinned to a full commit SHA (with a `# vX.Y.Z` comment for readability; Dependabot's `github-actions` ecosystem updates SHA pins natively), `bun-version` is pinned to 1.3.13 instead of `latest`, and `ci.yml` gains a top-level `permissions: contents: read` so its token can't write anything (pages / codeql already scoped theirs). The Docker base image is pinned to the `oven/bun:1.3-slim` manifest-list digest so builds are immune to tag repointing, and the compose service drops all capabilities, blocks privilege escalation (`no-new-privileges`), and mounts the root filesystem read-only — the server writes only to the `/data` named volume (still writable) and a `/tmp` tmpfs.
+
+### Tests
+
+- +8 unit tests (**274** total): side-panel focus-on-open, `delete-many` mixed-kind round-trip including strokes, `create-many` undo/redo round-trip + unknown-id safety, Select-tool seam test (one op pushed for a mixed 5-object delete; no op when nothing live), paste seam test (one `create-many` for a multi-object bundle; nothing for an empty bundle).
 
 ## [1.4.6] — 2026-06-10
 
