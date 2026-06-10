@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import {
+  loadAllStrokes,
   partitionForCompaction,
   partitionImagesForCompaction,
   partitionShapesForCompaction,
@@ -200,5 +201,89 @@ describe('storage/partitionShapesForCompaction', () => {
     const { kept, toCompact } = partitionShapesForCompaction([])
     expect(kept).toEqual([])
     expect(toCompact).toEqual([])
+  })
+})
+
+// ─── getDb open-failure caching (regression) ────────────────────────────────
+//
+// bun test has no real IndexedDB, but storage.ts reads the bare `indexedDB`
+// global at call time, so a minimal fake on globalThis is enough to exercise
+// the open path. Regression for the bug where a rejected open was cached in
+// the module-level `dbPromise` forever, silently killing persistence for the
+// whole session (persist-callbacks.ts swallows the rejections).
+
+type FakeOpenRequest = {
+  onupgradeneeded: (() => void) | null
+  onsuccess: (() => void) | null
+  onerror: (() => void) | null
+  onblocked: (() => void) | null
+  result?: unknown
+  error?: Error
+}
+
+/** Minimal IDBDatabase fake: any transaction/getAll resolves to []. */
+function makeFakeDb(): unknown {
+  return {
+    onclose: null,
+    transaction: () => ({
+      objectStore: () => ({
+        getAll: () => {
+          const req: {
+            onsuccess: (() => void) | null
+            onerror: (() => void) | null
+            result: unknown[]
+          } = { onsuccess: null, onerror: null, result: [] }
+          // IDB events are always async; fire after handlers are attached.
+          queueMicrotask(() => req.onsuccess?.())
+          return req
+        },
+      }),
+    }),
+  }
+}
+
+/** IDBFactory fake whose first open fails and later opens succeed. */
+function makeFlakyIndexedDB(): { factory: IDBFactory; openCalls: () => number } {
+  let calls = 0
+  const factory = {
+    open: () => {
+      calls += 1
+      const req: FakeOpenRequest = {
+        onupgradeneeded: null,
+        onsuccess: null,
+        onerror: null,
+        onblocked: null,
+      }
+      if (calls === 1) {
+        req.error = new Error('simulated open failure')
+        queueMicrotask(() => req.onerror?.())
+      } else {
+        req.result = makeFakeDb()
+        queueMicrotask(() => req.onsuccess?.())
+      }
+      return req
+    },
+  }
+  return { factory: factory as unknown as IDBFactory, openCalls: () => calls }
+}
+
+describe('storage/getDb', () => {
+  test('failed open is not cached — the next call retries and succeeds', async () => {
+    const { factory, openCalls } = makeFlakyIndexedDB()
+    const g = globalThis as { indexedDB?: IDBFactory }
+    const prev = g.indexedDB
+    g.indexedDB = factory
+    try {
+      // First call: open rejects.
+      await expect(loadAllStrokes()).rejects.toThrow('simulated open failure')
+      // Second call: before the fix this re-rejected with the cached
+      // error; after the fix it re-opens and succeeds.
+      const strokes = await loadAllStrokes()
+      expect(strokes).toEqual([])
+      expect(openCalls()).toBe(2)
+    } finally {
+      if (prev === undefined) delete g.indexedDB
+      else g.indexedDB = prev
+    }
   })
 })
