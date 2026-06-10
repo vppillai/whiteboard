@@ -41,7 +41,7 @@ export interface LaserToolDeps {
 
 /** How long any one sample point stays visible (ms). Tuned for "noticeable
  *  but doesn't linger" feel; tldraw uses ~2-3 s. */
-const LASER_FADE_MS = 2200
+export const LASER_FADE_MS = 2200
 /** Stroke width in CSS pixels at scale=1. Counter-scaled by the camera so
  *  the trail stays the same screen-thickness at any zoom. */
 const LASER_WIDTH_PX = 4
@@ -49,7 +49,7 @@ const LASER_WIDTH_PX = 4
  *  bloom that reads as light rather than ink. */
 const LASER_GLOW_BLUR = 8
 
-interface Sample {
+export interface Sample {
   /** Board-space x. */
   x: number
   /** Board-space y. */
@@ -65,27 +65,31 @@ interface Sample {
   continueFromPrev: boolean
 }
 
+/** Cull samples older than LASER_FADE_MS in place (they'd be alpha=0
+ *  anyway). Samples are appended in timestamp order, so the first
+ *  still-alive index bounds every expired one — a single splice drops k
+ *  expired samples in one O(n) pass. (A shift() per expired sample is
+ *  O(k·n): when a long 200 Hz trail all ages out within the fade window,
+ *  that bursts to tens of thousands of element copies in one frame.)
+ *  Returns true when at least one sample is still alive after culling.
+ *  Exported for tests. */
+export function _cullExpired(samples: Sample[], now: number): boolean {
+  const firstAlive = samples.findIndex((p) => now - p.t <= LASER_FADE_MS)
+  if (firstAlive === -1) samples.length = 0
+  else if (firstAlive > 0) samples.splice(0, firstAlive)
+  return samples.length > 0
+}
+
 export function createLaserTool(deps: LaserToolDeps): Tool {
   const points: Sample[] = []
   let active = false
   let rafHandle: number | null = null
 
-  /** Cull samples older than LASER_FADE_MS (they'd be alpha=0 anyway).
-   *  Returns true when at least one sample is still alive after culling. */
-  const cull = (now: number): boolean => {
-    while (points.length > 0) {
-      const head = points[0]
-      if (!head || now - head.t <= LASER_FADE_MS) break
-      points.shift()
-    }
-    return points.length > 0
-  }
-
   const startFadeLoop = (ctx: ToolContext): void => {
     if (rafHandle !== null) return
     const tick = (): void => {
       const now = performance.now()
-      const alive = cull(now)
+      const alive = _cullExpired(points, now)
       // Mark dirty regardless — even when nothing is alive we need one
       // final clear pass to wipe the last frame's drawn trail.
       ctx.markCommittedDirty()
