@@ -17,6 +17,19 @@ services:
     image: whiteboard:local
     container_name: whiteboard
     restart: unless-stopped
+    # Runtime hardening. The server is a static-file server plus a /data
+    # board store — it writes only to /data (named volume below, which stays
+    # writable under read_only) and needs no capabilities (port 8787 is
+    # unprivileged, process already runs as the non-root `app` user).
+    # /tmp is tmpfs because the root filesystem is read-only and Bun (and
+    # anything it shells out to) expects a writable temp dir.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
     ports:
       - "${PORT:-8787}:8787"
     environment:

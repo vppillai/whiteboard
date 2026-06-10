@@ -9,7 +9,10 @@
 # The build stage's node_modules is hoisted per-workspace by Bun, so the runtime
 # stage re-installs with --production rather than copying from the build stage.
 
-ARG BUN_VERSION=1.3-slim
+# Tag pinned to a digest so builds are reproducible and immune to tag
+# repointing. Refresh the digest when bumping the tag:
+#   docker buildx imagetools inspect oven/bun:<tag>
+ARG BUN_VERSION=1.3-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04
 
 # ---- 1. build --------------------------------------------------------------
 FROM oven/bun:${BUN_VERSION} AS build
