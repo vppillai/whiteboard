@@ -107,6 +107,19 @@ const MAX_BUNDLE_TEXTS = 5000
 const MAX_BUNDLE_SHAPES = 5000
 const MAX_STROKE_SAMPLES = 50000
 
+/** Strict grammar for color tokens crossing the clipboard boundary.
+ *  The app only ever writes the literal `'ink'` theme token or hex
+ *  colors (palette + swatch-add produce 6-digit `#rrggbb`; 3/4/8-digit
+ *  hex accepted for the standard CSS hex family). Anything else — in
+ *  particular attribute-breakout payloads like `red"/><script>` — is
+ *  attack-shaped and rejects the entry. This is the input-boundary
+ *  counterpart of the escapeAttr guards in export/svg.ts: hostile
+ *  colors are stopped before they can persist and reach any sink. */
+const COLOR_TOKEN = /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
+function isValidColorToken(v: unknown): boolean {
+  return v === 'ink' || (typeof v === 'string' && COLOR_TOKEN.test(v))
+}
+
 /** Hand-rolled field validator for the structural shape of a stroke /
  *  text inside a bundle. Sufficient to reject truncated, type-confused,
  *  or attack-shaped entries without dragging in a schema library; full
@@ -120,6 +133,7 @@ function isValidStrokeShape(s: unknown): boolean {
   if (o.samples.length > MAX_STROKE_SAMPLES) return false
   if (typeof o.startedAt !== 'number') return false
   if (!o.brush || typeof o.brush !== 'object') return false
+  if (!isValidColorToken((o.brush as { color?: unknown }).color)) return false
   return true
 }
 
@@ -136,7 +150,9 @@ function isValidTextShape(t: unknown): boolean {
   if (typeof o.content !== 'string') return false
   if (!o.transform || typeof o.transform !== 'object') return false
   if (!o.font || typeof o.font !== 'object') return false
-  if (typeof o.color !== 'string') return false
+  // Color flows to an escaped sink, but validating uniformly at the
+  // boundary keeps hostile strings out of the store entirely.
+  if (!isValidColorToken(o.color)) return false
   return true
 }
 
@@ -150,6 +166,7 @@ function isValidShapeShape(s: unknown): boolean {
     shape?: unknown
     transform?: unknown
     color?: unknown
+    fill?: unknown
     strokeWidth?: unknown
   }
   if (typeof o.id !== 'string') return false
@@ -157,7 +174,10 @@ function isValidShapeShape(s: unknown): boolean {
     return false
   }
   if (!o.transform || typeof o.transform !== 'object') return false
-  if (typeof o.color !== 'string') return false
+  if (!isValidColorToken(o.color)) return false
+  // Optional fill: absent or the literal 'none' mean outline-only
+  // (both documented on ShapeObject.fill); otherwise a color token.
+  if (o.fill !== undefined && o.fill !== 'none' && !isValidColorToken(o.fill)) return false
   if (typeof o.strokeWidth !== 'number') return false
   return true
 }

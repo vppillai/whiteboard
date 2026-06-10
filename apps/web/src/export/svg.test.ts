@@ -473,4 +473,58 @@ describe('export/svg', () => {
     expect(text).toContain('<line x1="10.00" y1="20.00" x2="40.00" y2="60.00"')
     expect(text).toContain('<polyline points=')
   })
+
+  test('hostile brush.color is escaped — no attribute breakout in export (H1)', async () => {
+    // Attribute-breakout payload: if interpolated raw it would close the
+    // fill attribute, terminate the <path>, and inject a <script> that
+    // executes when the exported SVG is opened standalone.
+    const payload = 'red"/><script>alert(1)</script><path d="'
+    const hostile = mkStroke(
+      [
+        { x: 0, y: 0 },
+        { x: 10, y: 10 },
+      ],
+      {
+        id: 'hostile',
+        brush: {
+          size: 3,
+          color: payload,
+          thinning: 0.6,
+          smoothing: 0.7,
+          streamline: 0.4,
+          taperStart: 0,
+          taperEnd: 0,
+          capStart: true,
+          capEnd: true,
+          pressureGamma: 1.5,
+          opacity: 0.94,
+        },
+      },
+    )
+    // A legit hex stroke in the same export proves escaping is identity
+    // for real colors (escapeAttr touches only & " < — hex has none).
+    const legit = mkStroke(
+      [
+        { x: 20, y: 20 },
+        { x: 30, y: 30 },
+      ],
+      { id: 'legit' },
+    )
+    const blob = exportSVG(
+      [hostile, legit],
+      [],
+      new Map(),
+      [],
+      [],
+      { x: 0, y: 0, width: 100, height: 100 },
+      baseSettings,
+    )
+    const text = await blob.text()
+    expect(text).not.toContain('<script')
+    expect(text).not.toContain('"><')
+    // The payload survives only in escaped form inside the attribute.
+    expect(text).toContain('fill="red&quot;')
+    // Legit hex color is byte-identical.
+    expect(text).toContain('fill="#ef4444"')
+  })
 })

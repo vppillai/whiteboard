@@ -43,7 +43,9 @@ import { exportPNG } from './export/png'
 import { makeShapeId, makeStrokeId, makeTextId } from './ids'
 import { writeImageToClipboard, writePngBlobToClipboard } from './imageclipboard'
 import type { Op } from './ops'
+import { shapeAABB } from './rendershapes'
 import type { SettingsV1 } from './settings'
+import { textAABB } from './textgeom'
 import type { Selection } from './tools'
 
 /** Dependencies the selection-clipboard subsystem needs from the
@@ -155,13 +157,14 @@ async function renderSelectionAsPng(
   })
 }
 
-/** Union bbox top-left across strokes' samples + texts' rects. Used
- *  as `bundle.origin` so paste-back translates the union to the cursor
- *  preserving relative layout. Falls back to {0,0} if every contributor
- *  is empty (degenerate erased-but-not-compacted strokes; the paste
- *  path still works — strokes' samples land at their existing absolute
- *  coords relative to cursor). */
-function selectionOrigin(
+/** Union bbox top-left across strokes' samples + texts' / shapes'
+ *  rotation-aware AABBs. Used as `bundle.origin` so paste-back
+ *  translates the union to the cursor preserving relative layout.
+ *  Falls back to {0,0} if every contributor is empty (degenerate
+ *  erased-but-not-compacted strokes; the paste path still works —
+ *  strokes' samples land at their existing absolute coords relative
+ *  to cursor). Exported for tests. */
+export function _selectionOrigin(
   ss: Stroke[],
   ts: TextObject[],
   shs: ShapeObject[],
@@ -174,13 +177,31 @@ function selectionOrigin(
       if (p.y < minY) minY = p.y
     }
   }
+  // Texts: rotation-aware AABB. For unrotated texts textAABB returns
+  // transform.x/y exactly, so this matches the previous raw-transform
+  // min-tracking; for rotated texts transform.x/y is the pre-rotation
+  // corner, not the visual top-left, and using it made pastes land
+  // offset from the cursor.
   for (const t of ts) {
-    if (t.transform.x < minX) minX = t.transform.x
-    if (t.transform.y < minY) minY = t.transform.y
+    const bb = textAABB(t)
+    if (bb.minX < minX) minX = bb.minX
+    if (bb.minY < minY) minY = bb.minY
   }
-  // Shapes: use the normalized rect top-left. Lines/arrows with negative
-  // w/h still need their bbox top-left, not the raw transform.x/y.
+  // Shapes: rotated shapes use shapeAABB (the visual bbox the Select
+  // tool and export bounds already use). Unrotated shapes keep the
+  // bare normalized rect rather than shapeAABB because shapeAABB
+  // inflates by strokeWidth/2 (+ arrow-head pad) and the origin
+  // convention here is geometry, not ink extent (strokes' samples
+  // above are likewise un-inflated) — and it keeps unrotated bundles
+  // byte-identical to pre-fix ones. Lines/arrows with negative w/h
+  // still need their bbox top-left, not the raw transform.x/y.
   for (const sh of shs) {
+    if (sh.rotation) {
+      const bb = shapeAABB(sh)
+      if (bb.minX < minX) minX = bb.minX
+      if (bb.minY < minY) minY = bb.minY
+      continue
+    }
     const nx = sh.transform.w >= 0 ? sh.transform.x : sh.transform.x + sh.transform.w
     const ny = sh.transform.h >= 0 ? sh.transform.y : sh.transform.y + sh.transform.h
     if (nx < minX) minX = nx
@@ -266,7 +287,7 @@ export async function performSelectCopy(ctx: SelectionClipboardContext): Promise
       strokes: snap.strokes,
       texts: snap.texts.length > 0 ? snap.texts : undefined,
       shapes: snap.shapes.length > 0 ? snap.shapes : undefined,
-      origin: selectionOrigin(snap.strokes, snap.texts, snap.shapes),
+      origin: _selectionOrigin(snap.strokes, snap.texts, snap.shapes),
     }
     return writeSelectionBundleToClipboard(pngBlob, bundle, ctx.showInfoToast)
   }

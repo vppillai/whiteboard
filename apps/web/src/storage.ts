@@ -71,7 +71,12 @@ let dbPromise: Promise<IDBDatabase> | null = null
 
 function getDb(): Promise<IDBDatabase> {
   if (!dbPromise) {
-    dbPromise = new Promise((resolve, reject) => {
+    // Captured by the handlers below so a failure can un-cache exactly
+    // this attempt (`dbPromise === p` guard) without clobbering a newer
+    // retry that may already be in flight. Safe to reference inside the
+    // executor: IDB events only ever fire asynchronously, after `p` is
+    // initialized and assigned to `dbPromise`.
+    const p: Promise<IDBDatabase> = new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION)
       req.onupgradeneeded = () => {
         const db = req.result
@@ -101,8 +106,28 @@ function getDb(): Promise<IDBDatabase> {
           db.createObjectStore(STORE_SHAPES, { keyPath: 'id' })
         }
       }
-      req.onsuccess = () => resolve(req.result)
-      req.onerror = () => reject(req.error)
+      req.onsuccess = () => {
+        const db = req.result
+        // If the browser force-closes the connection later (storage
+        // eviction, user clearing site data), drop the cached promise so
+        // the next persistence call reopens instead of reusing a dead
+        // handle. Note: `close` fires only on abnormal closure, not on
+        // an explicit db.close().
+        db.onclose = () => {
+          if (dbPromise === p) dbPromise = null
+        }
+        resolve(db)
+      }
+      // On open failure, un-cache the promise so the next persistence
+      // call retries instead of re-rejecting with the stale error for
+      // the rest of the session (persist-callbacks.ts swallows these
+      // rejections, so a poisoned cache silently stops all persistence).
+      // Covers onupgradeneeded failures too: an aborted upgrade
+      // transaction surfaces through this same onerror.
+      req.onerror = () => {
+        if (dbPromise === p) dbPromise = null
+        reject(req.error)
+      }
       // If another tab holds an older-version connection open, the
       // upgrade is BLOCKED and neither onsuccess nor onerror fires —
       // boot would hang silently. Reject loudly so the load try/catch
@@ -110,6 +135,9 @@ function getDb(): Promise<IDBDatabase> {
       // mysterious blank canvas. Diagnosed during M3 (shape tool work)
       // when a v4-holding tab blocked a v5 upgrade.
       req.onblocked = () => {
+        // Same un-caching as onerror: once the offending tab closes, the
+        // next call should retry rather than re-reject forever.
+        if (dbPromise === p) dbPromise = null
         reject(
           new Error(
             'whiteboard/storage: IDB upgrade blocked — close other tabs of this app and reload',
@@ -117,6 +145,7 @@ function getDb(): Promise<IDBDatabase> {
         )
       }
     })
+    dbPromise = p
   }
   return dbPromise
 }

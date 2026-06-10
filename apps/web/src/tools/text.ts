@@ -518,6 +518,41 @@ export function createTextTool(deps: TextToolDeps): TextTool {
     deps.markCommittedDirty()
   }
 
+  /** Commit an in-flight move drag: persist the moved transform and push
+   *  the transform-text op (using the before-transform snapshotted at
+   *  drag start). Shared by onPointerUp (normal release; pointercancel
+   *  also routes here per the Tool contract) and cleanup() — without the
+   *  cleanup() call, switching tools mid-drag left the in-memory
+   *  transform moved but never persisted and never recorded in undo, so
+   *  the text snapped back on reload. Mirrors the Select tool's
+   *  commitDrag-from-cleanup pattern. No-ops (and pushes no undo entry)
+   *  when the drag never passed the noop threshold or the transform is
+   *  unchanged. */
+  const commitDrag = (): void => {
+    if (!drag) return
+    const d = drag
+    drag = null
+    if (!d.movedPastNoop) return
+    const text = deps.getTexts().find((t) => t.id === d.textId)
+    if (!text) return
+    const after = { ...text.transform }
+    if (
+      d.before.x === after.x &&
+      d.before.y === after.y &&
+      d.before.w === after.w &&
+      d.before.h === after.h
+    ) {
+      return
+    }
+    deps.saveText(text)
+    deps.pushOp({
+      kind: 'transform-text',
+      textId: d.textId,
+      before: d.before,
+      after,
+    })
+  }
+
   const hitText = (board: { x: number; y: number }): TextObject | null => {
     const texts = deps.getTexts()
     for (let i = texts.length - 1; i >= 0; i--) {
@@ -583,30 +618,17 @@ export function createTextTool(deps: TextToolDeps): TextTool {
     onPointerUp(_e, ctx) {
       lastCtx = ctx
       if (!drag) return
-      const d = drag
-      drag = null
-      const text = deps.getTexts().find((t) => t.id === d.textId)
-      if (!text) return
-      if (!d.movedPastNoop) {
+      if (!drag.movedPastNoop) {
+        // Click without drag-motion → promote to edit mode. Only valid
+        // here (a real pointer release), never from cleanup().
+        const d = drag
+        drag = null
+        const text = deps.getTexts().find((t) => t.id === d.textId)
+        if (!text) return
         startEdit(text, ctx, false)
         return
       }
-      const after = { ...text.transform }
-      if (
-        d.before.x === after.x &&
-        d.before.y === after.y &&
-        d.before.w === after.w &&
-        d.before.h === after.h
-      ) {
-        return
-      }
-      deps.saveText(text)
-      deps.pushOp({
-        kind: 'transform-text',
-        textId: d.textId,
-        before: d.before,
-        after,
-      })
+      commitDrag()
     },
 
     renderContextualMenu(host, dismiss, rebuild, anchor) {
@@ -691,7 +713,10 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       // ever pushed). Same data-loss shape as the v1.1.0 Tier-A "clear
       // board didn't reset images" bug (image-paste batch).
       commitEdit()
-      drag = null
+      // Commit (not drop) any in-flight move drag — the transform was
+      // already mutated per-tick in onPointerMove, so dropping it here
+      // would leave the move unpersisted and invisible to undo.
+      commitDrag()
       lastCtx = null
     },
 

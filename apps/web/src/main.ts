@@ -139,6 +139,8 @@ const makeBrush = (): BrushConfig => ({ ...BRUSH_PRESETS[getBrushId()], color: g
 /** Minimal informational toast — appears bottom-center, fades after 2 s.
  *  Reuses the .df-exit-toast styling for visual consistency with the
  *  distraction-free exit hint. M2 feel-test added for empty-board exports. */
+let infoToastHideTimer: number | null = null
+let infoToastRemoveTimer: number | null = null
 function showInfoToast(msg: string): void {
   const id = 'whiteboard-info-toast'
   let toast = document.getElementById(id)
@@ -150,9 +152,17 @@ function showInfoToast(msg: string): void {
   }
   toast.textContent = msg
   toast.classList.add('visible')
-  window.setTimeout(() => {
+  // Cancel timers from a prior toast so a rapid second call gets its full
+  // 2 s — otherwise the stale hide timer strips 'visible' early.
+  if (infoToastHideTimer !== null) window.clearTimeout(infoToastHideTimer)
+  if (infoToastRemoveTimer !== null) window.clearTimeout(infoToastRemoveTimer)
+  infoToastHideTimer = window.setTimeout(() => {
     toast?.classList.remove('visible')
-    window.setTimeout(() => toast?.remove(), 300)
+    infoToastHideTimer = null
+    infoToastRemoveTimer = window.setTimeout(() => {
+      toast?.remove()
+      infoToastRemoveTimer = null
+    }, 300)
   }, 2000)
 }
 
@@ -670,7 +680,12 @@ async function main(): Promise<void> {
     getBrush: () => getEffectiveBrushConfig(getBrushId(), getColor()),
     liveLayer: target.live,
     camera,
-    dpr: target.dpr,
+    // Live read — the render target's resize handler rewrites target.dpr
+    // when devicePixelRatio changes (monitor drag, OS scaling), and tools
+    // must see the fresh value, not a boot-time snapshot.
+    get dpr() {
+      return target.dpr
+    },
     resolveColor: resolveInkColor,
     markCommittedDirty: () => {
       committedDirty = true
@@ -1453,7 +1468,14 @@ async function main(): Promise<void> {
       // ----- Pass 2: committed layer (grid + images + texts + shapes + composited strokes) -----
       clearLayer(target.committed)
       applyCamera(target.committed, camera, target.dpr)
-      drawGrid(target.committed, camera, target.width, target.height, getSettings().grid)
+      drawGrid(
+        target.committed,
+        camera,
+        target.width,
+        target.height,
+        getSettings().grid,
+        target.dpr,
+      )
 
       // Image layer — draws onto committed in board-space (camera transform
       // is already applied above). Layered BELOW the strokes composite so

@@ -514,7 +514,11 @@ function setImageTransform(ctx: OpContext, id: string, transform: ImageObject['t
 function setImageRotation(ctx: OpContext, id: string, rotation: number): void {
   const img = ctx.images.find((i) => i.id === id)
   if (!img) return
-  img.rotation = rotation || undefined
+  // Store `undefined` for exactly-zero so persisted records stay compact
+  // and back-compat with rotation-less records. Deliberately NOT
+  // `rotation || undefined`: that would also map NaN to `undefined`,
+  // silently masking a corrupted rotation as "no rotation".
+  img.rotation = rotation === 0 ? undefined : rotation
   ctx.saveImageMeta(img)
 }
 
@@ -569,7 +573,8 @@ function setTextRotation(ctx: OpContext, id: string, rotation: number): void {
   // Symmetric with setImageRotation: store `undefined` for the zero case
   // so persisted records don't carry an explicit `rotation: 0` field
   // (cheaper schema; backward-compat with rotation-less records).
-  t.rotation = rotation || undefined
+  // `=== 0` (not `||`) so NaN isn't silently masked as "no rotation".
+  t.rotation = rotation === 0 ? undefined : rotation
   ctx.saveText(t)
 }
 function flipShapeDeleted(ctx: OpContext, id: string, deleted: boolean): void {
@@ -589,7 +594,8 @@ function setShapeRotation(ctx: OpContext, id: string, rotation: number): void {
   // Symmetric with setImageRotation / setTextRotation: store `undefined`
   // for the zero case so persisted records stay compact and back-compat
   // with rotation-less records.
-  s.rotation = rotation || undefined
+  // `=== 0` (not `||`) so NaN isn't silently masked as "no rotation".
+  s.rotation = rotation === 0 ? undefined : rotation
   ctx.saveShape(s)
 }
 

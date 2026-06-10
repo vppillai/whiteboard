@@ -6,7 +6,28 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 ## [Unreleased]
 
-No entries yet.
+**Bug-fix pass — eleven verified defects from a six-dimension implementation review.** A comprehensive review (architecture, drawing pipeline, tools, state/persistence, security, UI shell) surfaced a set of real bugs; each fix below landed with a regression test where the unit harness can reach it, and the combined diff passed an adversarial cross-fix review before merging.
+
+### Fixed
+
+- **Distraction-free mode now actually hides the tool pill and help pill.** The `F`-toggle CSS targeted class names (`.pill`, `.helppill`, `.toolmenu`) that no element ever carried, so chrome stayed visible. Selectors now match the real elements (`#whiteboard-pill`, `.whiteboard-toolpill`, `.whiteboard-tools`).
+- **Tools track live `devicePixelRatio`.** The tool context snapshotted `dpr` at boot, so after a monitor drag or OS-scaling change the live layer (in-flight strokes, pen halo) rendered at the stale ratio while the committed layer used the fresh one. Now a live getter; the grid renderer likewise takes the render target's tracked dpr instead of reading `window.devicePixelRatio` mid-frame. Also un-sticks the pen halo cache, which is keyed on dpr.
+- **A failed IndexedDB open no longer permanently disables persistence.** The cached open promise was poisoned on rejection, so every later write silently re-rejected for the whole session while the board looked fine. Failure now un-caches (with a same-promise guard so a newer retry is never clobbered) and the connection invalidates on browser-initiated close.
+- **Switching tools mid-text-drag commits the move.** The Text tool's `cleanup()` dropped the in-flight drag, so the moved text was neither persisted nor undoable — it snapped back on reload. Drag commit (persist + undo op) is now shared between pointer-up and cleanup, mirroring the Select tool.
+- **Settings inputs no longer lose keys to global handlers.** Esc inside a settings field dismissed the whole side panel (capture-phase, unconditional), and typing `?` in the hex field toggled the help overlay and swallowed the character. Both paths now guard on editable targets.
+- **"Reset to defaults" resets everything.** `resetAll()` enumerated only the v1.0/v1.1 fields, silently keeping 14 newer scalars (text font/size/style, shape kind/color/stroke/fill, laser color, input toggles). Now a structural deep-copy from `DEFAULTS`, with an exhaustive key-iteration test so a future field can't be missed again.
+- **Paste lands rotated objects at the cursor.** The paste-anchor origin used raw `transform.x/y` for texts and rotated shapes — the pre-rotation top-left — so groups containing rotated objects pasted offset. Origin now uses the rotation-aware AABBs; unrotated selections are byte-identical to before.
+- **Rotation setters no longer mask `NaN`.** `rotation || undefined` coerced `NaN` to "no rotation", hiding corruption; now an explicit `=== 0` check (the zero→`undefined` compact-record behavior is unchanged).
+- **Rapid toasts no longer cut each other off**, and the destructive-confirm toast only exists in the DOM while visible (previously multiple permanently-hidden elements shared `id="whiteboard-toast"` from boot).
+- **Laser trail expiry is no longer quadratic.** Per-sample `Array.shift()` in the RAF tick could burst ~100k element copies in one frame when a long 200 Hz trail expired; now a single-splice cull with identical fade-boundary semantics.
+
+### Security
+
+- **SVG export escapes stroke fill, and clipboard colors are validated at the boundary.** The stroke `fill` attribute was the one unescaped user-data sink in SVG export — a crafted `brush.color` in a pasted clipboard bundle could break out of the attribute and execute when the exported file was opened standalone. The sink is now escaped like the text/shape paths, and `brush.color` is validated on paste against the formats the app actually produces (`ink` token or hex), closing the class rather than the single sink.
+
+### Tests
+
+- +34 unit tests (**266** total): IDB open-retry with a fake `indexedDB`, exhaustive `resetAll` key iteration, rotate-op round-trips for all three object kinds, rotated-paste origin, text drag-cleanup commit (incl. no-double-commit and zero-movement), laser cull boundary semantics, keymap/sidepanel editable-target guards, SVG escaping (hostile payload escaped, legit colors byte-identical), and clipboard color accept/reject.
 
 ## [1.4.5] — 2026-05-29
 

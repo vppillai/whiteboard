@@ -1342,9 +1342,9 @@ body.distraction-free .firstrun-hint {
 }
 
 /* Distraction-free mode — hides chrome (M2). */
-body.distraction-free .pill,
-body.distraction-free .helppill,
-body.distraction-free .toolmenu,
+body.distraction-free #whiteboard-pill,
+body.distraction-free .whiteboard-toolpill,
+body.distraction-free .whiteboard-tools,
 body.distraction-free .whiteboard-sidepanel,
 body.distraction-free .whiteboard-popover {
   /* biome-ignore lint/complexity/noImportantStyles: distraction-free must override runtime-injected display styles */
