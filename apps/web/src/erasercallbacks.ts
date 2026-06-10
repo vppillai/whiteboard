@@ -38,6 +38,10 @@ export function createEraserCommitCallbacks(deps: EraserCommitDeps): {
       imageIds: deletes.images,
       textIds: deletes.texts,
       shapeIds: deletes.shapes,
+      // Strokes erased during the same gesture commit per stroke via
+      // onObjectErase as the cursor crosses them; whole-object erase
+      // covers floating objects only.
+      strokeIds: [],
     }
     deps.apply(op, deps.opCtx)
     deps.push(op)

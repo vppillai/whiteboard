@@ -34,7 +34,33 @@ export interface StampEdit {
 export type Op =
   | { kind: 'create'; strokeId: string }
   | { kind: 'delete'; strokeIds: string[] }
-  | { kind: 'delete-many'; imageIds: string[]; textIds: string[]; shapeIds: string[] }
+  /**
+   * Composite multi-object delete: one op covering every object removed
+   * by a single gesture (Select-tool group delete, whole-object eraser
+   * pass), so one Cmd+Z restores the whole group. Same soft-delete flip
+   * semantics as the per-kind delete ops — records stay in the in-memory
+   * arrays + IDB across undo cycles.
+   */
+  | {
+      kind: 'delete-many'
+      imageIds: string[]
+      textIds: string[]
+      shapeIds: string[]
+      strokeIds: string[]
+    }
+  /**
+   * Composite multi-object create: one op for a whole pasted bundle
+   * (strokes + texts + shapes), so one Cmd+Z removes the whole paste.
+   * Mirrors the per-kind create ops' convention: by the time the op is
+   * pushed every object is already in its in-memory array with
+   * deleted=false and persisted. Apply (= redo) flips deleted→false;
+   * unapply (= undo) flips deleted→true. Images are deliberately absent —
+   * the whiteboard-native clipboard bundle never carries images
+   * (selections containing images degrade to PNG-only copy, see
+   * selectionclipboard.ts), and the separate image-paste flow has its
+   * own `paste-image` op.
+   */
+  | { kind: 'create-many'; strokeIds: string[]; textIds: string[]; shapeIds: string[] }
   | { kind: 'move'; strokeIds: string[]; dx: number; dy: number }
   | { kind: 'eraseStamps'; edits: StampEdit[] }
   /**
@@ -291,6 +317,12 @@ export function applyOp(op: Op, ctx: OpContext): void {
       for (const id of op.imageIds) flipImageDeleted(ctx, id, true)
       for (const id of op.textIds) flipTextDeleted(ctx, id, true)
       for (const id of op.shapeIds) flipShapeDeleted(ctx, id, true)
+      flipStrokesDeleted(ctx, op.strokeIds, true)
+      break
+    case 'create-many':
+      flipStrokesDeleted(ctx, op.strokeIds, false)
+      for (const id of op.textIds) flipTextDeleted(ctx, id, false)
+      for (const id of op.shapeIds) flipShapeDeleted(ctx, id, false)
       break
     case 'move':
       translateStrokes(ctx, op.strokeIds, op.dx, op.dy)
@@ -360,6 +392,12 @@ export function unapplyOp(op: Op, ctx: OpContext): void {
       for (const id of op.imageIds) flipImageDeleted(ctx, id, false)
       for (const id of op.textIds) flipTextDeleted(ctx, id, false)
       for (const id of op.shapeIds) flipShapeDeleted(ctx, id, false)
+      flipStrokesDeleted(ctx, op.strokeIds, false)
+      break
+    case 'create-many':
+      flipStrokesDeleted(ctx, op.strokeIds, true)
+      for (const id of op.textIds) flipTextDeleted(ctx, id, true)
+      for (const id of op.shapeIds) flipShapeDeleted(ctx, id, true)
       break
     case 'move':
       translateStrokes(ctx, op.strokeIds, -op.dx, -op.dy)

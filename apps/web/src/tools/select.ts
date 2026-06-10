@@ -30,7 +30,7 @@
  *   - **Esc** → clears selection, AND aborts any in-flight marquee
  *     (the latter detected via `hasPendingMarquee()`).
  *   - Delete / Backspace → soft-deletes every selected object across
- *     kinds with one op per item.
+ *     kinds via one composite `delete-many` op (single undo step).
  *
  * Pen / Eraser treat all objects as inert — no hit-test, no
  * handles. Selection state is held inside the tool and discarded on
@@ -337,9 +337,10 @@ export interface SelectTool extends Tool {
    *  when there are already selected objects, leaving a candidate
    *  marquee to commit on the next pointer-up. */
   hasPendingMarquee(): boolean
-  /** Soft-delete every selected object and emit the matching per-kind
-   *  delete op for each. Returns true if anything was deleted. Single
-   *  and multi cases share the same path. */
+  /** Soft-delete every selected object via ONE composite `delete-many`
+   *  op, so the whole group restores in a single undo step. Returns
+   *  true if anything was deleted. Single and multi cases share the
+   *  same path. */
   deleteSelected(): boolean
   /** Adjust the SELECTED text's font size by `delta` board pixels.
    *  No-op when no single text is selected (multi-selection or non-
@@ -2435,51 +2436,46 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       // move op silently drops. Matches the pattern selectAll /
       // selectByIds / clearSelection already use.
       commitDrag(null)
-      // Multi-aware: drain every selected item, emitting the matching
-      // per-kind delete op for each. Single-selection takes the same
-      // path with N=1 — the loop replaces the earlier three-way switch
-      // without changing single-object semantics.
+      // Accumulate live ids per kind and emit ONE composite `delete-many`
+      // op for the whole selection — one Cmd+Z restores the group
+      // (mirrors `commitMultiDrag`'s single `transform-many`). Single-
+      // selection takes the same path with N=1. The mutation surface
+      // stays `applyOp(op); pushOp(op)` (canonical pattern shared with
+      // `erasercallbacks.ts`); per-object persistence fires inside
+      // applyOp via the per-kind save callbacks, exactly as the earlier
+      // per-kind ops did.
       //
-      // Guard against double-delete: if an object was already removed
-      // (e.g. a delete-key racing some external state change, or future
-      // sync state), skip it without firing a redundant op that would
-      // corrupt the undo sequence.
-      let didDelete = false
+      // Guards: already-deleted / missing objects are skipped (a delete
+      // key racing external state must not flip them back on undo), and
+      // `seen` drops duplicate selection entries so each object's save
+      // callback fires at most once.
+      const imageIds: string[] = []
+      const textIds: string[] = []
+      const shapeIds: string[] = []
+      const strokeIds: string[] = []
+      const seen = new Set<string>()
       for (const sel of selected) {
-        // Route every delete through `applyOp` so the mutation surface is
-        // single (same pattern as `erasercallbacks.ts`). The four branches
-        // differ only in op kind + which array they read for the
-        // already-deleted guard; the mutation + persistence is handled
-        // by `flipDeletedOn` inside applyOp.
+        if (seen.has(sel.id)) continue
+        seen.add(sel.id)
         if (sel.kind === 'image') {
           const img = deps.getImages().find((i) => i.id === sel.id)
-          if (!img || img.deleted) continue
-          const op: Op = { kind: 'delete-image', imageId: sel.id }
-          deps.applyOp(op)
-          deps.pushOp(op)
-          didDelete = true
+          if (img && !img.deleted) imageIds.push(sel.id)
         } else if (sel.kind === 'text') {
           const t = deps.getTexts().find((x) => x.id === sel.id)
-          if (!t || t.deleted) continue
-          const op: Op = { kind: 'delete-text', textId: sel.id }
-          deps.applyOp(op)
-          deps.pushOp(op)
-          didDelete = true
+          if (t && !t.deleted) textIds.push(sel.id)
         } else if (sel.kind === 'shape') {
           const sh = deps.getShapes().find((x) => x.id === sel.id)
-          if (!sh || sh.deleted) continue
-          const op: Op = { kind: 'delete-shape', shapeId: sel.id }
-          deps.applyOp(op)
-          deps.pushOp(op)
-          didDelete = true
+          if (sh && !sh.deleted) shapeIds.push(sel.id)
         } else {
           const s = deps.getStrokes().find((x) => x.id === sel.id)
-          if (!s || s.deleted) continue
-          const op: Op = { kind: 'delete', strokeIds: [sel.id] }
-          deps.applyOp(op)
-          deps.pushOp(op)
-          didDelete = true
+          if (s && !s.deleted) strokeIds.push(sel.id)
         }
+      }
+      const didDelete = imageIds.length + textIds.length + shapeIds.length + strokeIds.length > 0
+      if (didDelete) {
+        const op: Op = { kind: 'delete-many', imageIds, textIds, shapeIds, strokeIds }
+        deps.applyOp(op)
+        deps.pushOp(op)
       }
       setSelection([])
       deps.markCommittedDirty()

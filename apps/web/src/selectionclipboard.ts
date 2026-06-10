@@ -30,8 +30,9 @@
  *   - Texts: fresh `t_` id, transform translated, z reassigned via
  *     `nextTextZ()` so stack order is stable; font deep-copied so
  *     subsequent edits don't mutate the bundle source.
- *   - One create / create-text op per item (N-undo-step convention
- *     matches v1.1 image batch + Cmd+A multi-delete).
+ *   - One composite `create-many` op for the whole bundle, so a paste
+ *     of N objects undoes in a single step (mirrors `delete-many` for
+ *     group delete and `transform-many` for group move).
  *   - Auto-switches to Select tool and pre-selects pasted items via
  *     `selectByIds` so the user can drag the whole group immediately.
  */
@@ -296,10 +297,11 @@ export async function performSelectCopy(ctx: SelectionClipboardContext): Promise
   return writePngBlobToClipboard(pngBlob, ctx.showInfoToast)
 }
 
-/** Paste a whiteboard-native bundle at the cursor. Strokes and texts
- *  get fresh ids, positions translated by (cursor - origin) preserving
- *  relative layout; one create / create-text op per item; auto-
- *  switches to Select and pre-selects the pasted group. */
+/** Paste a whiteboard-native bundle at the cursor. Strokes / texts /
+ *  shapes get fresh ids, positions translated by (cursor - origin)
+ *  preserving relative layout; one composite `create-many` op for the
+ *  whole bundle (single undo step); auto-switches to Select and
+ *  pre-selects the pasted group. */
 export function pasteSelectionBundle(
   bundle: ClipboardStrokeBundle,
   board: { x: number; y: number },
@@ -312,6 +314,13 @@ export function pasteSelectionBundle(
   const dy = board.y - bundle.origin.y
   const now = Date.now()
   const newSelection: Selection[] = []
+  // Per-kind id accumulators for the single composite `create-many` op
+  // pushed after all objects are inserted + persisted (the op stores ids
+  // only — soft-delete flips on undo/redo, the objects stay in memory +
+  // IDB, matching the per-kind create ops' convention).
+  const strokeIds: string[] = []
+  const textIds: string[] = []
+  const shapeIds: string[] = []
 
   for (let i = 0; i < bundle.strokes.length; i++) {
     const src = bundle.strokes[i]
@@ -331,7 +340,7 @@ export function pasteSelectionBundle(
     void ctx.saveStroke(pasted).catch((err) => {
       console.warn('whiteboard/web: failed to persist pasted stroke:', err)
     })
-    ctx.pushOp({ kind: 'create', strokeId: id })
+    strokeIds.push(id)
     newSelection.push({ kind: 'stroke', id })
   }
 
@@ -355,7 +364,7 @@ export function pasteSelectionBundle(
     }
     ctx.texts.push(pasted)
     ctx.saveText(pasted)
-    ctx.pushOp({ kind: 'create-text', textId: id })
+    textIds.push(id)
     newSelection.push({ kind: 'text', id })
   }
 
@@ -376,8 +385,15 @@ export function pasteSelectionBundle(
     }
     ctx.shapes.push(pasted)
     ctx.saveShape(pasted)
-    ctx.pushOp({ kind: 'create-shape', shapeId: id })
+    shapeIds.push(id)
     newSelection.push({ kind: 'shape', id })
+  }
+
+  // One composite op for the whole paste — a single Cmd+Z removes the
+  // entire pasted group. Push-only (no applyOp): every object above is
+  // already live + persisted, same as the per-kind create ops.
+  if (strokeIds.length + textIds.length + shapeIds.length > 0) {
+    ctx.pushOp({ kind: 'create-many', strokeIds, textIds, shapeIds })
   }
 
   ctx.markCommittedDirty()

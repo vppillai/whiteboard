@@ -75,10 +75,10 @@ describe('erasercallbacks: op dispatch', () => {
 
     cbs.onWholeObjectErase({ shapes: ['sh1'], texts: ['t1'], images: ['i1'] })
     expect(applied).toEqual([
-      { kind: 'delete-many', shapeIds: ['sh1'], textIds: ['t1'], imageIds: ['i1'] },
+      { kind: 'delete-many', shapeIds: ['sh1'], textIds: ['t1'], imageIds: ['i1'], strokeIds: [] },
     ])
     expect(pushed).toEqual([
-      { kind: 'delete-many', shapeIds: ['sh1'], textIds: ['t1'], imageIds: ['i1'] },
+      { kind: 'delete-many', shapeIds: ['sh1'], textIds: ['t1'], imageIds: ['i1'], strokeIds: [] },
     ])
   })
 })
