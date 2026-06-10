@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test'
-import type { ShapeObject, TextObject } from '@whiteboard/shared'
-import { _selectionOrigin, _shouldUseSingleImageFastPath } from './selectionclipboard'
+import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
+import type { ClipboardStrokeBundle } from './clipboardstrokes'
+import type { Op } from './ops'
+import {
+  _selectionOrigin,
+  _shouldUseSingleImageFastPath,
+  pasteSelectionBundle,
+  type SelectionClipboardContext,
+} from './selectionclipboard'
 
 function makeText(over: Partial<TextObject>): TextObject {
   return {
@@ -27,7 +34,6 @@ function makeShape(over: Partial<ShapeObject>): ShapeObject {
     ...over,
   }
 }
-
 describe('selectionclipboard: single-image fast path gating', () => {
   test('true for single-image-only selection', () => {
     expect(
@@ -100,5 +106,111 @@ describe('selectionclipboard: paste-anchor origin (_selectionOrigin)', () => {
 
   test('empty selection falls back to {0,0}', () => {
     expect(_selectionOrigin([], [], [])).toEqual({ x: 0, y: 0 })
+  })
+})
+
+describe('selectionclipboard: paste pushes one composite op', () => {
+  function mkStroke(id: string): Stroke {
+    return {
+      id,
+      brush: {
+        color: 'ink',
+        size: 2,
+        thinning: 0,
+        smoothing: 0.5,
+        streamline: 0.5,
+        taperStart: 0,
+        taperEnd: 0,
+        capStart: true,
+        capEnd: true,
+        pressureGamma: 1,
+      },
+      samples: [{ x: 0, y: 0, p: 0.5, t: 0 }],
+      startedAt: 0,
+    }
+  }
+
+  function mkPasteCtx() {
+    const strokes: Stroke[] = []
+    const texts: TextObject[] = []
+    const shapes: ShapeObject[] = []
+    const images: ImageObject[] = []
+    const pushed: Op[] = []
+    let z = 0
+    const ctx: SelectionClipboardContext = {
+      getStrokes: () => strokes,
+      getImages: () => images,
+      getTexts: () => texts,
+      getShapes: () => shapes,
+      getSelections: () => [],
+      getSelectedImage: () => null,
+      getSettings: () => ({}) as never,
+      loadImageBlob: () => Promise.resolve(null),
+      strokes,
+      texts,
+      shapes,
+      saveStroke: () => Promise.resolve(),
+      saveText: () => {},
+      saveShape: () => {},
+      pushOp: (op) => pushed.push(op),
+      nextTextZ: () => ++z,
+      nextShapeZ: () => ++z,
+      showInfoToast: () => {},
+      setToolSelect: () => {},
+      selectByIds: () => {},
+      clearSelection: () => {},
+      markCommittedDirty: () => {},
+    }
+    return { ctx, pushed, strokes, texts, shapes }
+  }
+
+  test('multi-object bundle paste pushes exactly one create-many op', () => {
+    const h = mkPasteCtx()
+    const srcText: TextObject = {
+      id: 'src-t',
+      content: 'hi',
+      font: { family: 'mono', size: 12, bold: false, italic: false, underline: false },
+      color: 'ink',
+      wrapWidth: undefined,
+      transform: { x: 5, y: 5, w: 40, h: 16 },
+      z: 1,
+      createdAt: 0,
+    }
+    const srcShape: ShapeObject = {
+      id: 'src-sh',
+      shape: 'rect',
+      color: 'ink',
+      strokeWidth: 2,
+      transform: { x: 10, y: 10, w: 50, h: 40 },
+      z: 2,
+      createdAt: 0,
+    }
+    const bundle: ClipboardStrokeBundle = {
+      v: 1,
+      strokes: [mkStroke('src-s1'), mkStroke('src-s2')],
+      texts: [srcText],
+      shapes: [srcShape],
+      origin: { x: 0, y: 0 },
+    }
+    pasteSelectionBundle(bundle, { x: 100, y: 100 }, h.ctx)
+
+    expect(h.pushed).toHaveLength(1)
+    const op = h.pushed[0]
+    expect(op?.kind).toBe('create-many')
+    if (op?.kind !== 'create-many') return
+    expect(op.strokeIds).toHaveLength(2)
+    expect(op.textIds).toHaveLength(1)
+    expect(op.shapeIds).toHaveLength(1)
+    // The op's ids reference the freshly-inserted (live) objects.
+    expect(h.strokes.map((s) => s.id)).toEqual(op.strokeIds)
+    expect(h.texts.map((t) => t.id)).toEqual(op.textIds)
+    expect(h.shapes.map((s) => s.id)).toEqual(op.shapeIds)
+  })
+
+  test('empty bundle pushes nothing', () => {
+    const h = mkPasteCtx()
+    const bundle: ClipboardStrokeBundle = { v: 1, strokes: [], origin: { x: 0, y: 0 } }
+    pasteSelectionBundle(bundle, { x: 100, y: 100 }, h.ctx)
+    expect(h.pushed).toHaveLength(0)
   })
 })

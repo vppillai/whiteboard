@@ -619,6 +619,7 @@ describe('ops: delete-many composite op', () => {
       imageIds: ['img-1'],
       textIds: ['txt-1'],
       shapeIds: ['sh-1'],
+      strokeIds: [],
     }
     applyOp(op, ctx)
     expect(ctx.images[0]?.deleted).toBe(true)
@@ -628,6 +629,84 @@ describe('ops: delete-many composite op', () => {
     expect(ctx.images[0]?.deleted).toBeUndefined()
     expect(ctx.texts[0]?.deleted).toBeUndefined()
     expect(ctx.shapes[0]?.deleted).toBeUndefined()
+  })
+
+  test('mixed kinds including strokes: apply deletes all, unapply restores all, round-trip idempotent', () => {
+    const stroke: Stroke = {
+      id: 'st-1',
+      brush: {
+        color: 'ink',
+        size: 2,
+        thinning: 0,
+        smoothing: 0.5,
+        streamline: 0.5,
+        taperStart: 0,
+        taperEnd: 0,
+        capStart: true,
+        capEnd: true,
+        pressureGamma: 1,
+      },
+      samples: [{ x: 0, y: 0, p: 0.5, t: 0 }],
+      startedAt: 0,
+    }
+    const image: ImageObject = {
+      id: 'img-1',
+      blobRef: 'blob:img-1',
+      format: 'png',
+      natural: { w: 100, h: 100 },
+      transform: { x: 0, y: 0, w: 100, h: 100 },
+      z: 1,
+      createdAt: 0,
+    }
+    const text: TextObject = {
+      id: 'txt-1',
+      content: 'hello',
+      font: { family: 'mono', size: 12, bold: false, italic: false, underline: false },
+      color: 'ink',
+      wrapWidth: undefined,
+      transform: { x: 20, y: 20, w: 40, h: 16 },
+      z: 2,
+      createdAt: 0,
+    }
+    const shape: ShapeObject = {
+      id: 'sh-1',
+      shape: 'rect',
+      color: 'ink',
+      strokeWidth: 2,
+      transform: { x: 30, y: 30, w: 50, h: 40 },
+      z: 3,
+      createdAt: 0,
+    }
+    const ctx: OpContext = {
+      strokes: [stroke],
+      saveStroke: () => {},
+      images: [image],
+      saveImageMeta: () => {},
+      texts: [text],
+      saveText: () => {},
+      shapes: [shape],
+      saveShape: () => {},
+      markDirty: () => {},
+    }
+    const op: Op = {
+      kind: 'delete-many',
+      imageIds: ['img-1'],
+      textIds: ['txt-1'],
+      shapeIds: ['sh-1'],
+      strokeIds: ['st-1'],
+    }
+    for (let i = 0; i < 3; i++) {
+      applyOp(op, ctx)
+      expect(ctx.strokes[0]?.deleted).toBe(true)
+      expect(ctx.images[0]?.deleted).toBe(true)
+      expect(ctx.texts[0]?.deleted).toBe(true)
+      expect(ctx.shapes[0]?.deleted).toBe(true)
+      unapplyOp(op, ctx)
+      expect(ctx.strokes[0]?.deleted).toBeUndefined()
+      expect(ctx.images[0]?.deleted).toBeUndefined()
+      expect(ctx.texts[0]?.deleted).toBeUndefined()
+      expect(ctx.shapes[0]?.deleted).toBeUndefined()
+    }
   })
 
   test('safe no-op for unknown ids', () => {
@@ -647,11 +726,103 @@ describe('ops: delete-many composite op', () => {
       imageIds: ['missing-image'],
       textIds: ['missing-text'],
       shapeIds: ['missing-shape'],
+      strokeIds: ['missing-stroke'],
     }
     applyOp(op, ctx)
     unapplyOp(op, ctx)
     expect(ctx.images).toHaveLength(0)
     expect(ctx.texts).toHaveLength(0)
     expect(ctx.shapes).toHaveLength(0)
+    expect(ctx.strokes).toHaveLength(0)
+  })
+})
+
+describe('ops: create-many composite op', () => {
+  function mkCreateManyCtx(): OpContext {
+    const stroke: Stroke = {
+      id: 'st-1',
+      brush: {
+        color: 'ink',
+        size: 2,
+        thinning: 0,
+        smoothing: 0.5,
+        streamline: 0.5,
+        taperStart: 0,
+        taperEnd: 0,
+        capStart: true,
+        capEnd: true,
+        pressureGamma: 1,
+      },
+      samples: [{ x: 0, y: 0, p: 0.5, t: 0 }],
+      startedAt: 0,
+    }
+    const text: TextObject = {
+      id: 'txt-1',
+      content: 'hello',
+      font: { family: 'mono', size: 12, bold: false, italic: false, underline: false },
+      color: 'ink',
+      wrapWidth: undefined,
+      transform: { x: 20, y: 20, w: 40, h: 16 },
+      z: 1,
+      createdAt: 0,
+    }
+    const shape: ShapeObject = {
+      id: 'sh-1',
+      shape: 'rect',
+      color: 'ink',
+      strokeWidth: 2,
+      transform: { x: 30, y: 30, w: 50, h: 40 },
+      z: 2,
+      createdAt: 0,
+    }
+    return {
+      strokes: [stroke],
+      saveStroke: () => {},
+      images: [],
+      saveImageMeta: () => {},
+      texts: [text],
+      saveText: () => {},
+      shapes: [shape],
+      saveShape: () => {},
+      markDirty: () => {},
+    }
+  }
+
+  test('unapply (undo) soft-deletes the pasted group; apply (redo) restores it; round-trip idempotent', () => {
+    // Paste-time state: every object is live in the arrays before the op
+    // is pushed — the op only flips the deleted flag, mirroring the
+    // per-kind create ops.
+    const ctx = mkCreateManyCtx()
+    const op: Op = {
+      kind: 'create-many',
+      strokeIds: ['st-1'],
+      textIds: ['txt-1'],
+      shapeIds: ['sh-1'],
+    }
+    for (let i = 0; i < 3; i++) {
+      unapplyOp(op, ctx)
+      expect(ctx.strokes[0]?.deleted).toBe(true)
+      expect(ctx.texts[0]?.deleted).toBe(true)
+      expect(ctx.shapes[0]?.deleted).toBe(true)
+      applyOp(op, ctx)
+      expect(ctx.strokes[0]?.deleted).toBeUndefined()
+      expect(ctx.texts[0]?.deleted).toBeUndefined()
+      expect(ctx.shapes[0]?.deleted).toBeUndefined()
+    }
+  })
+
+  test('safe no-op for unknown ids', () => {
+    const ctx = mkCreateManyCtx()
+    const op: Op = {
+      kind: 'create-many',
+      strokeIds: ['missing-stroke'],
+      textIds: ['missing-text'],
+      shapeIds: ['missing-shape'],
+    }
+    unapplyOp(op, ctx)
+    applyOp(op, ctx)
+    expect(ctx.strokes[0]?.deleted).toBeUndefined()
+    expect(ctx.texts[0]?.deleted).toBeUndefined()
+    expect(ctx.shapes[0]?.deleted).toBeUndefined()
   })
 })
