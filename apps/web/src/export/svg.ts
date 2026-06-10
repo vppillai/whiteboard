@@ -165,7 +165,11 @@ export function exportSVG(
     })
     if (outline.length === 0) continue
     const d = outlineToPath(outline)
-    const fill = resolveInkColor(s.brush.color)
+    // escapeAttr guards against attribute breakout if a hostile color
+    // string ever reaches the store (e.g. via a crafted clipboard bundle).
+    // Identity for legitimate values ('ink' resolves to a hex/CSS color
+    // with no `&`, `"` or `<`). Mirrors the text / shape paths below.
+    const fill = escapeAttr(resolveInkColor(s.brush.color))
     const opacity = s.brush.opacity ?? 1
     const isHighlighter = opacity < 0.6 && s.brush.thinning === 0
     const styleAttr = isHighlighter ? ' style="mix-blend-mode:multiply"' : ''

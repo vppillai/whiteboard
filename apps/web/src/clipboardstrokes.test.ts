@@ -232,3 +232,103 @@ describe('clipboardstrokes: round-trip', () => {
     expect(extractStrokesFromHtml(html)).toBeNull()
   })
 })
+
+describe('clipboardstrokes: color-token validation (H1)', () => {
+  // Hostile colors are SVG-attribute-breakout payloads: if they persisted
+  // they'd flow to every future sink (SVG export fill="..."). The boundary
+  // validator rejects the whole bundle, matching the per-item → whole-bundle
+  // rejection semantics of the structural validators above.
+  const HOSTILE = 'red"/><script>alert(1)</script><path d="'
+
+  function htmlFor(bundle: unknown): string {
+    const json = JSON.stringify(bundle)
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+    return `<div data-whiteboard-v1="${json}"></div>`
+  }
+
+  function mkShapeObj(extra: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      id: 'sh1',
+      shape: 'rect',
+      transform: { x: 0, y: 0, w: 10, h: 10 },
+      color: 'ink',
+      strokeWidth: 2,
+      z: 1,
+      createdAt: 0,
+      ...extra,
+    }
+  }
+
+  test('hostile brush.color rejects the whole bundle', () => {
+    const s = mkStroke('a', [{ x: 0, y: 0 }])
+    s.brush.color = HOSTILE
+    const html = htmlFor({ v: 1, strokes: [s], origin: { x: 0, y: 0 } })
+    expect(extractStrokesFromHtml(html)).toBeNull()
+  })
+
+  test('hostile text color rejects the whole bundle', () => {
+    const t = mkText('t1', 'hello')
+    t.color = HOSTILE
+    const html = htmlFor({ v: 1, strokes: [], texts: [t], origin: { x: 0, y: 0 } })
+    expect(extractStrokesFromHtml(html)).toBeNull()
+  })
+
+  test('hostile shape color / fill rejects the whole bundle', () => {
+    const badColor = htmlFor({
+      v: 1,
+      strokes: [],
+      shapes: [mkShapeObj({ color: HOSTILE })],
+      origin: { x: 0, y: 0 },
+    })
+    expect(extractStrokesFromHtml(badColor)).toBeNull()
+    const badFill = htmlFor({
+      v: 1,
+      strokes: [],
+      shapes: [mkShapeObj({ fill: HOSTILE })],
+      origin: { x: 0, y: 0 },
+    })
+    expect(extractStrokesFromHtml(badFill)).toBeNull()
+  })
+
+  test('non-string brush.color rejects the whole bundle', () => {
+    const s = mkStroke('a', [{ x: 0, y: 0 }]) as unknown as { brush: { color: unknown } }
+    s.brush.color = 42
+    const html = htmlFor({ v: 1, strokes: [s], origin: { x: 0, y: 0 } })
+    expect(extractStrokesFromHtml(html)).toBeNull()
+  })
+
+  test("legit colors are accepted: 'ink' and the CSS hex family", () => {
+    for (const color of ['ink', '#abc', '#abcd', '#aabbcc', '#aabbccdd', '#EF4444']) {
+      const s = mkStroke('a', [{ x: 0, y: 0 }])
+      s.brush.color = color
+      const html = htmlFor({ v: 1, strokes: [s], origin: { x: 0, y: 0 } })
+      expect(extractStrokesFromHtml(html)).not.toBeNull()
+    }
+  })
+
+  test("shape fill: absent and the literal 'none' are accepted", () => {
+    const absent = htmlFor({
+      v: 1,
+      strokes: [],
+      shapes: [mkShapeObj()],
+      origin: { x: 0, y: 0 },
+    })
+    expect(extractStrokesFromHtml(absent)).not.toBeNull()
+    const none = htmlFor({
+      v: 1,
+      strokes: [],
+      shapes: [mkShapeObj({ fill: 'none' })],
+      origin: { x: 0, y: 0 },
+    })
+    expect(extractStrokesFromHtml(none)).not.toBeNull()
+    const hex = htmlFor({
+      v: 1,
+      strokes: [],
+      shapes: [mkShapeObj({ fill: '#22c55e' })],
+      origin: { x: 0, y: 0 },
+    })
+    expect(extractStrokesFromHtml(hex)).not.toBeNull()
+  })
+})
