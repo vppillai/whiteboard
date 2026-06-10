@@ -6,6 +6,10 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 ## [Unreleased]
 
+No entries yet.
+
+## [1.4.6] — 2026-06-10
+
 **Bug-fix pass — eleven verified defects from a six-dimension implementation review.** A comprehensive review (architecture, drawing pipeline, tools, state/persistence, security, UI shell) surfaced a set of real bugs; each fix below landed with a regression test where the unit harness can reach it, and the combined diff passed an adversarial cross-fix review before merging.
 
 ### Fixed
