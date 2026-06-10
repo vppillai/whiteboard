@@ -26,6 +26,7 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 ### Tests
 
+- **Playwright e2e smoke suite.** A completeness audit found that most interactive `apps/web` modules are structurally unreachable by the bun unit tests (no DOM, canvas, or pointer events). A new `apps/e2e` workspace closes that gap with a minimal chromium smoke suite that drives the **production build through the real Bun static server** (same binary and CSP headers as deploys): boot with zero console errors, pen-stroke draw, undo/redo, eraser, select-tool drag-move, Ctrl+E PNG export (asserted via the download event), and IndexedDB reload persistence. The app intentionally exposes no test hooks, so stroke assertions snapshot the committed canvas layer and count changed pixels, polling on app signals instead of sleeping. Spec files are named `*.e2e.ts` because `bun test` auto-globs both `*.test.ts` and `*.spec.ts` — the unit and e2e suites stay fully separate (`bun test` vs `bun run test:e2e`). CI gains an `e2e` job (SHA-pinned actions, cached Playwright browsers). This is the safety net gating the upcoming `tools/select.ts` refactor.
 - +8 unit tests (**274** total): side-panel focus-on-open, `delete-many` mixed-kind round-trip including strokes, `create-many` undo/redo round-trip + unknown-id safety, Select-tool seam test (one op pushed for a mixed 5-object delete; no op when nothing live), paste seam test (one `create-many` for a multi-object bundle; nothing for an empty bundle).
 
 ## [1.4.6] — 2026-06-10
