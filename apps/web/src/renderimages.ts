@@ -19,18 +19,11 @@
 
 import type { ImageObject } from '@whiteboard/shared'
 import type { Camera } from './camera'
+import { ROTATION_EPSILON, type ViewBBox } from './geom'
 import { getImageElement } from './imagecache'
 import { imageAABB } from './imagegeom'
 import type { CanvasLayer } from './render'
-
-/** Axis-aligned viewport bbox in board coordinates. Matches the inline
- *  shape used by the main render loop so callers don't need a helper. */
-export interface ViewBBox {
-  minX: number
-  minY: number
-  maxX: number
-  maxY: number
-}
+import { drawMultiSelectionOutline } from './selectionoutline'
 
 export interface RenderImagesParams {
   /** All images (deleted ones are filtered here). Caller-owned order;
@@ -49,18 +42,6 @@ export interface RenderImagesParams {
    *  decorate each image with a dashed accent outline. */
   isMultiSelected: (id: string) => boolean
 }
-
-/**
- * Treat near-zero rotation as exact zero so float drift (rotate-to-zero
- * overshoot, `-0`, accumulated 1e-15) doesn't drop us into the slower
- * save/translate/rotate path for no visible difference. Mirrors the
- * imagegeom.ts ROTATION_EPSILON; kept local rather than imported to
- * avoid a cross-module dependency on a constant that may diverge if
- * the render fast-path tolerance ever differs from the geometry one.
- */
-const ROTATION_EPSILON = 1e-9
-
-const MULTI_SELECTION_OUTLINE_COLOR = '#2563eb'
 
 export function renderImages(params: RenderImagesParams): void {
   const { images, layer, camera, viewBBox, isMultiSelected } = params
@@ -90,24 +71,4 @@ export function renderImages(params: RenderImagesParams): void {
       ctx.restore()
     }
   }
-}
-
-/** Thin dashed outline drawn around an image that's part of a Select-
- *  tool multi-selection. Stroke width and dash pattern divide by
- *  camera.scale so the outline reads as ~2px thick at any zoom level
- *  — matches the way the Select tool draws its handles. */
-function drawMultiSelectionOutline(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  scale: number,
-): void {
-  ctx.save()
-  ctx.strokeStyle = MULTI_SELECTION_OUTLINE_COLOR
-  ctx.lineWidth = 2 / scale
-  ctx.setLineDash([6 / scale, 4 / scale])
-  ctx.strokeRect(x, y, w, h)
-  ctx.restore()
 }
