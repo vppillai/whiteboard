@@ -24,15 +24,10 @@
 
 import type { TextObject } from '@whiteboard/shared'
 import type { Camera } from './camera'
+import { ROTATION_EPSILON, type ViewBBox } from './geom'
 import type { CanvasLayer } from './render'
+import { drawMultiSelectionOutline } from './selectionoutline'
 import { fontCss, getTextMeasurement, TEXT_PADDING_X, TEXT_PADDING_Y, textAABB } from './textgeom'
-
-export interface ViewBBox {
-  minX: number
-  minY: number
-  maxX: number
-  maxY: number
-}
 
 export interface RenderTextsParams {
   texts: readonly TextObject[]
@@ -51,9 +46,6 @@ export interface RenderTextsParams {
   isMultiSelected: (id: string) => boolean
 }
 
-const MULTI_SELECTION_OUTLINE_COLOR = '#2563eb'
-const ROTATION_EPSILON = 1e-9
-
 export function renderTexts(params: RenderTextsParams): void {
   const { texts, layer, camera, viewBBox, resolveColor, editingId, isMultiSelected } = params
   const ctx = layer.ctx
@@ -67,7 +59,7 @@ export function renderTexts(params: RenderTextsParams): void {
     const r = t.rotation ?? 0
     if (Math.abs(r) < ROTATION_EPSILON) {
       drawText(ctx, t, resolveColor)
-      if (isMultiSelected(t.id)) drawMultiSelectionOutline(ctx, t, camera.scale)
+      if (isMultiSelected(t.id)) drawTextMultiSelectionOutline(ctx, t, camera.scale)
     } else {
       ctx.save()
       const cx = t.transform.x + t.transform.w / 2
@@ -86,7 +78,7 @@ export function renderTexts(params: RenderTextsParams): void {
         },
       }
       drawText(ctx, local, resolveColor)
-      if (isMultiSelected(t.id)) drawMultiSelectionOutline(ctx, local, camera.scale)
+      if (isMultiSelected(t.id)) drawTextMultiSelectionOutline(ctx, local, camera.scale)
       ctx.restore()
     }
   }
@@ -131,16 +123,11 @@ function drawText(
   ctx.restore()
 }
 
-function drawMultiSelectionOutline(
+function drawTextMultiSelectionOutline(
   ctx: CanvasRenderingContext2D,
   t: TextObject,
   scale: number,
 ): void {
   const { x, y, w, h } = t.transform
-  ctx.save()
-  ctx.strokeStyle = MULTI_SELECTION_OUTLINE_COLOR
-  ctx.lineWidth = 2 / scale
-  ctx.setLineDash([6 / scale, 4 / scale])
-  ctx.strokeRect(x, y, w, h)
-  ctx.restore()
+  drawMultiSelectionOutline(ctx, x, y, w, h, scale)
 }

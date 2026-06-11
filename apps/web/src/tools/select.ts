@@ -77,7 +77,8 @@ import type {
   TextFontFamily,
   TextObject,
 } from '@whiteboard/shared'
-import { imageAABB, imageCenter, pointInImage, rotateAroundPoint } from '../imagegeom'
+import { rotateAroundPoint } from '../geom'
+import { imageAABB, imageCenter, pointInImage } from '../imagegeom'
 import { buildFillOpacitySlider } from '../menu-fillopacity'
 import { iconFillOutline, iconFillSolid, iconStrokeWidth } from '../menu-icons'
 import { pill, pillRow, sectionLabel, separator } from '../menu-ui'

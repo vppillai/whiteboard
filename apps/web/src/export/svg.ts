@@ -15,19 +15,16 @@
 import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import { getStroke } from 'perfect-freehand'
 import { imageAABB, imageCenter } from '../imagegeom'
-import { shapeAABB } from '../rendershapes'
+import {
+  ARROW_HEAD_ANGLE,
+  ARROW_HEAD_LENGTH_PER_STROKE,
+  DEFAULT_FILL_ALPHA as SHAPE_DEFAULT_FILL_ALPHA,
+  shapeAABB,
+} from '../rendershapes'
 import type { GridType, SettingsV1 } from '../settings'
 import { FONT_CSS, measureText, TEXT_PADDING_X, TEXT_PADDING_Y, textAABB } from '../textgeom'
 import { resolveInkColor } from '../theme'
 import type { Bounds } from './bounds'
-
-/** Default fill alpha — matches DEFAULT_FILL_ALPHA in rendershapes.ts.
- *  Used when a shape doesn't carry its own `fillOpacity`. Per-shape
- *  opacity is honored below. */
-const SHAPE_DEFAULT_FILL_ALPHA = 0.25
-/** Arrow head sizing — same constants as rendershapes.ts. */
-const ARROW_HEAD_LENGTH_PER_STROKE = 4
-const ARROW_HEAD_ANGLE = Math.PI / 6
 
 /** Image bytes pre-encoded as a data URI, keyed by image id. The caller
  *  prepares this so the serializer stays pure-string-out (no DOM/IO). */

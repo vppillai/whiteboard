@@ -24,14 +24,9 @@
 
 import type { ShapeObject } from '@whiteboard/shared'
 import type { Camera } from './camera'
+import { ROTATION_EPSILON, rotateAroundPoint, rotatedRectAABB, type ViewBBox } from './geom'
 import type { CanvasLayer } from './render'
-
-export interface ViewBBox {
-  minX: number
-  minY: number
-  maxX: number
-  maxY: number
-}
+import { drawMultiSelectionOutline } from './selectionoutline'
 
 export interface RenderShapesParams {
   shapes: readonly ShapeObject[]
@@ -46,21 +41,21 @@ export interface RenderShapesParams {
   isMultiSelected: (id: string) => boolean
 }
 
-const MULTI_SELECTION_OUTLINE_COLOR = '#2563eb'
-const ROTATION_EPSILON = 1e-9
 /** Arrow-head length expressed as a multiple of strokeWidth. Sized so
  *  thin lines still get visible heads but very thick lines don't drown
- *  the rest of the arrow. */
-const ARROW_HEAD_LENGTH_PER_STROKE = 4
-/** Arrow-head half-angle (radians). ~30° opening looks natural. */
-const ARROW_HEAD_ANGLE = Math.PI / 6
+ *  the rest of the arrow. Exported so the SVG export emits identical
+ *  arrow-head geometry. */
+export const ARROW_HEAD_LENGTH_PER_STROKE = 4
+/** Arrow-head half-angle (radians). ~30° opening looks natural.
+ *  Exported for the SVG export (same reason as above). */
+export const ARROW_HEAD_ANGLE = Math.PI / 6
 /** Default alpha multiplier applied to fill when a shape doesn't carry
  *  its own `fillOpacity`. Pre-v1.4-late shapes (the field is optional)
  *  fall back here so re-loads of older boards still render correctly.
  *  Per-shape `fillOpacity` was added so the user can mix soft tints
  *  and saturated fills on the same board via the Shape tool menu's
- *  slider. */
-const DEFAULT_FILL_ALPHA = 0.25
+ *  slider. Exported so the SVG export's fill-opacity fallback matches. */
+export const DEFAULT_FILL_ALPHA = 0.25
 
 export function renderShapes(params: RenderShapesParams): void {
   const { shapes, layer, camera, viewBBox, resolveColor, isMultiSelected } = params
@@ -73,7 +68,7 @@ export function renderShapes(params: RenderShapesParams): void {
     const r = s.rotation ?? 0
     if (Math.abs(r) < ROTATION_EPSILON) {
       drawShape(ctx, s, resolveColor)
-      if (isMultiSelected(s.id)) drawMultiSelectionOutline(ctx, s, camera.scale)
+      if (isMultiSelected(s.id)) drawShapeMultiSelectionOutline(ctx, s, camera.scale)
     } else {
       ctx.save()
       const cx = s.transform.x + s.transform.w / 2
@@ -90,7 +85,7 @@ export function renderShapes(params: RenderShapesParams): void {
         },
       }
       drawShape(ctx, local, resolveColor)
-      if (isMultiSelected(s.id)) drawMultiSelectionOutline(ctx, local, camera.scale)
+      if (isMultiSelected(s.id)) drawShapeMultiSelectionOutline(ctx, local, camera.scale)
       ctx.restore()
     }
   }
@@ -197,7 +192,7 @@ function drawArrow(ctx: CanvasRenderingContext2D, s: ShapeObject): void {
   ctx.stroke()
 }
 
-function drawMultiSelectionOutline(
+function drawShapeMultiSelectionOutline(
   ctx: CanvasRenderingContext2D,
   s: ShapeObject,
   scale: number,
@@ -210,12 +205,7 @@ function drawMultiSelectionOutline(
   const ny = h >= 0 ? y : y + h
   const nw = Math.abs(w)
   const nh = Math.abs(h)
-  ctx.save()
-  ctx.strokeStyle = MULTI_SELECTION_OUTLINE_COLOR
-  ctx.lineWidth = 2 / scale
-  ctx.setLineDash([6 / scale, 4 / scale])
-  ctx.strokeRect(nx, ny, nw, nh)
-  ctx.restore()
+  drawMultiSelectionOutline(ctx, nx, ny, nw, nh, scale)
 }
 
 /**
@@ -249,34 +239,10 @@ export function shapeAABB(s: ShapeObject): {
   const nw = Math.abs(w)
   const nh = Math.abs(h)
   const r = s.rotation ?? 0
-  if (Math.abs(r) < ROTATION_EPSILON) {
-    return { minX: nx - pad, minY: ny - pad, maxX: nx + nw + pad, maxY: ny + nh + pad }
-  }
-  const cx = x + w / 2
-  const cy = y + h / 2
-  const cos = Math.cos(r)
-  const sin = Math.sin(r)
-  const corners: Array<[number, number]> = [
-    [nx - pad, ny - pad],
-    [nx + nw + pad, ny - pad],
-    [nx + nw + pad, ny + nh + pad],
-    [nx - pad, ny + nh + pad],
-  ]
-  let minX = Number.POSITIVE_INFINITY
-  let minY = Number.POSITIVE_INFINITY
-  let maxX = Number.NEGATIVE_INFINITY
-  let maxY = Number.NEGATIVE_INFINITY
-  for (const [px, py] of corners) {
-    const dx = px - cx
-    const dy = py - cy
-    const rx = cx + dx * cos - dy * sin
-    const ry = cy + dx * sin + dy * cos
-    if (rx < minX) minX = rx
-    if (rx > maxX) maxX = rx
-    if (ry < minY) minY = ry
-    if (ry > maxY) maxY = ry
-  }
-  return { minX, minY, maxX, maxY }
+  // Pivot is the RAW transform center (x + w/2), not the normalized
+  // rect's — identical value mathematically, but kept as the original
+  // expression so float results match the pre-extraction math exactly.
+  return rotatedRectAABB(nx - pad, ny - pad, nx + nw + pad, ny + nh + pad, x + w / 2, y + h / 2, r)
 }
 
 /**
@@ -304,8 +270,7 @@ export function pointInShape(
   const r = s.rotation ?? 0
   const cx = s.transform.x + s.transform.w / 2
   const cy = s.transform.y + s.transform.h / 2
-  const local =
-    Math.abs(r) < ROTATION_EPSILON ? p : rotatePointAroundCenter(p, { x: cx, y: cy }, -r)
+  const local = Math.abs(r) < ROTATION_EPSILON ? p : rotateAroundPoint(p, { x: cx, y: cy }, -r)
   const { x, y, w, h } = s.transform
   const nx = w >= 0 ? x : x + w
   const ny = h >= 0 ? y : y + h
@@ -371,23 +336,4 @@ export function pointInShape(
   const ex = local.x - projX
   const ey = local.y - projY
   return ex * ex + ey * ey <= tol * tol
-}
-
-/** Rotate `p` around `center` by angle (radians). Same shape as
- *  imagegeom.rotateAroundPoint — kept local to avoid an extra
- *  cross-file dependency in this geometry helper. */
-function rotatePointAroundCenter(
-  p: { x: number; y: number },
-  center: { x: number; y: number },
-  angle: number,
-): { x: number; y: number } {
-  if (angle === 0) return p
-  const cos = Math.cos(angle)
-  const sin = Math.sin(angle)
-  const dx = p.x - center.x
-  const dy = p.y - center.y
-  return {
-    x: center.x + dx * cos - dy * sin,
-    y: center.y + dx * sin + dy * cos,
-  }
 }

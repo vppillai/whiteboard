@@ -14,6 +14,7 @@
  */
 
 import type { TextFontFamily, TextObject } from '@whiteboard/shared'
+import { rotatedRectAABB } from './geom'
 
 /**
  * CSS font-family stack for each closed-set family. The first entry is
@@ -233,35 +234,7 @@ export function textAABB(t: TextObject): {
 } {
   const r = t.rotation ?? 0
   const { x, y, w, h } = t.transform
-  if (Math.abs(r) < 1e-9) {
-    return { minX: x, minY: y, maxX: x + w, maxY: y + h }
-  }
-  // Rotated AABB via corner rotation around center.
-  const cx = x + w / 2
-  const cy = y + h / 2
-  const cos = Math.cos(r)
-  const sin = Math.sin(r)
-  const corners: { x: number; y: number }[] = [
-    { x, y },
-    { x: x + w, y },
-    { x: x + w, y: y + h },
-    { x, y: y + h },
-  ]
-  let minX = Number.POSITIVE_INFINITY
-  let minY = Number.POSITIVE_INFINITY
-  let maxX = Number.NEGATIVE_INFINITY
-  let maxY = Number.NEGATIVE_INFINITY
-  for (const p of corners) {
-    const dx = p.x - cx
-    const dy = p.y - cy
-    const px = cx + dx * cos - dy * sin
-    const py = cy + dx * sin + dy * cos
-    if (px < minX) minX = px
-    if (py < minY) minY = py
-    if (px > maxX) maxX = px
-    if (py > maxY) maxY = py
-  }
-  return { minX, minY, maxX, maxY }
+  return rotatedRectAABB(x, y, x + w, y + h, x + w / 2, y + h / 2, r)
 }
 
 /**
