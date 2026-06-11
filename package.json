@@ -21,6 +21,7 @@
     "build": "bun run --filter '*' build",
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun run --filter '*' test",
+    "test:e2e": "bun run --filter @whiteboard/web build && bun run --filter @whiteboard/e2e test:e2e",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",

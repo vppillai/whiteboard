@@ -147,6 +147,22 @@ bun run test      # equivalent; uses the workspace script
 
 Tests live next to the code they cover (e.g., `settings.test.ts` alongside `settings.ts`, `storage.test.ts` alongside `storage.ts`, export module tests under `export/`). The pattern is **pure-helper-first**: DOM-touching modules expose a pure core that's testable without a DOM polyfill, with DOM-gated wrappers guarded by `typeof document !== 'undefined'`. CI runs the suite on every push.
 
+### End-to-end (Playwright)
+
+A small Playwright smoke suite in `apps/e2e` covers the interactive core that unit tests structurally can't reach (real DOM, canvas, pointer events): boot, pen draw, undo/redo, eraser, select-tool drag-move, PNG export, and reload persistence. It runs **against the production build** — `apps/web` is built, then served by the real Bun static server (`apps/server`), so the page is exercised exactly as deploys serve it (same binary, same CSP headers).
+
+```bash
+bunx playwright install chromium   # one-time: fetch the browser
+bun run test:e2e                   # builds apps/web, then runs the suite
+```
+
+Two conventions to know:
+
+- **Spec files are named `*.e2e.ts`**, not `*.test.ts` / `*.spec.ts` — `bun test` auto-globs both of those suffixes, and the e2e specs must only ever run under Playwright. `bun test` stays the pure unit suite.
+- **Stroke assertions are pixel diffs.** The app deliberately exposes no window-level test hooks, so the suite snapshots the committed canvas layer and counts changed pixels (see `apps/e2e/tests/smoke.e2e.ts`). Assertions poll via `expect.poll` — rendering is rAF-async — rather than sleeping.
+
+The suite is chromium-only, single-worker, and runs in CI as the `e2e` job. Headed debugging: `bunx playwright test --headed --debug` from `apps/e2e`.
+
 ## Troubleshooting
 
 - **`bun install` fails on first run**: ensure you're on Bun ≥ 1.1. Check with `bun --version`.
