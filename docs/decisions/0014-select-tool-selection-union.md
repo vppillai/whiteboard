@@ -4,7 +4,7 @@ Date: 2026-05-13
 
 ## Status
 
-Accepted. Ships as part of v1.2 with the Select tool's extension to handle text objects alongside images. **Updated 2026-05-13 (post-v1.2)** — the Select tool absorbs the Lasso tool's role; the Selection type becomes an *array* (`Selection[]`) carrying single-object handle-driven selection AND multi-object move/delete selection in the same data model. See also [ADR 0016](0016-lasso-into-select-absorption.md) for the cross-cutting design decision.
+Accepted. Ships as part of v1.2 with the Select tool's extension to handle text objects alongside images. **Updated 2026-05-13 (post-v1.2)** — the Select tool absorbs the Lasso tool's role; the Selection type becomes an *array* (`Selection[]`) carrying single-object handle-driven selection AND multi-object move/delete selection in the same data model. See also [ADR 0016](0016-lasso-into-select-absorption.md) for the cross-cutting design decision. **Updated 2026-06-10** — the *Migration trigger* below fired with the shape kind (v1.4); the `ObjectBehavior<T>` vtable (approach 2) is adopted. See *Adopted* below.
 
 ## Context
 
@@ -102,6 +102,16 @@ Re-open this decision and adopt the `ObjectBehavior<T>` polymorphism pattern whe
 **Note on the Lasso absorption.** The post-v1.2 Lasso → Select absorption was a DIFFERENT trigger entirely — not the "LOC threshold + 4th kind" migration trigger above. The triggers there were: a single selection model across the app (user-facing question "does Lasso still make sense?"), the multi-select demand that fell out of marquee + Shift+click + Cmd+A unification, and the Path B decision recorded in [ADR 0016](0016-lasso-into-select-absorption.md). The per-kind dispatch helpers (no vtable) handled the absorption cleanly. The LOC trigger above is still not met — the file is at ~2030 LOC but kind-aware code is well under 300, and the stroke variant adds minimal density.
 
 The per-kind dispatch helpers (`commitImageDrag` / `commitStrokeDrag` / `commitTextDrag`, `drawStrokeSelection` / `drawFloatingObjectSelection`) extracted in the v1.2 review pass are the intermediate step — they keep the discriminated union but localize the per-kind logic into named functions. If the migration trigger above is hit, those helpers are the obvious unit to lift into an `ObjectBehavior<T>` interface table.
+
+## Adopted (2026-06-10)
+
+The migration trigger fired and the `ObjectBehavior<T>` polymorphism pattern (approach 2) is now in place:
+
+- **Trigger.** Shapes (v1.4) were the FOURTH object type, and the kind-aware code in `select.ts` crossed the 300-LOC threshold: the `kind ===` dispatch sites (`selectSingleById` / `getView` / `startMultiDrag` / `tickMultiDrag` / `commitMultiDrag` / `deleteSelected`, plus the same shape repeated in `selectByIds`) and the four per-kind drag-commit helpers together accounted for roughly 340 LOC of per-kind branching — before counting the per-kind resize / rotate math.
+- **Shape.** `tools/select/behaviors.ts` defines `ObjectBehavior<T>` — a registry keyed by selection kind exposing exactly what the dispatch sites need: `resolve` (id → live object, fails closed on stale / soft-deleted ids), `viewParts` (the ObjectView `{ transform, rotation }`), `beginMultiDrag` (a per-item closure handle with `tick` / `commit`, so each kind carries its own multi-drag state shape), `commitSingleDrag` (the former `commitImageDrag` / `commitShapeDrag` / `commitTextDrag` / `commitStrokeDrag` helpers), and `collectDeleteId` (which `delete-many` slot the kind's ids occupy). The dispatch sites are now registry lookups via `behaviorFor(sel.kind)`.
+- **Strokes stay strokes.** The stroke behavior implements each slot in samples-translation terms (cumulative applied-delta tracking, dx/dy `move` op, the `transform-many` stroke arm) rather than being forced into a transform-shaped abstraction — the vtable's job is one dispatch point per concern, not false uniformity.
+- **Intentionally NOT behaviorized:** `objectAt` hit-test ordering (a z-order policy, not a per-kind capability), marquee hit semantics, the per-kind resize math in `onPointerMove` (image rect resize vs text font-size scaling vs shape endpoint resize), and the per-kind selection paint.
+- **LOC correction.** The "~2030 LOC" figure quoted in *Consequences* and the *Migration trigger* note was accurate post-v1.2 but stale by v1.4: the file had grown to ~2640 LOC, dropped to 2187 after the mechanical extractions (`geom.ts`, `tools/select/handles.ts`, `tools/select/menu.ts`), and sits at ~1840 with the vtable landed. One layer down, the same collapse applied to `ops.ts`: the byte-identical per-kind transform / rotation setters became `setTransformOn<T>` / `setRotationOn<T>` generics mirroring `flipDeletedOn` (the `Op` union and its serialized shapes are untouched).
 
 ## Related ADRs
 
