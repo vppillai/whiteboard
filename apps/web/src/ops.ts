@@ -20,7 +20,7 @@
  * when the user confirms a clear.
  */
 
-import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
+import type { BoardObject, ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import { addErasedStamps, invalidateStrokeBBox, removeErasedStamps } from './stroke'
 import { invalidateTextMeasurement, resizeToFit as resizeTextRect } from './textgeom'
 
@@ -337,10 +337,10 @@ export function applyOp(op: Op, ctx: OpContext): void {
       flipImageDeleted(ctx, op.imageId, true)
       break
     case 'transform-image':
-      setImageTransform(ctx, op.imageId, op.after)
+      setTransformOn(ctx.images, op.imageId, op.after, ctx.saveImageMeta)
       break
     case 'rotate-image':
-      setImageRotation(ctx, op.imageId, op.after)
+      setRotationOn(ctx.images, op.imageId, op.after, ctx.saveImageMeta)
       break
     case 'create-text':
       flipTextDeleted(ctx, op.textId, false)
@@ -349,13 +349,13 @@ export function applyOp(op: Op, ctx: OpContext): void {
       flipTextDeleted(ctx, op.textId, true)
       break
     case 'transform-text':
-      setTextTransform(ctx, op.textId, op.after)
+      setTransformOn(ctx.texts, op.textId, op.after, ctx.saveText)
       break
     case 'edit-text':
       setTextEdit(ctx, op.textId, op.after)
       break
     case 'rotate-text':
-      setTextRotation(ctx, op.textId, op.after)
+      setRotationOn(ctx.texts, op.textId, op.after, ctx.saveText)
       break
     case 'create-shape':
       flipShapeDeleted(ctx, op.shapeId, false)
@@ -364,10 +364,10 @@ export function applyOp(op: Op, ctx: OpContext): void {
       flipShapeDeleted(ctx, op.shapeId, true)
       break
     case 'transform-shape':
-      setShapeTransform(ctx, op.shapeId, op.after)
+      setTransformOn(ctx.shapes, op.shapeId, op.after, ctx.saveShape)
       break
     case 'rotate-shape':
-      setShapeRotation(ctx, op.shapeId, op.after)
+      setRotationOn(ctx.shapes, op.shapeId, op.after, ctx.saveShape)
       break
     case 'edit-shape':
       setShapeEdit(ctx, op.shapeId, op.after)
@@ -412,10 +412,10 @@ export function unapplyOp(op: Op, ctx: OpContext): void {
       flipImageDeleted(ctx, op.imageId, false)
       break
     case 'transform-image':
-      setImageTransform(ctx, op.imageId, op.before)
+      setTransformOn(ctx.images, op.imageId, op.before, ctx.saveImageMeta)
       break
     case 'rotate-image':
-      setImageRotation(ctx, op.imageId, op.before)
+      setRotationOn(ctx.images, op.imageId, op.before, ctx.saveImageMeta)
       break
     case 'create-text':
       flipTextDeleted(ctx, op.textId, true)
@@ -424,13 +424,13 @@ export function unapplyOp(op: Op, ctx: OpContext): void {
       flipTextDeleted(ctx, op.textId, false)
       break
     case 'transform-text':
-      setTextTransform(ctx, op.textId, op.before)
+      setTransformOn(ctx.texts, op.textId, op.before, ctx.saveText)
       break
     case 'edit-text':
       setTextEdit(ctx, op.textId, op.before)
       break
     case 'rotate-text':
-      setTextRotation(ctx, op.textId, op.before)
+      setRotationOn(ctx.texts, op.textId, op.before, ctx.saveText)
       break
     case 'create-shape':
       flipShapeDeleted(ctx, op.shapeId, true)
@@ -439,10 +439,10 @@ export function unapplyOp(op: Op, ctx: OpContext): void {
       flipShapeDeleted(ctx, op.shapeId, false)
       break
     case 'transform-shape':
-      setShapeTransform(ctx, op.shapeId, op.before)
+      setTransformOn(ctx.shapes, op.shapeId, op.before, ctx.saveShape)
       break
     case 'rotate-shape':
-      setShapeRotation(ctx, op.shapeId, op.before)
+      setRotationOn(ctx.shapes, op.shapeId, op.before, ctx.saveShape)
       break
     case 'edit-shape':
       setShapeEdit(ctx, op.shapeId, op.before)
@@ -465,11 +465,16 @@ function applyTransformMany(
 ): void {
   for (const item of items) {
     if (item.kind === 'image') {
-      setImageTransform(ctx, item.imageId, unapply ? item.before : item.after)
+      setTransformOn(
+        ctx.images,
+        item.imageId,
+        unapply ? item.before : item.after,
+        ctx.saveImageMeta,
+      )
     } else if (item.kind === 'text') {
-      setTextTransform(ctx, item.textId, unapply ? item.before : item.after)
+      setTransformOn(ctx.texts, item.textId, unapply ? item.before : item.after, ctx.saveText)
     } else if (item.kind === 'shape') {
-      setShapeTransform(ctx, item.shapeId, unapply ? item.before : item.after)
+      setTransformOn(ctx.shapes, item.shapeId, unapply ? item.before : item.after, ctx.saveShape)
     } else {
       const dx = unapply ? -item.dx : item.dx
       const dy = unapply ? -item.dy : item.dy
@@ -499,6 +504,47 @@ function flipDeletedOn<T extends { id: string; deleted?: boolean }>(
   const obj = arr.find((x) => x.id === id)
   if (!obj) return
   obj.deleted = deleted || undefined
+  save(obj)
+}
+
+/**
+ * Generic transform swap for any rect-transform object kind (image /
+ * text / shape — everything that extends BoardObject; strokes are
+ * sample-driven and move via `translateStrokes` instead). Mirrors
+ * `flipDeletedOn`: the three earlier per-kind setters
+ * (`setImageTransform` / `setTextTransform` / `setShapeTransform`)
+ * were byte-identical but for the array + save callback.
+ */
+function setTransformOn<T extends BoardObject>(
+  arr: readonly T[],
+  id: string,
+  transform: T['transform'],
+  save: (obj: T) => void,
+): void {
+  const obj = arr.find((x) => x.id === id)
+  if (!obj) return
+  obj.transform = { ...transform }
+  save(obj)
+}
+
+/**
+ * Generic rotation swap, same collapse as `setTransformOn` (was
+ * `setImageRotation` / `setTextRotation` / `setShapeRotation`).
+ *
+ * Store `undefined` for exactly-zero so persisted records stay compact
+ * and back-compat with rotation-less records. Deliberately NOT
+ * `rotation || undefined`: that would also map NaN to `undefined`,
+ * silently masking a corrupted rotation as "no rotation".
+ */
+function setRotationOn<T extends BoardObject>(
+  arr: readonly T[],
+  id: string,
+  rotation: number,
+  save: (obj: T) => void,
+): void {
+  const obj = arr.find((x) => x.id === id)
+  if (!obj) return
+  obj.rotation = rotation === 0 ? undefined : rotation
   save(obj)
 }
 
@@ -542,33 +588,8 @@ function flipImageDeleted(ctx: OpContext, id: string, deleted: boolean): void {
   flipDeletedOn(ctx.images, id, deleted, ctx.saveImageMeta)
 }
 
-function setImageTransform(ctx: OpContext, id: string, transform: ImageObject['transform']): void {
-  const img = ctx.images.find((i) => i.id === id)
-  if (!img) return
-  img.transform = { ...transform }
-  ctx.saveImageMeta(img)
-}
-
-function setImageRotation(ctx: OpContext, id: string, rotation: number): void {
-  const img = ctx.images.find((i) => i.id === id)
-  if (!img) return
-  // Store `undefined` for exactly-zero so persisted records stay compact
-  // and back-compat with rotation-less records. Deliberately NOT
-  // `rotation || undefined`: that would also map NaN to `undefined`,
-  // silently masking a corrupted rotation as "no rotation".
-  img.rotation = rotation === 0 ? undefined : rotation
-  ctx.saveImageMeta(img)
-}
-
 function flipTextDeleted(ctx: OpContext, id: string, deleted: boolean): void {
   flipDeletedOn(ctx.texts, id, deleted, ctx.saveText)
-}
-
-function setTextTransform(ctx: OpContext, id: string, transform: TextObject['transform']): void {
-  const t = ctx.texts.find((x) => x.id === id)
-  if (!t) return
-  t.transform = { ...transform }
-  ctx.saveText(t)
 }
 
 /** Apply an edit-text op's payload to the matching text. Recomputes the
@@ -604,37 +625,8 @@ function setTextEdit(
   t.transform = measured.transform
   ctx.saveText(t)
 }
-
-function setTextRotation(ctx: OpContext, id: string, rotation: number): void {
-  const t = ctx.texts.find((x) => x.id === id)
-  if (!t) return
-  // Symmetric with setImageRotation: store `undefined` for the zero case
-  // so persisted records don't carry an explicit `rotation: 0` field
-  // (cheaper schema; backward-compat with rotation-less records).
-  // `=== 0` (not `||`) so NaN isn't silently masked as "no rotation".
-  t.rotation = rotation === 0 ? undefined : rotation
-  ctx.saveText(t)
-}
 function flipShapeDeleted(ctx: OpContext, id: string, deleted: boolean): void {
   flipDeletedOn(ctx.shapes, id, deleted, ctx.saveShape)
-}
-
-function setShapeTransform(ctx: OpContext, id: string, transform: ShapeObject['transform']): void {
-  const s = ctx.shapes.find((x) => x.id === id)
-  if (!s) return
-  s.transform = { ...transform }
-  ctx.saveShape(s)
-}
-
-function setShapeRotation(ctx: OpContext, id: string, rotation: number): void {
-  const s = ctx.shapes.find((x) => x.id === id)
-  if (!s) return
-  // Symmetric with setImageRotation / setTextRotation: store `undefined`
-  // for the zero case so persisted records stay compact and back-compat
-  // with rotation-less records.
-  // `=== 0` (not `||`) so NaN isn't silently masked as "no rotation".
-  s.rotation = rotation === 0 ? undefined : rotation
-  ctx.saveShape(s)
 }
 
 /** Apply an edit-shape op's payload (color / strokeWidth / fill /
