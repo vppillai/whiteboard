@@ -185,16 +185,17 @@ async function main(): Promise<void> {
   clearFactoryResetQueryParam()
   initTheme()
 
-  // StrokeStore seam: main.ts talks to a `StrokeStore` interface rather than
-  // calling storage.ts directly. v1 wires the local IDB-backed implementation.
+  // StrokeStore seam: main.ts talks to the generic `ObjectStore` surface
+  // (load / upsert / delete / clear / onRemoteChange, objectstore.ts) rather
+  // than calling storage.ts directly. v1 wires the local IDB-backed implementation.
   // The seam preserves the future-sharing option per ADR 0012 — when sharing
   // returns (design archive at docs/superpowers/specs/2026-05-10-m3-sync-design.md),
   // a Y.Doc-backed store with the same surface plugs in here.
   const strokeStore: StrokeStore = createLocalStrokeStore()
 
-  // ImageStore — the equivalent seam for pasted images. Same shape as
-  // StrokeStore (load / insert / update / hard-delete / clear) but with
-  // a binary-blob side channel because images carry bytes that don't
+  // ImageStore — the equivalent seam for pasted images. Same `ObjectStore`
+  // contract as StrokeStore but with a binary-blob side channel
+  // (insert / loadBlob / blob-aware delete) because images carry bytes that don't
   // belong inside a small JSON record. v1 is local IDB-backed; sync of
   // image binaries is deferred to M5.1 per ADR 0012.
   const imageStore: ImageStore = createLocalImageStore()
@@ -408,29 +409,29 @@ async function main(): Promise<void> {
   // policy (currently: warn-and-continue) in one place — future changes
   // like surfacing a toast or retry only touch this line.
   const persistImageMeta = createWarnAndContinuePersist<ImageObject>(
-    imageStore.updateMeta.bind(imageStore),
+    imageStore.upsert.bind(imageStore),
     'whiteboard/web: failed to persist image metadata:',
   )
 
   // Same pattern for text records — single closure used by opCtx and the
   // Text tool. Errors are warn-and-continue (matching strokes / images).
   const persistText = createWarnAndContinuePersist<TextObject>(
-    textStore.update.bind(textStore),
+    textStore.upsert.bind(textStore),
     'whiteboard/web: failed to persist text:',
   )
 
   // Same pattern for shape records — single closure used by opCtx (and the
   // Shape tool, in SH5). Errors are warn-and-continue.
   const persistShape = createWarnAndContinuePersist<ShapeObject>(
-    shapeStore.update.bind(shapeStore),
+    shapeStore.upsert.bind(shapeStore),
     'whiteboard/web: failed to persist shape:',
   )
   const persistStroke = createWarnAndContinuePersist<Stroke>(
-    strokeStore.save.bind(strokeStore),
+    strokeStore.upsert.bind(strokeStore),
     'whiteboard/web: failed to persist stroke:',
   )
   const persistSelectStroke = createWarnAndContinuePersist<Stroke>(
-    strokeStore.save.bind(strokeStore),
+    strokeStore.upsert.bind(strokeStore),
     'whiteboard/web: failed to persist stroke (Select move/delete):',
   )
 
@@ -829,7 +830,7 @@ async function main(): Promise<void> {
     strokes,
     texts,
     shapes,
-    saveStroke: (s) => strokeStore.save(s),
+    saveStroke: (s) => strokeStore.upsert(s),
     saveText: persistText,
     saveShape: persistShape,
     pushOp: pushUndoOp,
