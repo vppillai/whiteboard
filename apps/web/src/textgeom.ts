@@ -14,7 +14,7 @@
  */
 
 import type { TextFontFamily, TextObject } from '@whiteboard/shared'
-import { rotatedRectAABB } from './geom'
+import { ROTATION_EPSILON, rotatedRectAABB } from './geom'
 
 /**
  * CSS font-family stack for each closed-set family. The first entry is
@@ -246,7 +246,7 @@ export function textAABB(t: TextObject): {
 export function pointInText(p: { x: number; y: number }, t: TextObject): boolean {
   const r = t.rotation ?? 0
   const { x, y, w, h } = t.transform
-  if (Math.abs(r) < 1e-9) {
+  if (Math.abs(r) < ROTATION_EPSILON) {
     return p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h
   }
   const cx = x + w / 2
