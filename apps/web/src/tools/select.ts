@@ -62,12 +62,14 @@
  * is one assignment; exclusion is structural rather than convention.
  * `commitDrag` dispatches on the union kind.
  *
- * Kind-specific code lives in three places: per-kind drag commits
- * (`commitImageDrag` / `commitStrokeDrag` / `commitTextDrag`), per-kind
- * selection paint (`drawStrokeSelection` / `drawFloatingObjectSelection`),
- * and `objectAt` hit-test order. Adding a 4th object kind is therefore
- * one helper per concern, not a fan-out across every interaction
- * handler.
+ * Kind-specific code lives in two places: the per-kind
+ * `ObjectBehavior<T>` vtable in ./select/behaviors.ts (live-object
+ * resolution, view parts, drag commits, multi-drag lifecycle, delete-op
+ * slots — the migration ADR 0014 promised at 4 kinds), and the
+ * intentionally-local sites here (`objectAt` hit-test order, marquee
+ * hit semantics, per-kind resize math in onPointerMove, per-kind
+ * selection paint). Adding a 5th object kind is one behavior entry plus
+ * those local sites, not a fan-out across every interaction handler.
  */
 
 import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
@@ -75,8 +77,15 @@ import { imageAABB, imageCenter, pointInImage } from '../imagegeom'
 import type { Op, TransformManyItem } from '../ops'
 import { applyCamera, clearLayer } from '../render'
 import { pointInShape, shapeAABB } from '../rendershapes'
-import { getStrokeBBox, getStrokePath, invalidateStrokeBBox } from '../stroke'
+import { getStrokeBBox, getStrokePath } from '../stroke'
 import { pointInText, resizeToFit, TEXT_PADDING_X, textAABB } from '../textgeom'
+import {
+  _applyStrokeMoveStep,
+  type BehaviorDeps,
+  behaviorFor,
+  type DeleteManyIds,
+  type MultiDragHandle,
+} from './select/behaviors'
 import {
   anchorBoardFor,
   cursorFor,
@@ -132,10 +141,11 @@ type DragKind =
  * on an object that's part of a multi-selection (length > 1); all
  * selected objects translate together.
  *
- * Per-item before-state varies by kind:
- *   - image / text: snapshot the transform rect — each tick recomputes
- *     `transform.x/y` from before + total delta (matches the single-
- *     object move path).
+ * Per-item state lives inside the per-kind MultiDragHandle closures
+ * built by the behavior registry (./select/behaviors.ts):
+ *   - image / text / shape: snapshot the transform rect — each tick
+ *     recomputes `transform.x/y` from before + total delta (matches the
+ *     single-object move path).
  *   - stroke: track cumulative applied delta — each tick mutates
  *     samples + erasedStamps by the step delta (matches the single-
  *     stroke move path, which mutates in place rather than carrying a
@@ -147,15 +157,9 @@ type DragKind =
  * center is a power-user feature better deferred to a dedicated
  * marquee handle if/when needed.
  */
-type MultiDragItem =
-  | { kind: 'image'; id: string; before: ImageObject['transform'] }
-  | { kind: 'text'; id: string; before: ImageObject['transform'] }
-  | { kind: 'shape'; id: string; before: ImageObject['transform'] }
-  | { kind: 'stroke'; id: string; applied: { dx: number; dy: number } }
-
 interface MultiDragState {
   startBoard: { x: number; y: number }
-  items: MultiDragItem[]
+  items: MultiDragHandle[]
 }
 
 /**
@@ -212,33 +216,11 @@ interface DragState {
   startBoard: { x: number; y: number }
 }
 
-interface SelectToolDeps {
-  /** Read-only access; the tool mutates entries' `transform` in place during drag. */
-  getImages: () => ImageObject[]
-  /** Persist a single image's metadata after each move-tick. */
-  saveImageMeta: (img: ImageObject) => void
-  /** Read-only access; same mutation pattern as images. */
-  getTexts: () => TextObject[]
-  /** Persist a single text after each move-tick. */
-  saveText: (t: TextObject) => void
-  /** Read-only access; same mutation pattern as images/texts. Shapes
-   *  share the image transform model (rect + rotation), so move /
-   *  resize / rotate paths reuse the image code paths almost verbatim. */
-  getShapes: () => ShapeObject[]
-  /** Persist a single shape after each move-tick. */
-  saveShape: (s: ShapeObject) => void
-  /** Read-only access. Used by the stroke hit-test path so clicking on
-   *  a drawing in Select mode selects it (parallel to Lasso's tap-
-   *  select). */
-  getStrokes: () => Stroke[]
-  /** Persist a single stroke after a move-tick / delete. The `move` op's
-   *  apply/unapply semantics translate samples in place; mutation during
-   *  drag is direct and saveStroke is fired per-tick, then the op is
-   *  pushed (NOT applied — samples are already at the post-drag state)
-   *  on drag-end. */
-  saveStroke: (s: Stroke) => void
-  /** Push an op into the undo stack — fired on drag-end + on delete. */
-  pushOp: (op: Op) => void
+/** The Select tool's full dependency surface: the per-kind object
+ *  access / persistence / undo-push slice shared with the behavior
+ *  vtable (see BehaviorDeps in ./select/behaviors.ts), plus the
+ *  tool-level callbacks below that the behaviors never touch. */
+interface SelectToolDeps extends BehaviorDeps {
   /** Apply an op (mutate in-memory state + persist). Used by the
    *  delete path so the single mutation surface is `applyOp`, matching
    *  the canonical pattern in `erasercallbacks.ts`. In-flight drag
@@ -345,46 +327,10 @@ export interface SelectTool extends Tool {
   adjustSelectedTextFontSize(delta: number): boolean
 }
 
-export function _shouldPushStrokeTransformManyItem(
-  stroke: { id?: string; deleted?: boolean } | undefined,
-  dx: number,
-  dy: number,
-): boolean {
-  if (dx === 0 && dy === 0) return false
-  if (!stroke || stroke.deleted) return false
-  return true
-}
-
-/** Translate a stroke's samples (and erasedStamps) by the STEP delta since
- *  the last applied total, then advance the `applied` tracker to the new
- *  total. Shared by the single-object stroke move (onPointerMove) and the
- *  multi-drag stroke branch — the only two byte-identical per-kind blocks in
- *  the Select tool. Step-delta (not absolute) keeps per-tick work bounded by
- *  the drag step, not the cumulative distance. No-op on a zero step. Exported
- *  underscored for unit testing; not part of the public Tool surface. */
-export function _applyStrokeMoveStep(
-  stroke: Stroke,
-  applied: { dx: number; dy: number },
-  totalDx: number,
-  totalDy: number,
-): void {
-  const stepDx = totalDx - applied.dx
-  const stepDy = totalDy - applied.dy
-  if (stepDx === 0 && stepDy === 0) return
-  for (const s of stroke.samples) {
-    s.x += stepDx
-    s.y += stepDy
-  }
-  if (stroke.erasedStamps) {
-    for (const stamp of stroke.erasedStamps) {
-      stamp.x += stepDx
-      stamp.y += stepDy
-    }
-  }
-  invalidateStrokeBBox(stroke)
-  applied.dx = totalDx
-  applied.dy = totalDy
-}
+// The underscored stroke-move internals moved into ./select/behaviors
+// with the vtable; re-exported here so existing unit-test imports
+// (select.stroke-move.test.ts, select.transform-many.test.ts) stay valid.
+export { _applyStrokeMoveStep, _shouldPushStrokeTransformManyItem } from './select/behaviors'
 
 /**
  * The Select tool has three drag modes — single-object transform,
@@ -450,21 +396,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
    *  selection with the single item. Silent no-op when the underlying
    *  object is missing or deleted. */
   function selectSingleById(sel: Selection): void {
-    let alive = false
-    if (sel.kind === 'image') {
-      const img = deps.getImages().find((i) => i.id === sel.id)
-      alive = !!img && !img.deleted
-    } else if (sel.kind === 'text') {
-      const t = deps.getTexts().find((x) => x.id === sel.id)
-      alive = !!t && !t.deleted
-    } else if (sel.kind === 'shape') {
-      const sh = deps.getShapes().find((x) => x.id === sel.id)
-      alive = !!sh && !sh.deleted
-    } else {
-      const s = deps.getStrokes().find((x) => x.id === sel.id)
-      alive = !!s && !s.deleted
-    }
-    if (!alive) return
+    if (!behaviorFor(sel.kind).resolve(deps, sel.id)) return
     commitDrag(null)
     setSelection([sel])
     activeDrag = null
@@ -497,50 +429,13 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
   function getView(): ObjectView | null {
     const sel = singleSelection()
     if (!sel) return null
-    if (sel.kind === 'image') {
-      const img = deps.getImages().find((i) => i.id === sel.id)
-      if (!img || img.deleted) return null
-      return {
-        selection: sel,
-        obj: img,
-        transform: img.transform,
-        rotation: img.rotation ?? 0,
-      }
-    }
-    if (sel.kind === 'text') {
-      const t = deps.getTexts().find((x) => x.id === sel.id)
-      if (!t || t.deleted) return null
-      return {
-        selection: sel,
-        obj: t,
-        transform: t.transform,
-        rotation: t.rotation ?? 0,
-      }
-    }
-    if (sel.kind === 'shape') {
-      const sh = deps.getShapes().find((x) => x.id === sel.id)
-      if (!sh || sh.deleted) return null
-      return {
-        selection: sel,
-        obj: sh,
-        transform: sh.transform,
-        rotation: sh.rotation ?? 0,
-      }
-    }
-    // sel.kind === 'stroke'
-    const s = deps.getStrokes().find((x) => x.id === sel.id)
-    if (!s || s.deleted) return null
-    const bb = getStrokeBBox(s)
-    return {
-      selection: sel,
-      obj: s,
-      // Strokes don't carry a transform — derive one from the bbox so
-      // handle math / hover-cursor reuse the same fields. Strokes don't
-      // expose handles (corners / edges / rotation), so the only
-      // consumer is the body hit-test and the halo render.
-      transform: { x: bb.minX, y: bb.minY, w: bb.maxX - bb.minX, h: bb.maxY - bb.minY },
-      rotation: 0,
-    }
+    const b = behaviorFor(sel.kind)
+    const obj = b.resolve(deps, sel.id)
+    if (!obj) return null
+    // Rect kinds expose their LIVE transform reference (mutating it is
+    // the canonical drag path); strokes get a fresh bbox-derived rect.
+    const { transform, rotation } = b.viewParts(obj)
+    return { selection: sel, obj, transform, rotation }
   }
 
   /** Top-most non-deleted object whose rotated rect (image / text /
@@ -613,147 +508,6 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       }
     }
     return null
-  }
-
-  /** Did the rect change between drag-start snapshot and current state? */
-  function transformChanged(
-    before: ImageObject['transform'],
-    after: ImageObject['transform'],
-  ): boolean {
-    return (
-      before.x !== after.x || before.y !== after.y || before.w !== after.w || before.h !== after.h
-    )
-  }
-
-  /** Image-kind drag commit. Emits rotate-image OR transform-image. */
-  function commitImageDrag(d: DragState, img: ImageObject, isRotation: boolean): void {
-    if (isRotation) {
-      const afterR = img.rotation ?? 0
-      if (d.beforeRotation !== afterR) {
-        deps.saveImageMeta(img)
-        deps.pushOp({
-          kind: 'rotate-image',
-          imageId: img.id,
-          before: d.beforeRotation,
-          after: afterR,
-        })
-      }
-      return
-    }
-    // Move or resize → transform-image (both end up overwriting the rect).
-    const after = { ...img.transform }
-    if (transformChanged(d.before, after)) {
-      deps.saveImageMeta(img)
-      deps.pushOp({ kind: 'transform-image', imageId: img.id, before: d.before, after })
-    }
-  }
-
-  /** Shape-kind drag commit. Mirrors commitImageDrag — same transform
-   *  model (rect + rotation), same op semantics. Style edits (color /
-   *  strokeWidth / fill) come through edit-shape from the contextual
-   *  menu, not from a drag, so this helper only emits transform / rotate. */
-  function commitShapeDrag(d: DragState, sh: ShapeObject, isRotation: boolean): void {
-    if (isRotation) {
-      const afterR = sh.rotation ?? 0
-      if (d.beforeRotation !== afterR) {
-        deps.saveShape(sh)
-        deps.pushOp({
-          kind: 'rotate-shape',
-          shapeId: sh.id,
-          before: d.beforeRotation,
-          after: afterR,
-        })
-      }
-      return
-    }
-    const after = { ...sh.transform }
-    if (transformChanged(d.before, after)) {
-      deps.saveShape(sh)
-      deps.pushOp({ kind: 'transform-shape', shapeId: sh.id, before: d.before, after })
-    }
-  }
-
-  /**
-   * Stroke-kind drag commit. Only `move` is supported (no resize / rotate
-   * semantics for freehand geometry).
-   *
-   * Key invariant: samples were mutated directly during the drag (see
-   * onPointerMove stroke branch). The `move` op handler in ops.ts ALSO
-   * translates samples on apply / unapply. Pushing the op via
-   * deps.pushOp records it in the undo stack WITHOUT calling applyOp —
-   * otherwise we'd double-translate on commit. Undo / redo work
-   * correctly because the op's apply/unapply are symmetric (translate
-   * by +dx vs -dx).
-   */
-  function commitStrokeDrag(d: DragState, stroke: Stroke): void {
-    const applied = d.strokeMoveApplied
-    if (!applied || (applied.dx === 0 && applied.dy === 0)) return
-    deps.saveStroke(stroke)
-    deps.pushOp({
-      kind: 'move',
-      strokeIds: [stroke.id],
-      dx: applied.dx,
-      dy: applied.dy,
-    })
-  }
-
-  /** Text-kind drag commit. Emits rotate-text, edit-text (resize), or
-   *  transform-text (move). Resize for text covers two flavors:
-   *    - Corner drag: scales font.size → font payload change.
-   *    - E/W edge drag: mutates wrapWidth → wrapWidth payload change.
-   *  Both are captured in `beforeTextSnapshot` (taken at drag-start)
-   *  vs current state. wrapWidth is in the change predicate so the
-   *  E/W drag's undo path correctly restores the auto-width vs
-   *  wrap-width layout. */
-  function commitTextDrag(
-    d: DragState,
-    t: TextObject,
-    isRotation: boolean,
-    isResize: boolean,
-  ): void {
-    if (isRotation) {
-      const afterR = t.rotation ?? 0
-      if (d.beforeRotation !== afterR) {
-        deps.saveText(t)
-        deps.pushOp({
-          kind: 'rotate-text',
-          textId: t.id,
-          before: d.beforeRotation,
-          after: afterR,
-        })
-      }
-      return
-    }
-    if (isResize) {
-      if (!d.beforeTextSnapshot) {
-        throw new Error('select: text resize commit missing beforeTextSnapshot')
-      }
-      const after = {
-        content: t.content,
-        font: { ...t.font },
-        color: t.color,
-        wrapWidth: t.wrapWidth,
-      }
-      const before = d.beforeTextSnapshot
-      const changed =
-        before.font.size !== after.font.size ||
-        before.font.family !== after.font.family ||
-        before.font.bold !== after.font.bold ||
-        before.font.italic !== after.font.italic ||
-        before.font.underline !== after.font.underline ||
-        before.wrapWidth !== after.wrapWidth
-      if (changed) {
-        deps.saveText(t)
-        deps.pushOp({ kind: 'edit-text', textId: t.id, before, after })
-      }
-      return
-    }
-    // Move → transform-text
-    const after = { ...t.transform }
-    if (transformChanged(d.before, after)) {
-      deps.saveText(t)
-      deps.pushOp({ kind: 'transform-text', textId: t.id, before: d.before, after })
-    }
   }
 
   /** Paint the live marquee rectangle on the live layer. Dashed accent
@@ -860,59 +614,27 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     }
   }
 
-  /** Build the per-item before-state for a multi-move drag, snapshotting
-   *  transforms (images/texts) or initializing the applied-delta tracker
-   *  (strokes) so each move tick can compute deltas correctly. */
+  /** Build the per-item multi-drag handles via the behavior registry
+   *  (rect kinds snapshot their transform; strokes initialize the
+   *  applied-delta tracker). Items whose object is missing / deleted at
+   *  drag-start are skipped. */
   function startMultiDrag(startBoard: { x: number; y: number }): MultiDragState {
-    const items: MultiDragItem[] = []
+    const items: MultiDragHandle[] = []
     for (const sel of selected) {
-      if (sel.kind === 'image') {
-        const img = deps.getImages().find((i) => i.id === sel.id)
-        if (!img || img.deleted) continue
-        items.push({ kind: 'image', id: sel.id, before: { ...img.transform } })
-      } else if (sel.kind === 'text') {
-        const t = deps.getTexts().find((x) => x.id === sel.id)
-        if (!t || t.deleted) continue
-        items.push({ kind: 'text', id: sel.id, before: { ...t.transform } })
-      } else if (sel.kind === 'shape') {
-        const sh = deps.getShapes().find((x) => x.id === sel.id)
-        if (!sh || sh.deleted) continue
-        items.push({ kind: 'shape', id: sel.id, before: { ...sh.transform } })
-      } else {
-        const s = deps.getStrokes().find((x) => x.id === sel.id)
-        if (!s || s.deleted) continue
-        items.push({ kind: 'stroke', id: sel.id, applied: { dx: 0, dy: 0 } })
-      }
+      const h = behaviorFor(sel.kind).beginMultiDrag(deps, sel.id)
+      if (h) items.push(h)
     }
     return { startBoard, items }
   }
 
-  /** Per-tick multi-move translation. Image / text items overwrite
-   *  transform.x/y from before + delta; stroke items mutate samples (+
-   *  erasedStamps) by the step delta vs the applied tracker so the
-   *  per-tick work is incremental. */
+  /** Per-tick multi-move translation. Each handle re-resolves its live
+   *  object and applies the total delta in its own kind's terms (rect
+   *  kinds overwrite transform.x/y from before + delta; strokes mutate
+   *  samples + erasedStamps by the incremental step). */
   function tickMultiDrag(d: MultiDragState, bx: number, by: number): void {
     const dx = bx - d.startBoard.x
     const dy = by - d.startBoard.y
-    for (const item of d.items) {
-      if (item.kind === 'image') {
-        const img = deps.getImages().find((i) => i.id === item.id)
-        if (!img || img.deleted) continue
-        img.transform = { ...item.before, x: item.before.x + dx, y: item.before.y + dy }
-      } else if (item.kind === 'text') {
-        const t = deps.getTexts().find((x) => x.id === item.id)
-        if (!t || t.deleted) continue
-        t.transform = { ...item.before, x: item.before.x + dx, y: item.before.y + dy }
-      } else if (item.kind === 'shape') {
-        const sh = deps.getShapes().find((x) => x.id === item.id)
-        if (!sh || sh.deleted) continue
-        sh.transform = { ...item.before, x: item.before.x + dx, y: item.before.y + dy }
-      } else {
-        const stroke = deps.getStrokes().find((x) => x.id === item.id)
-        if (!stroke || stroke.deleted) continue
-        _applyStrokeMoveStep(stroke, item.applied, dx, dy)
-      }
-    }
+    for (const h of d.items) h.tick(dx, dy)
   }
 
   /** Commit a multi-move drag: emit ONE composite `transform-many` op
@@ -931,55 +653,24 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
    *  noop), no op is pushed at all. */
   function commitMultiDrag(d: MultiDragState): void {
     const items: TransformManyItem[] = []
-    for (const item of d.items) {
-      if (item.kind === 'image') {
-        const img = deps.getImages().find((i) => i.id === item.id)
-        if (!img || img.deleted) continue
-        const after = { ...img.transform }
-        if (!transformChanged(item.before, after)) continue
-        deps.saveImageMeta(img)
-        items.push({ kind: 'image', imageId: item.id, before: item.before, after })
-      } else if (item.kind === 'text') {
-        const t = deps.getTexts().find((x) => x.id === item.id)
-        if (!t || t.deleted) continue
-        const after = { ...t.transform }
-        if (!transformChanged(item.before, after)) continue
-        deps.saveText(t)
-        items.push({ kind: 'text', textId: item.id, before: item.before, after })
-      } else if (item.kind === 'shape') {
-        const sh = deps.getShapes().find((x) => x.id === item.id)
-        if (!sh || sh.deleted) continue
-        const after = { ...sh.transform }
-        if (!transformChanged(item.before, after)) continue
-        deps.saveShape(sh)
-        items.push({ kind: 'shape', shapeId: item.id, before: item.before, after })
-      } else {
-        const stroke = deps.getStrokes().find((x) => x.id === item.id)
-        if (!_shouldPushStrokeTransformManyItem(stroke, item.applied.dx, item.applied.dy)) continue
-        if (!stroke || stroke.deleted) continue
-        deps.saveStroke(stroke)
-        items.push({
-          kind: 'stroke',
-          strokeId: item.id,
-          dx: item.applied.dx,
-          dy: item.applied.dy,
-        })
-      }
+    for (const h of d.items) {
+      const item = h.commit()
+      if (item) items.push(item)
     }
     if (items.length === 0) return
     deps.pushOp({ kind: 'transform-many', items })
   }
 
   /**
-   * Finalize the current drag — dispatch to the per-kind commit helper
-   * and clear drag state. Called from both onPointerUp (normal release)
+   * Finalize the current drag — dispatch to the selection kind's
+   * behavior commit and clear drag state. Called from both onPointerUp (normal release)
    * and pointercancel-style entry paths (browser revoked the pointer
    * mid-drag, window blur, OS gesture steal). Without this shared path,
    * a pointercancel left `drag` non-null and the live transform
    * mutations un-recorded in undo.
    *
-   * Dispatching to per-kind helpers (instead of branching inline) means
-   * adding a 4th object kind is one helper + one dispatch case rather
+   * Dispatching through the behavior registry (instead of branching
+   * inline) means adding an object kind is one behavior entry rather
    * than another ~30-line branch in a 130-line function.
    *
    * IMPORTANT: dispatch is on `d.selection.kind` (the snapshot captured
@@ -994,12 +685,11 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
    *      differ from `d.selection.kind`, sending the commit down the
    *      wrong branch and casting an ImageObject to TextObject.
    *
-   * The per-kind commit helpers themselves guard against the deleted
-   * case (each does its own `.find()` + null check) and push an op
-   * only when the object is still alive AND its state actually changed
-   * during the drag. Pushing the op IS the only correctness-critical
-   * action; missing the per-kind dispatch is what loses the undo
-   * record.
+   * The resolve below guards the deleted case (fails closed when the
+   * object is gone) and the behavior commits push an op only when the
+   * object's state actually changed during the drag. Pushing the op IS
+   * the only correctness-critical action; missing the dispatch is what
+   * loses the undo record.
    */
   function commitDrag(e: PointerEvent | null): void {
     if (!activeDrag) return
@@ -1033,22 +723,12 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     const isRotation = typeof d.kind === 'object' && 'rotate' in d.kind
     const isResize = typeof d.kind === 'object' && 'resize' in d.kind
 
-    // Dispatch on the drag-start selection snapshot. Each per-kind
-    // helper resolves the live object itself and no-ops if it has been
-    // deleted out from under the drag.
-    if (d.selection.kind === 'image') {
-      const img = deps.getImages().find((i) => i.id === d.selection.id)
-      if (img && !img.deleted) commitImageDrag(d, img, isRotation)
-    } else if (d.selection.kind === 'stroke') {
-      const s = deps.getStrokes().find((x) => x.id === d.selection.id)
-      if (s && !s.deleted) commitStrokeDrag(d, s)
-    } else if (d.selection.kind === 'shape') {
-      const sh = deps.getShapes().find((x) => x.id === d.selection.id)
-      if (sh && !sh.deleted) commitShapeDrag(d, sh, isRotation)
-    } else {
-      const t = deps.getTexts().find((x) => x.id === d.selection.id)
-      if (t && !t.deleted) commitTextDrag(d, t, isRotation, isResize)
-    }
+    // Dispatch on the drag-start selection snapshot via the behavior
+    // registry. Resolve fails closed if the object was deleted out from
+    // under the drag.
+    const b = behaviorFor(d.selection.kind)
+    const obj = b.resolve(deps, d.selection.id)
+    if (obj) b.commitSingleDrag(deps, d, obj, isRotation, isResize)
   }
 
   /** Paint the stroke-selection affordance: a perfect-freehand outline
@@ -1939,19 +1619,7 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       commitDrag(null)
       const next: Selection[] = []
       for (const item of items) {
-        if (item.kind === 'image') {
-          const img = deps.getImages().find((i) => i.id === item.id)
-          if (img && !img.deleted) next.push(item)
-        } else if (item.kind === 'text') {
-          const t = deps.getTexts().find((x) => x.id === item.id)
-          if (t && !t.deleted) next.push(item)
-        } else if (item.kind === 'shape') {
-          const sh = deps.getShapes().find((x) => x.id === item.id)
-          if (sh && !sh.deleted) next.push(item)
-        } else {
-          const s = deps.getStrokes().find((x) => x.id === item.id)
-          if (s && !s.deleted) next.push(item)
-        }
+        if (behaviorFor(item.kind).resolve(deps, item.id)) next.push(item)
       }
       setSelection(next)
       activeDrag = null
@@ -1999,31 +1667,18 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       // key racing external state must not flip them back on undo), and
       // `seen` drops duplicate selection entries so each object's save
       // callback fires at most once.
-      const imageIds: string[] = []
-      const textIds: string[] = []
-      const shapeIds: string[] = []
-      const strokeIds: string[] = []
+      const ids: DeleteManyIds = { imageIds: [], textIds: [], shapeIds: [], strokeIds: [] }
       const seen = new Set<string>()
       for (const sel of selected) {
         if (seen.has(sel.id)) continue
         seen.add(sel.id)
-        if (sel.kind === 'image') {
-          const img = deps.getImages().find((i) => i.id === sel.id)
-          if (img && !img.deleted) imageIds.push(sel.id)
-        } else if (sel.kind === 'text') {
-          const t = deps.getTexts().find((x) => x.id === sel.id)
-          if (t && !t.deleted) textIds.push(sel.id)
-        } else if (sel.kind === 'shape') {
-          const sh = deps.getShapes().find((x) => x.id === sel.id)
-          if (sh && !sh.deleted) shapeIds.push(sel.id)
-        } else {
-          const s = deps.getStrokes().find((x) => x.id === sel.id)
-          if (s && !s.deleted) strokeIds.push(sel.id)
-        }
+        const b = behaviorFor(sel.kind)
+        if (b.resolve(deps, sel.id)) b.collectDeleteId(ids, sel.id)
       }
-      const didDelete = imageIds.length + textIds.length + shapeIds.length + strokeIds.length > 0
+      const didDelete =
+        ids.imageIds.length + ids.textIds.length + ids.shapeIds.length + ids.strokeIds.length > 0
       if (didDelete) {
-        const op: Op = { kind: 'delete-many', imageIds, textIds, shapeIds, strokeIds }
+        const op: Op = { kind: 'delete-many', ...ids }
         deps.applyOp(op)
         deps.pushOp(op)
       }
