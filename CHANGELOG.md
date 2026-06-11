@@ -6,6 +6,12 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 ## [Unreleased]
 
+No entries yet.
+
+## [1.5.0] — 2026-06-10
+
+**Review roadmap completion — composite undo, e2e safety net, store/select architecture unification, supply-chain hardening.** The remaining four steps of the 2026-06-10 implementation review (whose bug-fix pass shipped as v1.4.6), each landed as an adversarially-reviewed PR: group gestures now undo in one step; a Playwright smoke suite covers the interactive paths unit tests structurally cannot reach and gates CI; the four object stores and the Select tool's per-kind dispatch are unified behind the abstractions (`ObjectStore<T>`, `ObjectBehavior<T>`) that v2 AI features and deferred sync will build on — honoring ADR 0014's fired migration trigger with zero observable behavior change; and CI/deploy gain supply-chain pinning plus container runtime confinement.
+
 ### Added
 
 - **Dialog and pill a11y.** The settings side panel now declares `aria-modal="true"` and moves keyboard focus into the dialog on open (focus still returns to the opener on close, as before); the options menu's grid / spacing pills gain `aria-pressed` so screen readers announce the active selection, matching the right-click menu's pills.
