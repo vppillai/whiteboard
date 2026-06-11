@@ -70,23 +70,12 @@
  * handler.
  */
 
-import type {
-  ImageObject,
-  ShapeObject,
-  Stroke,
-  TextFontFamily,
-  TextObject,
-} from '@whiteboard/shared'
+import type { ImageObject, ShapeObject, Stroke, TextObject } from '@whiteboard/shared'
 import { imageAABB, imageCenter, pointInImage } from '../imagegeom'
-import { buildFillOpacitySlider } from '../menu-fillopacity'
-import { iconFillOutline, iconFillSolid, iconStrokeWidth } from '../menu-icons'
-import { pill, pillRow, sectionLabel, separator } from '../menu-ui'
 import type { Op, TransformManyItem } from '../ops'
 import { applyCamera, clearLayer } from '../render'
 import { pointInShape, shapeAABB } from '../rendershapes'
-import { getShapeFillOpacity } from '../settings'
 import { getStrokeBBox, getStrokePath, invalidateStrokeBBox } from '../stroke'
-import { buildSwatchPalette } from '../swatchpalette'
 import { pointInText, resizeToFit, TEXT_PADDING_X, textAABB } from '../textgeom'
 import {
   anchorBoardFor,
@@ -97,6 +86,7 @@ import {
   isOverRotationHandle,
   rotationHandlePos,
 } from './select/handles'
+import { renderShapeContextualMenu, renderTextContextualMenu } from './select/menu'
 import type { Tool, ToolContext } from './types'
 
 /** Discriminated-union pointer to a single board object across the
@@ -1351,168 +1341,6 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
     }
   }
 
-  /** Build the contextual menu for a shape selection (color / stroke
-   *  width / fill toggle). Mirrors the Shape tool's own menu so style
-   *  edits work in either mode. Each change emits an `edit-shape` op
-   *  so undo correctly restores the previous style. */
-  function renderShapeContextualMenu(
-    host: HTMLElement,
-    sh: ShapeObject,
-    dismiss: () => void,
-    rebuild?: () => void,
-    anchor?: { x: number; y: number },
-  ): void {
-    type EditPayload = {
-      color: string
-      strokeWidth: number
-      fill: string | undefined
-      fillOpacity: number | undefined
-    }
-    const snapshotEdit = (s: ShapeObject): EditPayload => ({
-      color: s.color,
-      strokeWidth: s.strokeWidth,
-      fill: s.fill,
-      fillOpacity: s.fillOpacity,
-    })
-    const applyEdit = (mutate: (s: ShapeObject) => void): void => {
-      commitDrag(null)
-      const before = snapshotEdit(sh)
-      mutate(sh)
-      deps.saveShape(sh)
-      const after = snapshotEdit(sh)
-      deps.pushOp({ kind: 'edit-shape', shapeId: sh.id, before, after })
-      deps.markCommittedDirty()
-    }
-
-    // Color first (per v1.4 brief — "shapes below swatch"). Shared
-    // palette helper (curated + custom + "+") matches the standalone
-    // Color picker and the Shape tool's menu — adding a custom swatch
-    // here is reflected immediately via rebuild.
-    host.appendChild(sectionLabel('Color'))
-    host.appendChild(
-      buildSwatchPalette({
-        active: sh.color,
-        onPick: (c) => {
-          applyEdit((s) => {
-            s.color = c
-            // If fill was on, keep it synced to the new stroke color.
-            if (s.fill) s.fill = c
-          })
-          dismiss()
-        },
-        addAt: anchor ?? { x: 0, y: 0 },
-        onPaletteChanged: () => rebuild?.(),
-      }),
-    )
-
-    host.appendChild(separator())
-
-    // Stroke width — icon = line preview at the corresponding thickness.
-    host.appendChild(sectionLabel('Stroke width'))
-    const widthRow = pillRow()
-    for (const w of [1, 2, 4, 8] as const) {
-      widthRow.appendChild(
-        pill({
-          label: `${w}px`,
-          icon: iconStrokeWidth(w),
-          active: sh.strokeWidth === w,
-          onClick: () => {
-            applyEdit((s) => {
-              s.strokeWidth = w
-            })
-            dismiss()
-          },
-        }),
-      )
-    }
-    host.appendChild(widthRow)
-
-    host.appendChild(separator())
-
-    // Fill toggle (icons: empty rect / filled rect).
-    // Lines / arrows don't visually carry fill — disable both the
-    // toggle and the opacity slider for those kinds so the user
-    // sees the controls exist but they don't fire confusing ops on
-    // unfillable shapes.
-    const supportsFill = sh.shape !== 'line' && sh.shape !== 'arrow'
-    host.appendChild(sectionLabel('Fill'))
-    const fillRow = pillRow()
-    const fillOn = !!sh.fill
-    fillRow.appendChild(
-      pill({
-        label: 'Outline only',
-        icon: iconFillOutline(),
-        active: !fillOn,
-        disabled: !supportsFill,
-        onClick: supportsFill
-          ? () => {
-              applyEdit((s) => {
-                s.fill = undefined
-              })
-              dismiss()
-            }
-          : undefined,
-      }),
-    )
-    fillRow.appendChild(
-      pill({
-        label: 'Filled',
-        icon: iconFillSolid(),
-        active: fillOn,
-        disabled: !supportsFill,
-        onClick: supportsFill
-          ? () => {
-              applyEdit((s) => {
-                s.fill = s.color
-                // Newly-filled shape gets the sticky opacity if it didn't
-                // already carry one — so toggling Outline→Filled inherits
-                // the current default rather than the legacy 0.25 constant.
-                if (s.fillOpacity === undefined) s.fillOpacity = getShapeFillOpacity()
-              })
-              dismiss()
-            }
-          : undefined,
-      }),
-    )
-    host.appendChild(fillRow)
-
-    // Fill opacity slider — uses the shared `buildFillOpacitySlider`
-    // helper so the widget visual matches the Shape tool's menu.
-    // Live preview during `input` (mutates the shape + saves +
-    // marks dirty so the canvas re-renders). On `change` (pointerup
-    // / keyboard release) the helper supplies the scrub-start value
-    // so we emit exactly ONE edit-shape op per drag with the correct
-    // pre-scrub `before` payload.
-    host.appendChild(sectionLabel('Fill opacity'))
-    host.appendChild(
-      buildFillOpacitySlider({
-        get: () => sh.fillOpacity ?? getShapeFillOpacity(),
-        disabled: !supportsFill || !fillOn,
-        onPreview: (v) => {
-          sh.fillOpacity = v
-          deps.saveShape(sh)
-          deps.markCommittedDirty()
-        },
-        onCommit: (v, scrubStart) => {
-          if (scrubStart === null || v === scrubStart) return
-          const before: EditPayload = {
-            color: sh.color,
-            strokeWidth: sh.strokeWidth,
-            fill: sh.fill,
-            fillOpacity: scrubStart,
-          }
-          const after: EditPayload = {
-            color: sh.color,
-            strokeWidth: sh.strokeWidth,
-            fill: sh.fill,
-            fillOpacity: v,
-          }
-          deps.pushOp({ kind: 'edit-shape', shapeId: sh.id, before, after })
-        },
-      }),
-    )
-  }
-
   return {
     id: 'select',
     cursor: 'default',
@@ -1987,150 +1815,48 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       // Image-selection / stroke-selection / no-selection fall through
       // to the static TOOL / VIEW / EXPORT rows that toolmenu.ts adds
       // outside this hook.
+      //
+      // This method is the dispatcher: it resolves the selection to a
+      // live object, then delegates the DOM construction to the pure
+      // builders in ./select/menu.ts, injecting the tool internals they
+      // need (drag commit, persistence, op push) as explicit deps.
       const sel = singleSelection()
 
       if (sel?.kind === 'shape') {
         const sh = deps.getShapes().find((x) => x.id === sel.id)
         if (!sh || sh.deleted) return
-        renderShapeContextualMenu(host, sh, dismiss, rebuild, anchor)
+        renderShapeContextualMenu(
+          host,
+          sh,
+          {
+            commitActiveDrag: () => commitDrag(null),
+            saveShape: (s) => deps.saveShape(s),
+            pushOp: (op) => deps.pushOp(op),
+            markCommittedDirty: () => deps.markCommittedDirty(),
+          },
+          dismiss,
+          rebuild,
+          anchor,
+        )
         return
       }
 
       if (!sel || sel.kind !== 'text') return
       const t = deps.getTexts().find((x) => x.id === sel.id)
       if (!t || t.deleted) return
-
-      const applyEdit = (mutate: (text: TextObject) => void): void => {
-        // Commit any in-flight drag BEFORE snapshotting `before` — without
-        // this, picking a color while a rotation drag is mid-flight would
-        // emit two undo ops for what felt like one gesture (the rotation
-        // op on drag-release + this edit op now). Safe to call when no
-        // drag is active (commitDrag no-ops on null drag).
-        commitDrag(null)
-        const before = {
-          content: t.content,
-          font: { ...t.font },
-          color: t.color,
-          wrapWidth: t.wrapWidth,
-        }
-        mutate(t)
-        // Re-fit the rect to any font-affecting changes so the rendered
-        // bbox stays correct.
-        const fitted = resizeToFit(t)
-        t.transform = fitted.transform
-        deps.saveText(t)
-        const after = {
-          content: t.content,
-          font: { ...t.font },
-          color: t.color,
-          wrapWidth: t.wrapWidth,
-        }
-        deps.pushOp({ kind: 'edit-text', textId: t.id, before, after })
-        deps.markCommittedDirty()
-      }
-
-      // COLOR — shared palette (curated + custom + "+").
-      host.appendChild(sectionLabel('Color'))
-      host.appendChild(
-        buildSwatchPalette({
-          active: t.color,
-          onPick: (c) => {
-            applyEdit((x) => {
-              x.color = c
-            })
-            dismiss()
-          },
-          addAt: anchor ?? { x: 0, y: 0 },
-          onPaletteChanged: () => rebuild?.(),
-        }),
+      renderTextContextualMenu(
+        host,
+        t,
+        {
+          commitActiveDrag: () => commitDrag(null),
+          saveText: (x) => deps.saveText(x),
+          pushOp: (op) => deps.pushOp(op),
+          markCommittedDirty: () => deps.markCommittedDirty(),
+        },
+        dismiss,
+        rebuild,
+        anchor,
       )
-
-      // FONT
-      host.appendChild(separator())
-      host.appendChild(sectionLabel('Font'))
-      const fontRow = pillRow()
-      const families: { id: TextFontFamily; label: string }[] = [
-        { id: 'mono', label: 'Mono' },
-        { id: 'sans', label: 'Sans' },
-        { id: 'serif', label: 'Serif' },
-      ]
-      for (const f of families) {
-        fontRow.appendChild(
-          pill({
-            label: f.label,
-            active: t.font.family === f.id,
-            onClick: () => {
-              applyEdit((x) => {
-                x.font = { ...x.font, family: f.id }
-              })
-              dismiss()
-            },
-          }),
-        )
-      }
-      host.appendChild(fontRow)
-
-      // SIZE
-      host.appendChild(separator())
-      host.appendChild(sectionLabel('Size'))
-      const sizeRow = pillRow()
-      for (const s of [12, 14, 18, 24, 36]) {
-        sizeRow.appendChild(
-          pill({
-            label: String(s),
-            active: t.font.size === s,
-            onClick: () => {
-              applyEdit((x) => {
-                x.font = { ...x.font, size: s }
-              })
-              dismiss()
-            },
-          }),
-        )
-      }
-      host.appendChild(sizeRow)
-
-      // STYLE (B / I / U)
-      host.appendChild(separator())
-      host.appendChild(sectionLabel('Style'))
-      const styleRow = pillRow()
-      styleRow.appendChild(
-        pill({
-          label: 'B',
-          active: t.font.bold,
-          onClick: () => {
-            applyEdit((x) => {
-              x.font = { ...x.font, bold: !x.font.bold }
-            })
-            dismiss()
-          },
-        }),
-      )
-      styleRow.appendChild(
-        pill({
-          label: 'I',
-          active: t.font.italic,
-          onClick: () => {
-            applyEdit((x) => {
-              x.font = { ...x.font, italic: !x.font.italic }
-            })
-            dismiss()
-          },
-        }),
-      )
-      styleRow.appendChild(
-        pill({
-          label: 'U',
-          active: t.font.underline,
-          onClick: () => {
-            applyEdit((x) => {
-              x.font = { ...x.font, underline: !x.font.underline }
-            })
-            dismiss()
-          },
-        }),
-      )
-      host.appendChild(styleRow)
     },
 
     cleanup(): void {
