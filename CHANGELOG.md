@@ -41,6 +41,10 @@ No entries yet.
 - **`Tool.onPointerLeave?(ctx)`** — new optional vtable hook (ADR 0005/0007 surface) for tools that paint their own cursor.
 - **`enabledHandles(view)`** in `tools/select/handles.ts` — per-kind selection-handle availability, single source of truth for renderer + hit-test.
 
+### Security
+
+- **vite bumped 8.0.13 → 8.1.5** past [GHSA-fx2h-pf6j-xcff](https://github.com/advisories/GHSA-fx2h-pf6j-xcff) (`server.fs.deny` bypass on Windows alternate paths — dev-server-only exposure, but it tripped CI's high-severity audit gate).
+
 ### Tests
 
 - +9 unit tests (**283** total): eraser-hold editable guard (guarded keydown, unguarded keyup, stuck-hold recovery), pointer-router single-owner gating (second pointerdown ignored, stray pointerup ignored, owner up clears, implicit pen-lift, hover moves flow when idle), laser tap-sample fade-deadline survival.
