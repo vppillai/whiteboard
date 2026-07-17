@@ -113,6 +113,7 @@ import { createLocalShapeStore, type ShapeStore } from './shapestore'
 import { dismissSidePanel, isSidePanelOpen, showSidePanel } from './sidepanel'
 import { bboxesIntersect, effectiveOpacity, getStrokeBBox, getStrokePath } from './stroke'
 import { createLocalStrokeStore, type StrokeStore } from './strokestore'
+import { resizeToFit } from './textgeom'
 import { createLocalTextStore, type TextStore } from './textstore'
 import { cycleMode, initTheme, resolveInkColor } from './theme'
 import { getPersistedPinnedAnchor, openToolMenu } from './toolmenu'
@@ -214,7 +215,13 @@ async function main(): Promise<void> {
   // like the clear-board toast can hand focus back here on close.
   root.tabIndex = -1
 
-  const target = setupCanvas(root)
+  // onResize: any external re-rasterize (window resize, devicePixelRatio
+  // change) ERASES the canvas bitmaps, so the frame loop must repaint.
+  // `committedDirty` is declared further down — safe because the callback
+  // only fires on events, long after main() finished initializing.
+  const target = setupCanvas(root, () => {
+    committedDirty = true
+  })
   const camera = makeCamera()
 
   // ---------------------------------------------------------------------
@@ -408,9 +415,23 @@ async function main(): Promise<void> {
   // every move/resize/rotate, so consolidating the closure keeps the error
   // policy (currently: warn-and-continue) in one place — future changes
   // like surfacing a toast or retry only touch this line.
+  // Shared failure policy for all persist paths: keep the in-memory /
+  // on-screen state (warn-and-continue) but TELL the user once per
+  // session that changes aren't reaching storage — a silent console.warn
+  // means quota errors (Safari private mode, IDB near the cap) lose work
+  // with zero signal until the next reload surprises them.
+  let persistFailureNotified = false
+  const warnPersistFailure = (message: string, err: unknown): void => {
+    console.warn(message, err)
+    if (persistFailureNotified) return
+    persistFailureNotified = true
+    showInfoToast("Changes aren't being saved — storage may be full")
+  }
+
   const persistImageMeta = createWarnAndContinuePersist<ImageObject>(
     imageStore.upsert.bind(imageStore),
     'whiteboard/web: failed to persist image metadata:',
+    warnPersistFailure,
   )
 
   // Same pattern for text records — single closure used by opCtx and the
@@ -418,6 +439,7 @@ async function main(): Promise<void> {
   const persistText = createWarnAndContinuePersist<TextObject>(
     textStore.upsert.bind(textStore),
     'whiteboard/web: failed to persist text:',
+    warnPersistFailure,
   )
 
   // Same pattern for shape records — single closure used by opCtx (and the
@@ -425,14 +447,17 @@ async function main(): Promise<void> {
   const persistShape = createWarnAndContinuePersist<ShapeObject>(
     shapeStore.upsert.bind(shapeStore),
     'whiteboard/web: failed to persist shape:',
+    warnPersistFailure,
   )
   const persistStroke = createWarnAndContinuePersist<Stroke>(
     strokeStore.upsert.bind(strokeStore),
     'whiteboard/web: failed to persist stroke:',
+    warnPersistFailure,
   )
   const persistSelectStroke = createWarnAndContinuePersist<Stroke>(
     strokeStore.upsert.bind(strokeStore),
     'whiteboard/web: failed to persist stroke (Select move/delete):',
+    warnPersistFailure,
   )
 
   const opCtx: OpContext = {
@@ -608,7 +633,15 @@ async function main(): Promise<void> {
       content: content.el,
       refocusOnClose: root,
       tag: 'settings',
-      onDismiss: content.cleanup,
+      onDismiss: () => {
+        content.cleanup()
+        // Leaving Settings disarms any pending destructive toast the
+        // panel spawned — otherwise the toast outlives its context and
+        // the next click on the same button confirms with no toast
+        // shown (an armed flow's request() fires onConfirm immediately).
+        resetFlow.cancel()
+        factoryResetFlow.cancel()
+      },
     })
   }
 
@@ -738,6 +771,9 @@ async function main(): Promise<void> {
   // fallthrough in toolCtx.setCursor.
   const onRootPointerLeave = (): void => {
     root.style.cursor = tool.current.cursor ?? ''
+    // Let the tool drop its self-drawn cursor too (pen brush preview,
+    // eraser disc) — the CSS reset above only covers the OS cursor.
+    tool.current.onPointerLeave?.(toolCtx)
   }
   root.addEventListener('pointerleave', onRootPointerLeave)
   registerCleanup(() => root.removeEventListener('pointerleave', onRootPointerLeave))
@@ -1062,10 +1098,18 @@ async function main(): Promise<void> {
     e.preventDefault()
     const fx = e.clientX - canvasRect.left
     const fy = e.clientY - canvasRect.top
+    // Normalize non-pixel deltas. Firefox reports deltaMode=1 (lines,
+    // ~3 per notch) for physical mouse wheels where Chrome reports
+    // pixels (~100 per notch) — unnormalized, pan crawls at 3 px/notch
+    // and Ctrl+zoom is a imperceptible 1.0015³ per notch. 16 px/line ≈
+    // the default line height browsers use for the same conversion.
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? target.height : 1
+    const dx = e.deltaX * unit
+    const dy = e.deltaY * unit
     if (e.ctrlKey || e.metaKey) {
-      zoomAt(camera, fx, fy, ZOOM_WHEEL_FACTOR ** -e.deltaY)
+      zoomAt(camera, fx, fy, ZOOM_WHEEL_FACTOR ** -dy)
     } else {
-      panByScreen(camera, -e.deltaX, -e.deltaY)
+      panByScreen(camera, -dx, -dy)
     }
     onCameraChange()
   }
@@ -1189,6 +1233,11 @@ async function main(): Promise<void> {
     if (which === 'bold') t.font.bold = !t.font.bold
     else if (which === 'italic') t.font.italic = !t.font.italic
     else t.font.underline = !t.font.underline
+    // Bold/italic glyphs have different metrics — refit the rect so the
+    // text can't overflow its own box / selection outline. resizeToFit
+    // also drops the stale measurement cache entry (the render pass
+    // would otherwise keep drawing the pre-toggle glyphs).
+    t.transform = resizeToFit(t).transform
     persistText(t)
     const after = {
       content: t.content,
@@ -1339,6 +1388,13 @@ async function main(): Promise<void> {
           handled = true
         }
         if (clearFlow.cancel()) handled = true
+        // The settings-panel destructive flows too — an Esc that closes
+        // the panel must not leave an armed confirmation toast floating:
+        // a still-armed flow confirms INSTANTLY on the next request(),
+        // so an orphaned toast turns the next button click into an
+        // unconfirmed wipe.
+        if (resetFlow.cancel()) handled = true
+        if (factoryResetFlow.cancel()) handled = true
         if (dismissAllPopovers()) handled = true
         // Esc closes the help overlay if open. Goes after popovers so a
         // user with both help AND a popover open dismisses one at a
@@ -1570,7 +1626,25 @@ async function main(): Promise<void> {
   // Cleanup on unload AND on HMR dispose. Run all registered teardowns +
   // detach the pointer pipeline. Idempotent (cleanups array is drained).
   registerCleanup(detachPointer)
+  // Flush the active tool's in-progress state before the page goes away.
+  // Tool cleanup() commits — the Text tool persists the in-progress edit
+  // and pushes its op; Select commits an in-flight drag — so closing the
+  // tab mid-typing can't silently discard visible content. Wired to BOTH
+  // beforeunload (via runAllCleanups) and pagehide: pagehide also fires
+  // on bfcache navigations where beforeunload doesn't, and cleanup() is
+  // idempotent (commit guards on its own active state) so double-fire is
+  // harmless. Same reliability reasoning as viewstate.ts's flush.
+  const flushActiveToolState = (): void => {
+    try {
+      tool.current.cleanup?.()
+    } catch (err) {
+      console.warn('whiteboard/web: tool flush failed:', err)
+    }
+  }
+  window.addEventListener('pagehide', flushActiveToolState)
+  registerCleanup(() => window.removeEventListener('pagehide', flushActiveToolState))
   const runAllCleanups = (): void => {
+    flushActiveToolState()
     for (const fn of cleanups.splice(0)) {
       try {
         fn()

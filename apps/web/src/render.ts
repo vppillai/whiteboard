@@ -35,7 +35,15 @@ export interface RenderTarget {
   cleanup(): void
 }
 
-export function setupCanvas(parent: HTMLElement): RenderTarget {
+export function setupCanvas(
+  parent: HTMLElement,
+  /** Called after every re-rasterize triggered by a window resize or a
+   *  devicePixelRatio change (NOT the initial synchronous sizing).
+   *  Assigning canvas width/height ERASES the bitmap per the HTML spec,
+   *  so the caller must mark its render state dirty here or the board
+   *  stays blank until the next unrelated repaint. */
+  onResize?: () => void,
+): RenderTarget {
   const committed = makeLayer()
   const strokes = makeLayer()
   const live = makeLayer()
@@ -59,6 +67,27 @@ export function setupCanvas(parent: HTMLElement): RenderTarget {
     }
   }
 
+  const onExternalResize = () => {
+    resize()
+    onResize?.()
+  }
+
+  // devicePixelRatio changes (drag between monitors of different DPI,
+  // browser zoom) do NOT fire a window `resize` when the CSS-pixel size
+  // is unchanged — the standard detector is a matchMedia listener on the
+  // CURRENT resolution, re-armed after each fire because the query
+  // string bakes in the old dpr.
+  let dprMedia: MediaQueryList | null = null
+  const onDprChange = (): void => {
+    onExternalResize()
+    armDprListener()
+  }
+  const armDprListener = (): void => {
+    dprMedia?.removeEventListener('change', onDprChange)
+    dprMedia = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`)
+    dprMedia.addEventListener('change', onDprChange)
+  }
+
   const target: RenderTarget = {
     committed,
     strokes,
@@ -66,11 +95,15 @@ export function setupCanvas(parent: HTMLElement): RenderTarget {
     width: 0,
     height: 0,
     dpr: window.devicePixelRatio || 1,
-    cleanup: () => window.removeEventListener('resize', resize),
+    cleanup: () => {
+      window.removeEventListener('resize', onExternalResize)
+      dprMedia?.removeEventListener('change', onDprChange)
+    },
   }
 
   resize()
-  window.addEventListener('resize', resize)
+  window.addEventListener('resize', onExternalResize)
+  armDprListener()
 
   return target
 }

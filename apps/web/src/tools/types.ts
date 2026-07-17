@@ -102,6 +102,16 @@ export interface Tool {
    * tools that only render in response to pointer events can omit it.
    */
   redraw?(ctx: ToolContext): void
+  /**
+   * The pointer left the canvas root. Tools that paint their own cursor
+   * onto the live layer (pen's brush preview, eraser's disc) must clear
+   * that state here — without it the last-rendered cursor stays frozen
+   * on canvas as a "ghost" while the user is over the toolpill / off-
+   * window (and pen's idle timer would even promote the ghost to the
+   * bright halo). Not fired mid-gesture: pointer capture retargets
+   * events to the root until release. Optional.
+   */
+  onPointerLeave?(ctx: ToolContext): void
   /** Optional teardown when the tool is being deactivated (e.g. user
    *  switches to another tool). Cancel any in-flight gesture cleanly. */
   cleanup?(): void

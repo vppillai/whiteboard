@@ -204,6 +204,14 @@ export function measureText(
  * text tool after any edit op (content change, font change, B/I toggle).
  */
 export function resizeToFit(t: TextObject): TextObject {
+  // Callers refit AFTER mutating content / font / wrapWidth on `t`, then
+  // copy the returned transform back onto `t` — so `t`'s identity (and
+  // its WeakMap measurement-cache entry) survives the edit. Invalidate
+  // here, at the shared refit chokepoint, so no mutation site can forget
+  // and leave the render pass drawing the PRE-edit glyphs inside a
+  // post-edit box (v1.5 review finding: re-editing a committed text
+  // visually reverted to its old content until undo/redo or reload).
+  invalidateTextMeasurement(t)
   // When wrapWidth is set, the rect's width is FIXED to wrapWidth +
   // padding — the content wraps to fit that width, and only the height
   // grows with the wrapped line count. Without wrapWidth, the width is

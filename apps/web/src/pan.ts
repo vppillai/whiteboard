@@ -10,6 +10,7 @@
  */
 
 import type { Camera } from './camera'
+import { isEditableTarget } from './editable'
 
 export interface PanController {
   /**
@@ -47,6 +48,11 @@ export function attachPan(opts: PanOptions): PanController {
 
   const onKeyDown = (e: KeyboardEvent): void => {
     if (e.key === ' ' && !e.repeat) {
+      // A space typed into an editable (text editor, settings input) is
+      // text, not a pan modifier. Keyup stays unguarded so a hold that
+      // began on canvas always releases even if focus moved into an
+      // input meanwhile. See editable.ts.
+      if (isEditableTarget(e.target)) return
       spaceHeld = true
       if (!panState) root.dataset.input = 'pan'
     }

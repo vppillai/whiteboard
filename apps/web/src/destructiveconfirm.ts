@@ -74,7 +74,12 @@ export function createDestructiveConfirm(opts: DestructiveConfirmOptions): Destr
     })
 
     toast.append(msg, cancelBtn, confirmBtn)
-    confirmBtn.focus({ preventScroll: true })
+    // Focus lands on CANCEL, not the destructive action: the toast often
+    // appears right after an Enter/Space press on the triggering button,
+    // and a stray repeat of that key must not complete an irreversible
+    // wipe. Confirming stays a deliberate act (click, Tab+Enter, or a
+    // second request()).
+    cancelBtn.focus({ preventScroll: true })
   }
 
   const request = (): void => {

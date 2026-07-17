@@ -7,11 +7,37 @@
  * operate on.
  */
 
-import type { ImageObject } from '@whiteboard/shared'
+import type { ImageObject, ShapeObject } from '@whiteboard/shared'
 import { rotateAroundPoint } from '../../geom'
 import type { ObjectView } from '../select'
 
 export type HandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
+
+/**
+ * Per-kind handle availability — the single source of truth shared by the
+ * hit-test (`handleAt`) and the selection-affordance renderer
+ * (select.ts's `drawFloatingObjectSelection`). Keeping one copy is the
+ * point: the v1.5 line-handle bug happened because the two sites each
+ * hand-maintained this list and neither had a line/arrow case.
+ *
+ *   - Image / rect / ellipse: 4 corners + 4 edges (8). Corners do
+ *     anchor-preserving rect resize; edges do 1-axis resize.
+ *   - Text: 4 corners (font-size scale) + E/W edges (wrap-width).
+ *     N/S hidden — text height is content-derived.
+ *   - Line / arrow: ONLY the two true endpoints. The transform encodes a
+ *     line as (x, y) → (x+w, y+h), which are `handlePositions`' `nw` and
+ *     `se`; the other six rect handles sit on empty canvas for any
+ *     non-axis-aligned line, and dragging one fed a bogus edge-midpoint
+ *     anchor into `applyLineResize`, teleporting an endpoint.
+ */
+export function enabledHandles(view: ObjectView): readonly HandleId[] {
+  if (view.selection.kind === 'text') return ['nw', 'ne', 'se', 'sw', 'e', 'w']
+  if (view.selection.kind === 'shape') {
+    const sh = view.obj as ShapeObject
+    if (sh.shape === 'line' || sh.shape === 'arrow') return ['nw', 'se']
+  }
+  return ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
+}
 
 /** Distance from the top-center handle to the rotation handle, in screen
  *  pixels. Constant so it stays the same visual offset at every zoom. */
@@ -177,11 +203,7 @@ export function handleAt(
 ): HandleId | null {
   const tol = HANDLE_HIT_PX / scale
   const positions = handlePositions(view.transform, view.rotation)
-  const enabled =
-    view.selection.kind === 'text'
-      ? (['nw', 'ne', 'se', 'sw', 'e', 'w'] as const)
-      : (['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const)
-  for (const id of enabled) {
+  for (const id of enabledHandles(view)) {
     const p = positions[id]
     if (Math.abs(p.x - boardX) <= tol && Math.abs(p.y - boardY) <= tol) return id
   }
