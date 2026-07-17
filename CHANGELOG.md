@@ -8,6 +8,47 @@ Each milestone (M0..M7 — see [docs/milestones.md](docs/milestones.md)) closes 
 
 No entries yet.
 
+## [1.5.1] — 2026-07-17
+
+**UX bug-fix pass — twenty verified defects from a six-dimension frontend review** (input pipeline, select tool, text tool, camera/render, UI chrome/keyboard, undo/persistence). Every finding was traced end-to-end in code before fixing; each fix landed with a regression test where the unit harness can reach it.
+
+### Fixed
+
+- **Window resizes no longer blank the board.** Reassigning a canvas's bitmap dimensions erases it (per the HTML spec), and nothing marked the frame dirty afterward — so any resize (snap, devtools toggle, orientation flip) left the board visually empty until the next unrelated interaction. `setupCanvas` now takes an `onResize` callback that owns the "re-rasterize → repaint" contract.
+- **Different-DPI monitor moves re-rasterize.** `devicePixelRatio` changes don't fire `resize` when the window's CSS size is unchanged (the common drag-between-monitors case), leaving rendering blurry. A re-armed `matchMedia('(resolution: …dppx)')` listener now tracks DPR directly.
+- **Firefox mouse-wheel pan/zoom un-crawled.** Wheel deltas are now normalized by `deltaMode` — Firefox reports line-based deltas (~3/notch) where Chrome reports pixels (~100/notch), so pan moved 3 px per notch and Ctrl+zoom was imperceptible.
+- **A second concurrent pointer can't corrupt the active gesture.** The pointer router now tracks a single owning `pointerId`: a stray second touch mid-stroke is ignored instead of restarting the stroke, and a stray `pointerup` from an unrelated pointer no longer prematurely commits the gesture.
+- **Typing into inputs can't hijack tools.** The spring-loaded eraser (`E`) and Space-pan listeners were missing the editable-target guard the keymap already had — typing `e` into the settings hex field switched tools (dropping any selection via the outgoing tool's cleanup). The guard now lives in one shared module (`editable.ts`) used by all four document-level key listeners; keyup stays unguarded so a hold started on canvas can't stick.
+- **Focused sliders/checkboxes no longer kill every shortcut.** The editable guard matched *all* `input` types, and browsers leave focus on a slider after a drag — so touching a settings slider silently disabled every shortcut (including Esc and Cmd+,) until the user clicked elsewhere. Shortcut dispatchers now guard on text-entry controls only; hold-modifiers keep the broader net.
+- **Line/arrow selection handles are the two real endpoints.** All 8 rect handles were drawn and grabbable on lines/arrows, but six of them sit on empty canvas for any diagonal line, and dragging one fed a bogus edge-midpoint anchor into the endpoint-resize math — teleporting an endpoint. Per-kind handle availability is now a single shared helper (`enabledHandles`) used by both the renderer and the hit-test so the two can never drift.
+- **Shift+tap on empty canvas keeps the selection.** Shift means "extend" everywhere else in the Select tool (shift+click toggles, shift+marquee unions), but a Shift+*tap* that hit nothing wiped the whole selection.
+- **Edited texts no longer render their pre-edit content.** The per-object text-measurement cache wasn't invalidated on the common commit path (only on undo/redo), so re-editing a committed text drew the old glyphs inside the new box until an undo or reload. Invalidation now lives inside `resizeToFit` — the shared refit chokepoint — so no mutation site can forget it; the one path that refits a temp object (Select's corner-drag font scaling) invalidates explicitly.
+- **Editing a rotated text puts the editor on the text.** The contenteditable overlay ignored `rotation`, appearing axis-aligned and displaced from the text the user double-clicked. It now applies the matching CSS rotation around the rect center, mirroring the canvas render.
+- **Cmd+B/I on a selected (non-editing) text refits its box** so bold/italic glyph metrics can't overflow the rect and selection outline.
+- **In-progress text edits survive tab close.** The active tool's state is flushed (committing the edit + its undo op through the normal path) on `beforeunload` *and* `pagehide` — previously a paragraph typed without Esc was silently gone on reload.
+- **Persistence failures surface a toast.** Every board mutation persists warn-and-continue; a quota error (Safari private mode, IDB near cap) lost work with only a console line. First failure per session now shows "Changes aren't being saved — storage may be full".
+- **Destructive confirmation toasts focus Cancel, not the destructive button** — a stray Enter right after clicking "Factory reset…" no longer wipes everything.
+- **Orphaned destructive toasts can't arm a silent wipe.** Esc now cancels the settings-panel reset / factory-reset confirmation toasts (previously only clear-board), and dismissing the panel disarms them — an armed-but-invisible flow used to make the *next* click confirm instantly with no toast shown.
+- **Laser taps are visible.** A stationary tap (the "look at this spot" gesture) rendered nothing — both draw paths required ≥2 samples. Single-sample spans now draw a fading dot matched to the trail's width and fade lifecycle.
+- **No more ghost brush cursor.** Pen and eraser draw their own cursor on the live layer, but nothing cleared it when the pointer left the canvas — the preview froze in place (and the pen's idle timer then promoted the ghost to the bright halo while the user was in the settings panel). A new optional `Tool.onPointerLeave` hook clears hover state and timers.
+- **Holding `?` no longer flickers the help overlay** (missing auto-repeat guard — every other single-key toggle had one).
+- **Escape during IME composition stays in the text editor** — dismissing a candidate window no longer commits and exits the edit.
+
+### Changed (internal)
+
+- **`editable.ts`** — the editable-target guard idiom, previously inlined per listener (and therefore missed by two of the four listeners that needed it), is now one module with two documented tiers: `isTextEntryTarget` for shortcut dispatchers, `isEditableTarget` for hold-style modifiers.
+- **`setupCanvas(parent, onResize?)`** — the render target now owns notifying the caller after any external re-rasterize (window resize or DPR change) instead of the caller inferring when bitmaps were wiped.
+- **`Tool.onPointerLeave?(ctx)`** — new optional vtable hook (ADR 0005/0007 surface) for tools that paint their own cursor.
+- **`enabledHandles(view)`** in `tools/select/handles.ts` — per-kind selection-handle availability, single source of truth for renderer + hit-test.
+
+### Security
+
+- **vite bumped 8.0.13 → 8.1.5** past [GHSA-fx2h-pf6j-xcff](https://github.com/advisories/GHSA-fx2h-pf6j-xcff) (`server.fs.deny` bypass on Windows alternate paths — dev-server-only exposure, but it tripped CI's high-severity audit gate).
+
+### Tests
+
+- +9 unit tests (**283** total): eraser-hold editable guard (guarded keydown, unguarded keyup, stuck-hold recovery), pointer-router single-owner gating (second pointerdown ignored, stray pointerup ignored, owner up clears, implicit pen-lift, hover moves flow when idle), laser tap-sample fade-deadline survival.
+
 ## [1.5.0] — 2026-06-10
 
 **Review roadmap completion — composite undo, e2e safety net, store/select architecture unification, supply-chain hardening.** The remaining four steps of the 2026-06-10 implementation review (whose bug-fix pass shipped as v1.4.6), each landed as an adversarially-reviewed PR: group gestures now undo in one step; a Playwright smoke suite covers the interactive paths unit tests structurally cannot reach and gates CI; the four object stores and the Select tool's per-kind dispatch are unified behind the abstractions (`ObjectStore<T>`, `ObjectBehavior<T>`) that v2 AI features and deferred sync will build on — honoring ADR 0014's fired migration trigger with zero observable behavior change; and CI/deploy gain supply-chain pinning plus container runtime confinement.

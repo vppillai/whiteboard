@@ -511,6 +511,18 @@ export function createPenTool(opts: PenToolOptions): Tool {
       renderStroke(ctx)
     },
 
+    onPointerLeave(ctx) {
+      // Guard: capture means leave shouldn't fire mid-stroke, but if a
+      // quirk delivers one anyway, never drop an in-flight stroke.
+      if (active) return
+      lastHover = null
+      cancelIdleTimer()
+      cancelJiggleTimer()
+      jiggleWindow.length = 0
+      jiggleHaloUntilT = 0
+      clearLayer(ctx.liveLayer)
+    },
+
     onPointerUp(_e, _ctx) {
       if (!active) return
       opts.callbacks.onStrokeCommit(active)

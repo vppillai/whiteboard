@@ -8,6 +8,8 @@
  * lives in settings/panel-content.ts.
  */
 
+import { isTextEntryTarget } from './editable'
+
 export interface SidePanel {
   el: HTMLElement
   dismiss(): void
@@ -89,10 +91,11 @@ export function showSidePanel(opts: SidePanelOptions): SidePanel {
 
   const onKey = (e: KeyboardEvent): void => {
     if (e.key === 'Escape') {
-      // Esc inside an editable (the settings hex field etc.) belongs to
-      // the field — leave the browser default intact and keep the panel.
-      const t = e.target as HTMLElement | null
-      if (t?.closest('input, textarea, [contenteditable]')) return
+      // Esc inside a text-entry control (the settings hex field etc.)
+      // belongs to the field — leave the browser default intact and keep
+      // the panel. Text-entry only: a focused slider / checkbox must not
+      // eat Esc (see editable.ts).
+      if (isTextEntryTarget(e.target)) return
       e.preventDefault()
       dismiss()
     }

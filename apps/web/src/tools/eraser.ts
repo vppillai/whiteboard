@@ -296,6 +296,15 @@ export function createEraserTool(opts: EraserToolOptions): EraserTool {
     id: 'eraser',
     cursor: 'none',
 
+    onPointerLeave(ctx) {
+      // Drop the self-drawn cursor disc when the pointer exits the
+      // canvas — otherwise it freezes in place as a ghost. Guarded so a
+      // quirky mid-sweep leave can't clear an active gesture's feedback.
+      if (active) return
+      lastCursor = null
+      clearLayer(ctx.liveLayer)
+    },
+
     onPointerDown(e, ctx) {
       const { x, y } = ctx.toBoard(e.clientX, e.clientY)
       active = true

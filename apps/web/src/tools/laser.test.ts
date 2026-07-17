@@ -39,4 +39,22 @@ describe('laser _cullExpired', () => {
     expect(_cullExpired(samples, now)).toBe(false)
     expect(samples).toEqual([])
   })
+
+  // A stationary tap (pointerdown + pointerup, no move) leaves exactly one
+  // sample in the buffer — the whole "span" the redraw's dot-fallback has
+  // to render. redraw() and drawSpan() aren't exported (they draw straight
+  // to a canvas context, so there's no seam to unit-test without a real
+  // canvas), but the fade loop's own "keep animating" decision is just
+  // `_cullExpired`'s return value, and that's exercised here: a lone
+  // tap-sample must stay alive (and thus keep the RAF loop — and the dot's
+  // fade — going) right up to its deadline, then get culled in the same
+  // frame that crosses it, exactly like a multi-sample trail does.
+  test('a lone tap-sample survives until its fade deadline, then expires', () => {
+    const tap = s(1000, false)
+    const samples = [tap]
+    expect(_cullExpired(samples, tap.t + LASER_FADE_MS)).toBe(true)
+    expect(samples).toEqual([tap])
+    expect(_cullExpired(samples, tap.t + LASER_FADE_MS + 1)).toBe(false)
+    expect(samples).toEqual([])
+  })
 })

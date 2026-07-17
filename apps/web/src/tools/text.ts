@@ -33,6 +33,7 @@
  */
 
 import type { TextFontFamily, TextObject } from '@whiteboard/shared'
+import { ROTATION_EPSILON } from '../geom'
 import { makeTextId } from '../ids'
 import { pill, pillRow, sectionLabel, separator } from '../menu-ui'
 import type { Op } from '../ops'
@@ -226,6 +227,21 @@ export function createTextTool(deps: TextToolDeps): TextTool {
     el.style.position = 'fixed'
     el.style.left = `${screen.x}px`
     el.style.top = `${screen.y}px`
+    // Rotated texts: the canvas draws the rect rotated around its CENTER
+    // (rendertexts.ts), so mirror that with a CSS rotate about the same
+    // point — otherwise the editor appears axis-aligned and displaced
+    // from the text the user double-clicked. left/top above already put
+    // the UNrotated top-left in place; rotating about the rect center
+    // reproduces the canvas geometry exactly. Re-applied on every input,
+    // so the origin tracks the refit rect as content changes.
+    const rot = text.rotation ?? 0
+    if (Math.abs(rot) > ROTATION_EPSILON) {
+      el.style.transformOrigin = `${screenW / 2}px ${screenH / 2}px`
+      el.style.transform = `rotate(${rot}rad)`
+    } else {
+      el.style.transformOrigin = ''
+      el.style.transform = ''
+    }
     // Padding mirrors textgeom.TEXT_PADDING_X/Y so typed text aligns
     // with the rendered text's first-character left edge.
     el.style.padding = `${TEXT_PADDING_Y * ctx.camera.scale}px ${TEXT_PADDING_X * ctx.camera.scale}px`
@@ -367,6 +383,11 @@ export function createTextTool(deps: TextToolDeps): TextTool {
       // editable still runs.
       e.stopPropagation()
       if (e.key === 'Escape') {
+        // During IME composition (Japanese / Chinese candidate window),
+        // Escape means "dismiss the candidate list", not "exit the
+        // editor" — some browser/IME combos still deliver the keydown
+        // to the page with isComposing set. Let the IME have it.
+        if (e.isComposing) return
         e.preventDefault()
         commitEdit()
         deps.onEscExit()

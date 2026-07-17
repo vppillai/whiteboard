@@ -78,7 +78,13 @@ import type { Op, TransformManyItem } from '../ops'
 import { applyCamera, clearLayer } from '../render'
 import { pointInShape, shapeAABB } from '../rendershapes'
 import { getStrokeBBox, getStrokePath } from '../stroke'
-import { pointInText, resizeToFit, TEXT_PADDING_X, textAABB } from '../textgeom'
+import {
+  invalidateTextMeasurement,
+  pointInText,
+  resizeToFit,
+  TEXT_PADDING_X,
+  textAABB,
+} from '../textgeom'
 import {
   _applyStrokeMoveStep,
   type BehaviorDeps,
@@ -89,6 +95,7 @@ import {
 import {
   anchorBoardFor,
   cursorFor,
+  enabledHandles,
   type HandleId,
   handleAt,
   handlePositions,
@@ -792,14 +799,11 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
       x: (p.x - ctx.camera.x) * ctx.camera.scale,
       y: (p.y - ctx.camera.y) * ctx.camera.scale,
     })
-    // Texts: 4 corners + 2 horizontal edges (E/W for wrap-width).
-    // Vertical edges (N/S) are hidden because text height is
-    // content-derived. Images: all 8.
-    const visibleHandles =
-      view.selection.kind === 'text'
-        ? (['nw', 'ne', 'se', 'sw', 'e', 'w'] as const)
-        : (['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const)
-    for (const hid of visibleHandles) {
+    // Per-kind handle set — shared with the hit-test via
+    // `enabledHandles` (handles.ts) so what's drawn and what's
+    // grabbable can never drift apart. Texts: 4 corners + E/W edges.
+    // Lines/arrows: the two true endpoints only. Everything else: 8.
+    for (const hid of enabledHandles(view)) {
       const s = boardToScreen(positions[hid])
       c.fillStyle = '#ffffff'
       c.fillRect(s.x - HANDLE_PX / 2 - 1, s.y - HANDLE_PX / 2 - 1, HANDLE_PX + 2, HANDLE_PX + 2)
@@ -1407,6 +1411,11 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
               )
               t.font = { ...drag.beforeTextSnapshot.font, size: next.newSize }
               t.transform = next.newTransform
+              // applyTextResize refits a TEMP object internally, so the
+              // shared invalidate-inside-resizeToFit never sees `t` —
+              // drop `t`'s cached measurement here or the live drag
+              // renders the pre-drag font size all the way through.
+              invalidateTextMeasurement(t)
             }
           }
         }
@@ -1430,7 +1439,11 @@ export function createSelectTool(deps: SelectToolDeps): SelectTool {
           // intent → deselect. Route through setSelection so the
           // onSelectionChange hook (which the pinned tool menu uses
           // to drop the prior selection's contextual section) fires.
-          if (selected.length > 0) setSelection([])
+          // Shift+tap keeps the selection: Shift means "extend, don't
+          // replace" everywhere else in this tool (shift+click toggles,
+          // shift+marquee unions), so an additive tap that hit nothing
+          // must be a no-op, not a wipe.
+          if (!m.additive && selected.length > 0) setSelection([])
         }
         ctx.markCommittedDirty()
         return

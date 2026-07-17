@@ -100,6 +100,7 @@ Key submodules:
 | `clearflow.ts`  | M1.4 ✅  | Clear-board confirmation flow + toast.                   |
 | `clipboardstrokes.ts` | v1.3 / v1.4 ✅ | Wire format for the whiteboard-native clipboard bundle. Builds the `text/html` payload (`<div data-whiteboard-v1="<json-encoded-bundle>"><img src="data:..."/></div>` — JSON in a data attribute + inline PNG so rich-text targets get an image too); extracts + validates incoming bundles on paste. Schema is `{ v: 1, strokes, texts?, shapes?, origin: { x, y } }` with version-additive forward-compat (new optional fields stay at v=1). DoS caps: 5000 strokes / 5000 texts / 50000 samples per stroke; bundles past the cap reject cleanly and fall through to the PNG paste path. See [ADR 0017](decisions/0017-whiteboard-native-clipboard-format.md). |
 | `keymap.ts`     | M1.4 ✅  | Keyboard shortcut registry + dispatcher.                 |
+| `editable.ts`   | v1.5.x ✅ | Shared editable-target guards for document-level key listeners (`isTextEntryTarget` for shortcut dispatchers, `isEditableTarget` for hold-modifiers). Used by `keymap.ts`, `sidepanel.ts`, `pan.ts`, `eraserhold.ts`. |
 | `helpoverlay.ts`| M1.4 ✅  | `?` help overlay (shortcuts + repo link).                |
 | `pill.ts`       | M1.4 ✅  | Bottom-left "? for help" pill.                           |
 | `toolpill.ts`   | M1 ✅    | Bottom-right active-tool indicator + tap-to-cycle. Pen-friendly one-step activation alongside `V` / `S` / `B` / `P` / right-click TOOL menu. |

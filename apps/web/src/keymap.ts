@@ -10,6 +10,8 @@
  * what to do, not which event-system rituals to perform.
  */
 
+import { isTextEntryTarget } from './editable'
+
 export interface KeyHandlers {
   // ⌘/Ctrl-modified
   undo: () => void
@@ -107,15 +109,12 @@ export interface KeyHandlers {
 
 export function attachKeymap(handlers: KeyHandlers): () => void {
   const onKey = (e: KeyboardEvent): void => {
-    // Never hijack keys aimed at an editable. The settings panel's form
-    // inputs (hex field etc.) must receive typed characters and native
-    // editing commands (⌘Z / ⌘A / Backspace / Esc) untouched — no
-    // binding here is meant to fire while one is focused. The
-    // contenteditable text editor protects itself via stopPropagation;
-    // plain inputs don't, so the guard lives here. Same idiom as
-    // main.ts's onDocContextMenu.
-    const target = e.target as HTMLElement | null
-    if (target?.closest('input, textarea, [contenteditable]')) return
+    // Never hijack keys aimed at a text-entry control. The settings
+    // panel's form inputs (hex field etc.) must receive typed characters
+    // and native editing commands (⌘Z / ⌘A / Backspace / Esc) untouched.
+    // Text-entry ONLY — sliders and checkboxes keep focus after a click,
+    // and shortcuts must keep working then (see editable.ts).
+    if (isTextEntryTarget(e.target)) return
 
     const meta = e.metaKey || e.ctrlKey
     const { shiftKey: shift, altKey: alt } = e
@@ -317,7 +316,9 @@ export function attachKeymap(handlers: KeyHandlers): () => void {
       }
     }
 
-    if (e.key === '?' || (shift && e.key === '/')) {
+    // `!e.repeat` matches every other single-key toggle here — without it,
+    // holding `?` flickers the overlay open/closed on OS auto-repeat.
+    if ((e.key === '?' || (shift && e.key === '/')) && !e.repeat) {
       e.preventDefault()
       handlers.toggleHelp()
     }

@@ -165,30 +165,36 @@ export function createLaserTool(deps: LaserToolDeps): Tool {
       // Strokes are bounded by `continueFromPrev = false` markers — the
       // first sample of every new pointer-down is one such marker. The
       // result is multiple disjoint polylines that don't get connecting
-      // lines between them.
-      if (points.length < 2) return
+      // lines between them. A span can also be a single sample — a
+      // stationary tap (pointerdown + pointerup with no move) — which
+      // drawSpan renders as a filled dot rather than a line, since the
+      // tap gesture is "look at this spot", not "draw nothing".
+      if (points.length === 0) return
       clearLayer(ctx.liveLayer)
       applyCamera(ctx.liveLayer, ctx.camera, ctx.dpr)
       const c = ctx.liveLayer.ctx
       const now = performance.now()
       const inkColor = ctx.resolveColor(deps.getColor())
+      const strokeWidthPx = LASER_WIDTH_PX / ctx.camera.scale
       c.save()
       c.lineCap = 'butt'
       c.lineJoin = 'round'
-      c.lineWidth = LASER_WIDTH_PX / ctx.camera.scale
+      c.lineWidth = strokeWidthPx
       c.strokeStyle = inkColor
+      c.fillStyle = inkColor
       c.shadowColor = inkColor
       c.shadowBlur = LASER_GLOW_BLUR / ctx.camera.scale
 
       // Walk the array and group adjacent samples into stroke-spans, where
       // a span ends just before a sample with continueFromPrev=false (or
-      // at the end of the array). For each span ≥ 2 samples, draw a single
-      // polyline path with alpha from the span's average age — one
-      // `stroke()` call per span instead of per segment.
+      // at the end of the array). For each span, draw with alpha from the
+      // span's average age: a single-sample span (a tap) becomes a filled
+      // dot, radius matched to the trail's stroke width; a span of 2+
+      // becomes one polyline `stroke()` call instead of per-segment.
       let spanStart = 0
       const drawSpan = (startIdx: number, endIdxExclusive: number): void => {
         const count = endIdxExclusive - startIdx
-        if (count < 2) return
+        if (count < 1) return
         let ageSum = 0
         for (let k = startIdx; k < endIdxExclusive; k++) {
           const p = points[k]
@@ -199,9 +205,18 @@ export function createLaserTool(deps: LaserToolDeps): Tool {
         const alpha = Math.max(0, 1 - avgAge / LASER_FADE_MS)
         if (alpha <= 0) return
         c.globalAlpha = alpha
-        c.beginPath()
         const first = points[startIdx]
         if (!first) return
+        if (count === 1) {
+          // Tap: no second point to draw a line to. A dot whose diameter
+          // matches the trail's stroke width reads as "the same laser,
+          // held still" rather than a differently-sized mark.
+          c.beginPath()
+          c.arc(first.x, first.y, strokeWidthPx / 2, 0, Math.PI * 2)
+          c.fill()
+          return
+        }
+        c.beginPath()
         c.moveTo(first.x, first.y)
         for (let k = startIdx + 1; k < endIdxExclusive; k++) {
           const p = points[k]
