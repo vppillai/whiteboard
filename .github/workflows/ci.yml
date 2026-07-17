@@ -68,10 +68,16 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
 
       - name: Install Playwright chromium
-        # Browser binaries come from the cache when the lockfile is
-        # unchanged; --with-deps still apt-installs the system libraries
-        # the runner image lacks. On a cache hit the download is skipped.
-        run: bunx playwright install --with-deps chromium
+        # MUST run the WORKSPACE playwright (via the package script), not
+        # `bunx playwright` — bunx at the repo root doesn't resolve the
+        # e2e workspace's bin, silently downloads the LATEST playwright,
+        # and installs THAT version's browser builds. The version-pinned
+        # test runner then can't find its own build (this exact drift
+        # broke CI when latest moved past the pinned 1.60 and the June
+        # browser cache expired). Browser binaries come from the cache
+        # when the lockfile is unchanged; --with-deps (inside the script)
+        # still apt-installs the system libraries the runner image lacks.
+        run: bun run --filter @whiteboard/e2e install-browsers
 
       - name: Run e2e smoke suite
         # Builds apps/web, then drives the production bundle through the
